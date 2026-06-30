@@ -8,6 +8,10 @@ src-tauri/gen
 src/auto-imports.d.ts
 src/components.d.ts
 
+# Local AI collaboration notes
+AGENTS.md
+CLAUDE.md
+
 # Logs
 *.log
 npm-debug.log*
