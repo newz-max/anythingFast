@@ -2,12 +2,13 @@
 import { computed, onMounted, shallowRef } from 'vue'
 import { useDialog, useMessage } from 'naive-ui'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
-import TaskEditor from '@/components/tasks/TaskEditor.vue'
+import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
 import ExecutionProgress from '@/components/execution/ExecutionProgress.vue'
 import { createTaskDraft, cloneTask } from '@/domain/taskFactory'
 import { useTaskStore } from '@/stores/taskStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import type { TaskItem } from '@/types/domain'
+import type { TaskWizardMode } from '@/composables/useTaskWizardDraft'
 
 const taskStore = useTaskStore()
 const executionStore = useExecutionStore()
@@ -15,8 +16,13 @@ const message = useMessage()
 const dialog = useDialog()
 const showLogs = shallowRef(false)
 const shortcutDraft = shallowRef('')
+const wizardVisible = shallowRef(false)
+const wizardMode = shallowRef<TaskWizardMode>('create')
+const wizardTask = shallowRef<TaskItem | null>(null)
 
 const selectedTask = computed(() => taskStore.selectedTask)
+const selectedActionCount = computed(() => selectedTask.value?.actions.filter((action) => action.enabled).length ?? 0)
+const selectedKeywords = computed(() => selectedTask.value?.keywords?.join('、') || '无')
 
 onMounted(async () => {
   shortcutDraft.value = taskStore.settings.globalShortcut
@@ -24,20 +30,22 @@ onMounted(async () => {
   await executionStore.loadLogs()
 })
 
-async function createTask() {
-  const task = createTaskDraft()
-  await taskStore.upsertTask(task)
-  message.success('已创建事项')
+function createTask() {
+  wizardMode.value = 'create'
+  wizardTask.value = createTaskDraft()
+  wizardVisible.value = true
 }
 
 async function saveTask(task: TaskItem) {
   await taskStore.upsertTask(task)
   message.success('已保存')
+  wizardVisible.value = false
 }
 
 async function duplicateTask(task: TaskItem) {
   await taskStore.upsertTask(cloneTask(task))
   message.success('已复制事项')
+  wizardVisible.value = false
 }
 
 function deleteTask(task: TaskItem) {
@@ -48,9 +56,29 @@ function deleteTask(task: TaskItem) {
     negativeText: '取消',
     onPositiveClick: async () => {
       await taskStore.removeTask(task.id)
+      wizardVisible.value = false
       message.success('已删除')
     }
   })
+}
+
+function selectTask(taskId: string) {
+  taskStore.selectTask(taskId)
+  wizardMode.value = 'edit'
+  wizardTask.value = taskStore.tasks.find((task) => task.id === taskId) || null
+  wizardVisible.value = Boolean(wizardTask.value)
+}
+
+function editSelectedTask() {
+  if (!selectedTask.value) return
+  wizardMode.value = 'edit'
+  wizardTask.value = selectedTask.value
+  wizardVisible.value = true
+}
+
+function toggleSelectedTaskEnabled(enabled: boolean) {
+  if (!selectedTask.value) return
+  void taskStore.updateTaskEnabled(selectedTask.value.id, enabled)
 }
 
 async function saveShortcut() {
@@ -70,7 +98,7 @@ async function saveShortcut() {
         :tasks="taskStore.tasks"
         :categories="taskStore.categories"
         :selected-task-id="taskStore.selectedTaskId"
-        @select="taskStore.selectTask"
+        @select="selectTask"
         @create="createTask"
         @toggle-enabled="taskStore.updateTaskEnabled"
       />
@@ -90,21 +118,76 @@ async function saveShortcut() {
 
       <ExecutionProgress v-if="showLogs" class="logs" :logs="executionStore.logs" :events="executionStore.events" />
 
-      <TaskEditor
-        v-if="selectedTask"
-        :task="selectedTask"
-        :all-tasks="taskStore.tasks"
-        :saving="taskStore.saving"
-        @save="saveTask"
-        @duplicate="duplicateTask"
-        @delete="deleteTask"
-      />
+      <section v-if="selectedTask" class="task-overview">
+        <NCard class="overview-panel" :bordered="false">
+          <template #header>
+            <div class="overview-header">
+              <div>
+                <h2 class="title">{{ selectedTask.name || '未命名事项' }}</h2>
+                <p class="subtitle">{{ selectedTask.category || '未分类' }} · {{ selectedTask.actions.length }} 个动作</p>
+              </div>
+              <NSpace>
+                <NButton secondary @click="duplicateTask(selectedTask)">复制</NButton>
+                <NButton secondary type="error" @click="deleteTask(selectedTask)">删除</NButton>
+                <NButton type="primary" @click="editSelectedTask">编辑事项</NButton>
+              </NSpace>
+            </div>
+          </template>
+
+          <NGrid :cols="3" :x-gap="14" :y-gap="14" responsive="screen">
+            <NGi>
+              <NStatistic label="启用动作" :value="selectedActionCount" />
+            </NGi>
+            <NGi>
+              <div class="metric-label">风险等级</div>
+              <NTag :type="selectedTask.riskLevel === 'high' ? 'error' : selectedTask.riskLevel === 'medium' ? 'warning' : 'success'">
+                {{ selectedTask.riskLevel }}
+              </NTag>
+            </NGi>
+            <NGi>
+              <div class="metric-label">启用状态</div>
+              <NSwitch
+                :value="selectedTask.enabled"
+                @update:value="toggleSelectedTaskEnabled"
+              />
+            </NGi>
+          </NGrid>
+
+          <NDivider />
+          <NDescriptions label-placement="left" :column="1" bordered>
+            <NDescriptionsItem label="关键词">{{ selectedKeywords }}</NDescriptionsItem>
+            <NDescriptionsItem label="描述">{{ selectedTask.description || '无' }}</NDescriptionsItem>
+          </NDescriptions>
+
+          <NDivider />
+          <NTimeline>
+            <NTimelineItem
+              v-for="action in selectedTask.actions"
+              :key="action.id"
+              :type="action.riskLevel === 'high' ? 'error' : action.riskLevel === 'medium' ? 'warning' : 'success'"
+              :title="action.name || action.type"
+              :content="`${action.type}${action.enabled ? '' : ' · 已停用'}`"
+            />
+          </NTimeline>
+        </NCard>
+      </section>
       <NEmpty v-else class="empty-state" description="还没有事项">
         <template #extra>
           <NButton type="primary" @click="createTask">新增事项</NButton>
         </template>
       </NEmpty>
     </section>
+
+    <TaskWizardDrawer
+      v-model:show="wizardVisible"
+      :mode="wizardMode"
+      :task="wizardTask"
+      :all-tasks="taskStore.tasks"
+      :saving="taskStore.saving"
+      @save="saveTask"
+      @duplicate="duplicateTask"
+      @delete="deleteTask"
+    />
   </main>
 </template>
 
@@ -161,5 +244,37 @@ async function saveShortcut() {
 
 .empty-state {
   margin-top: 20vh;
+}
+
+.task-overview {
+  min-width: 0;
+}
+
+.overview-panel {
+  border-radius: 8px;
+}
+
+.overview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  color: #667085;
+  font-size: 13px;
+}
+
+.metric-label {
+  margin-bottom: 6px;
+  color: #667085;
+  font-size: 13px;
 }
 </style>

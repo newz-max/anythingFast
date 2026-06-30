@@ -22,7 +22,7 @@ export function createTaskDraft(): TaskItem {
     category: '未分类',
     keywords: [],
     description: '',
-    actions: [createActionDraft('openUrl')],
+    actions: [],
     riskLevel: 'low',
     enabled: true,
     createdAt: timestamp,
