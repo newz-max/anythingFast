@@ -5,6 +5,7 @@ import { actionTypeOptions, describeAction, getActionTypeLabel } from '@/domain/
 import { createActionDraft } from '@/domain/taskFactory'
 import { deriveActionRisk } from '@/domain/risk'
 import { validateActionLocal } from '@/domain/validation'
+import { clonePlainDto } from '@/utils/clonePlainDto'
 import type { ActionType, TaskAction } from '@/types/domain'
 
 export type ActionWizardMode = 'create' | 'edit'
@@ -33,7 +34,7 @@ watch(
   (show) => {
     if (!show) return
     currentStep.value = 1
-    draft.value = props.action ? structuredClone(props.action) : createActionDraft('openUrl')
+    draft.value = props.action ? clonePlainDto(props.action) : createActionDraft('openUrl')
     normalizeRisk()
   }
 )
@@ -74,7 +75,7 @@ function save() {
     currentStep.value = 3
     return
   }
-  emit('save', structuredClone(draft.value))
+  emit('save', clonePlainDto(draft.value))
   close()
 }
 

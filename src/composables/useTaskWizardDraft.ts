@@ -2,6 +2,7 @@ import { computed, ref, shallowRef, watch, type Ref } from 'vue'
 import { createTaskDraft } from '@/domain/taskFactory'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
 import { validateTaskLocal } from '@/domain/validation'
+import { clonePlainDto } from '@/utils/clonePlainDto'
 import type { TaskAction, TaskItem } from '@/types/domain'
 
 export type TaskWizardMode = 'create' | 'edit'
@@ -35,7 +36,7 @@ export function useTaskWizardDraft(options: {
         return
       }
 
-      const nextDraft = mode === 'create' ? createTaskDraft() : task ? structuredClone(task) : null
+      const nextDraft = mode === 'create' ? createTaskDraft() : task ? clonePlainDto(task) : null
       draft.value = nextDraft
       if (nextDraft) {
         draftCache.set(key, nextDraft)

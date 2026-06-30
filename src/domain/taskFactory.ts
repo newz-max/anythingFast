@@ -1,3 +1,4 @@
+import { clonePlainDto } from '@/utils/clonePlainDto'
 import type { ActionType, AppConfig, RiskLevel, TaskAction, TaskItem } from '@/types/domain'
 
 const now = () => new Date().toISOString()
@@ -44,14 +45,15 @@ export function createActionDraft(type: ActionType): TaskAction {
 
 export function cloneTask(task: TaskItem): TaskItem {
   const timestamp = now()
+  const sourceTask = clonePlainDto(task)
   return {
-    ...structuredClone(task),
+    ...sourceTask,
     id: uid('task'),
     name: `${task.name} 副本`,
     lastRunAt: undefined,
     createdAt: timestamp,
     updatedAt: timestamp,
-    actions: task.actions.map((action) => ({
+    actions: sourceTask.actions.map((action) => ({
       ...action,
       id: uid('action')
     }))

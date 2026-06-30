@@ -5,6 +5,7 @@ import TaskWizardActionStep from '@/components/tasks/TaskWizardActionStep.vue'
 import TaskWizardBasicStep from '@/components/tasks/TaskWizardBasicStep.vue'
 import TaskWizardConfirmStep from '@/components/tasks/TaskWizardConfirmStep.vue'
 import { useTaskWizardDraft, type TaskWizardMode } from '@/composables/useTaskWizardDraft'
+import { clonePlainDto } from '@/utils/clonePlainDto'
 import type { TaskAction, TaskItem } from '@/types/domain'
 
 const props = defineProps<{
@@ -74,19 +75,19 @@ function save() {
     currentStep.value = 3
     return
   }
-  const savedTask = structuredClone(draft.value)
+  const savedTask = clonePlainDto(draft.value)
   clearDraft()
   emit('save', savedTask)
 }
 
 function duplicate() {
   if (!draft.value) return
-  emit('duplicate', structuredClone(draft.value))
+  emit('duplicate', clonePlainDto(draft.value))
 }
 
 function remove() {
   if (!draft.value) return
-  emit('delete', structuredClone(draft.value))
+  emit('delete', clonePlainDto(draft.value))
 }
 
 function createAction() {
