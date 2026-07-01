@@ -11,6 +11,10 @@ src/components.d.ts
 # Local AI collaboration notes
 AGENTS.md
 CLAUDE.md
+openspec/
+.codex/
+.claude/
+design-ui/
 
 # Logs
 *.log

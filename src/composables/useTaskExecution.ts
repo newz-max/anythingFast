@@ -2,14 +2,16 @@ import { computed } from 'vue'
 import { useDialog, useMessage } from 'naive-ui'
 import { tauriApi } from '@/api/tauri'
 import { useExecutionStore } from '@/stores/executionStore'
-import type { TaskItem } from '@/types/domain'
+import { useTaskStore } from '@/stores/taskStore'
+import type { TaskAction, TaskItem } from '@/types/domain'
 
 export function useTaskExecution() {
   const dialog = useDialog()
   const message = useMessage()
   const executionStore = useExecutionStore()
+  const taskStore = useTaskStore()
 
-  const running = computed(() => Boolean(executionStore.runningTaskId))
+  const running = computed(() => Boolean(executionStore.runningTaskId || executionStore.runningActionId))
 
   async function execute(task: TaskItem) {
     if (!task.enabled) {
@@ -21,9 +23,11 @@ export function useTaskExecution() {
       const risk = await tauriApi.analyzeRisk(task.id)
       if (risk.requiresConfirmation) {
         await confirmRisk(task, risk.reasons, risk.highRiskActions.map((action) => `${action.name}: ${action.detail}`))
-        await executionStore.runTask(task.id, 'confirmed')
+        const summary = await executionStore.runTask(task.id, 'confirmed')
+        taskStore.markTaskLastRun(task.id, summary.finishedAt)
       } else {
-        await executionStore.runTask(task.id)
+        const summary = await executionStore.runTask(task.id)
+        taskStore.markTaskLastRun(task.id, summary.finishedAt)
       }
       message.success('事项执行完成')
     } catch (err) {
@@ -35,12 +39,43 @@ export function useTaskExecution() {
     }
   }
 
-  function confirmRisk(task: TaskItem, reasons: string[], details: string[]) {
+  async function executeAction(task: TaskItem, action: TaskAction) {
+    if (!task.enabled) {
+      message.warning('事项已停用')
+      return
+    }
+    if (!action.enabled) {
+      message.warning('动作已停用')
+      return
+    }
+
+    try {
+      const risk = await tauriApi.analyzeActionRisk(task.id, action.id)
+      if (risk.requiresConfirmation) {
+        await confirmRisk(task, risk.reasons, risk.highRiskActions.map((item) => `${item.name}: ${item.detail}`), action)
+        const summary = await executionStore.runTaskAction(task.id, action.id, 'confirmed')
+        taskStore.markTaskLastRun(task.id, summary.finishedAt)
+      } else {
+        const summary = await executionStore.runTaskAction(task.id, action.id)
+        taskStore.markTaskLastRun(task.id, summary.finishedAt)
+      }
+      message.success('动作执行完成')
+    } catch (err) {
+      if (err instanceof Error && err.message === 'cancelled') {
+        message.info('已取消执行')
+        return
+      }
+      message.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  function confirmRisk(task: TaskItem, reasons: string[], details: string[], action?: TaskAction) {
     return new Promise<void>((resolve, reject) => {
       dialog.warning({
-        title: '确认执行高风险事项',
+        title: action ? '确认执行高风险动作' : '确认执行高风险事项',
         content: () => [
           `事项：${task.name}`,
+          ...(action ? [`动作：${action.name || '未命名动作'}`] : []),
           ...reasons.map((reason) => `原因：${reason}`),
           ...details
         ].join('\n'),
@@ -55,6 +90,7 @@ export function useTaskExecution() {
 
   return {
     running,
-    execute
+    execute,
+    executeAction
   }
 }

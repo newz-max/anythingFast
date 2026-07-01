@@ -45,16 +45,56 @@ pub struct TaskItem {
     pub actions: Vec<TaskAction>,
     pub risk_level: RiskLevel,
     pub enabled: bool,
+    #[serde(default)]
+    pub favorite: bool,
+    #[serde(default)]
+    pub tag_ids: Vec<String>,
+    #[serde(default = "default_task_triggers")]
+    pub triggers: Vec<TaskTrigger>,
     pub last_run_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum TaskTrigger {
+    #[serde(rename = "manual")]
+    Manual { enabled: bool },
+    #[serde(rename = "shortcut")]
+    Shortcut { enabled: bool, shortcut: String },
+}
+
+fn default_task_triggers() -> Vec<TaskTrigger> {
+    vec![TaskTrigger::Manual { enabled: true }]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTag {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub global_shortcut: String,
+    #[serde(default = "default_app_theme")]
+    pub theme: AppTheme,
     pub config_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AppTheme {
+    Light,
+    Dark,
+    System,
+}
+
+fn default_app_theme() -> AppTheme {
+    AppTheme::System
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +102,8 @@ pub struct AppSettings {
 pub struct AppConfig {
     pub version: u32,
     pub tasks: Vec<TaskItem>,
+    #[serde(default)]
+    pub tags: Vec<TaskTag>,
     pub settings: AppSettings,
 }
 
@@ -111,6 +153,17 @@ pub enum ExecutionStatus {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ExecutionScope {
+    Task,
+    Action,
+}
+
+fn default_execution_scope() -> ExecutionScope {
+    ExecutionScope::Task
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionExecutionResult {
@@ -126,6 +179,9 @@ pub struct ActionExecutionResult {
 pub struct TaskExecutionSummary {
     pub task_id: String,
     pub task_name: String,
+    #[serde(default = "default_execution_scope")]
+    pub scope: ExecutionScope,
+    pub action_id: Option<String>,
     pub started_at: String,
     pub finished_at: String,
     pub status: ExecutionStatus,
@@ -138,6 +194,9 @@ pub struct ExecutionLogSummary {
     pub id: String,
     pub task_id: String,
     pub task_name: String,
+    #[serde(default = "default_execution_scope")]
+    pub scope: ExecutionScope,
+    pub action_id: Option<String>,
     pub started_at: String,
     pub finished_at: String,
     pub status: ExecutionStatus,
@@ -157,8 +216,10 @@ impl Default for AppConfig {
         Self {
             version: 1,
             tasks: Vec::new(),
+            tags: Vec::new(),
             settings: AppSettings {
                 global_shortcut: "Alt+Space".to_string(),
+                theme: AppTheme::System,
                 config_path: None,
             },
         }

@@ -7,6 +7,7 @@ import type { ExecutionLogSummary, TaskExecutionSummary } from '@/types/domain'
 
 export const useExecutionStore = defineStore('execution', () => {
   const runningTaskId = shallowRef<string | null>(null)
+  const runningActionId = shallowRef<string | null>(null)
   const events = shallowRef<ExecutionEventPayload[]>([])
   const logs = shallowRef<ExecutionLogSummary[]>([])
   const lastSummary = shallowRef<TaskExecutionSummary | null>(null)
@@ -16,7 +17,12 @@ export const useExecutionStore = defineStore('execution', () => {
     if (!('__TAURI_INTERNALS__' in window)) return
     await listenExecutionEvents((payload) => {
       events.value = [...events.value, payload]
-      runningTaskId.value = payload.status === 'finished' || payload.status === 'failed' ? null : payload.taskId
+      if (payload.status === 'finished' || payload.status === 'failed') {
+        runningTaskId.value = null
+        runningActionId.value = null
+      } else {
+        runningTaskId.value = payload.taskId
+      }
     })
   }
 
@@ -38,6 +44,26 @@ export const useExecutionStore = defineStore('execution', () => {
     }
   }
 
+  async function runTaskAction(taskId: string, actionId: string, confirmationToken?: string) {
+    error.value = null
+    runningTaskId.value = taskId
+    runningActionId.value = actionId
+    events.value = []
+    try {
+      if (!('__TAURI_INTERNALS__' in window)) {
+        throw new Error('浏览器预览环境不能执行本地动作，请使用 Tauri 运行。')
+      }
+      lastSummary.value = await tauriApi.runTaskAction(taskId, actionId, confirmationToken)
+      await loadLogs(20)
+      return lastSummary.value
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : String(err)
+      runningTaskId.value = null
+      runningActionId.value = null
+      throw err
+    }
+  }
+
   async function loadLogs(limit = 20) {
     if (!('__TAURI_INTERNALS__' in window)) {
       logs.value = []
@@ -48,12 +74,14 @@ export const useExecutionStore = defineStore('execution', () => {
 
   return {
     runningTaskId,
+    runningActionId,
     events,
     logs,
     lastSummary,
     error,
     setupListeners,
     runTask,
+    runTaskAction,
     loadLogs
   }
 })

@@ -34,7 +34,10 @@ defineProps<{
                 {{ log.status }}
               </NTag>
             </template>
-            <NThing :title="log.taskName" :description="`${log.startedAt} · ${log.actions.length} 个动作`" />
+            <NThing
+              :title="log.scope === 'action' ? `${log.taskName} · 单动作` : log.taskName"
+              :description="`${log.startedAt} · ${log.actions.length} 个动作`"
+            />
           </NListItem>
         </NList>
       </NGi>

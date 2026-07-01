@@ -1,53 +1,95 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
-import { useDialog, useMessage } from 'naive-ui'
+import { computed, onMounted, shallowRef, watch } from 'vue'
+import { NDropdown, NModal, useDialog, useMessage } from 'naive-ui'
+import type { DropdownOption } from 'naive-ui'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
 import ExecutionProgress from '@/components/execution/ExecutionProgress.vue'
 import { createTaskDraft, cloneTask } from '@/domain/taskFactory'
+import { builtInTaskTemplates, createTaskFromTemplate } from '@/domain/taskTemplates'
+import { getTasksForView, type TaskView } from '@/domain/taskViews'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { useTaskStore } from '@/stores/taskStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskExecution } from '@/composables/useTaskExecution'
-import type { ActionType, TaskAction, TaskItem } from '@/types/domain'
+import type { ActionType, AppTheme, ShortcutTaskTrigger, TaskAction, TaskItem, TaskTag, TaskTemplate, TaskTrigger } from '@/types/domain'
 import type { TaskWizardMode } from '@/composables/useTaskWizardDraft'
 
 const taskStore = useTaskStore()
 const executionStore = useExecutionStore()
-const { execute, running } = useTaskExecution()
+const { execute, executeAction, running } = useTaskExecution()
 const message = useMessage()
 const dialog = useDialog()
 const showLogs = shallowRef(false)
 const shortcutDraft = shallowRef('')
+const settingsShortcutDraft = shallowRef('')
+const themeDraft = shallowRef<AppTheme>('system')
 const wizardVisible = shallowRef(false)
 const wizardMode = shallowRef<TaskWizardMode>('create')
 const wizardTask = shallowRef<TaskItem | null>(null)
 const wizardInitialStep = shallowRef(1)
+const activeTaskView = shallowRef<TaskView>('all')
+const selectedTagId = shallowRef<string | null>(null)
+const tagModalVisible = shallowRef(false)
+const tagDraftName = shallowRef('')
+const editingTag = shallowRef<TaskTag | null>(null)
+const taskShortcutDraft = shallowRef('')
+const helpModalVisible = shallowRef(false)
+const settingsModalVisible = shallowRef(false)
 
 const selectedTask = computed(() => taskStore.selectedTask)
+const visibleTasks = computed(() => getTasksForView(taskStore.tasks, activeTaskView.value, selectedTagId.value))
+const showTemplateCenter = computed(() => activeTaskView.value === 'templates')
 const selectedActionCount = computed(() => selectedTask.value?.actions.filter((action) => action.enabled).length ?? 0)
 const selectedKeywords = computed(() => selectedTask.value?.keywords?.join('、') || '无')
 const selectedCategory = computed(() => selectedTask.value?.category || '未分类')
 const formattedCreatedAt = computed(() => formatDateTime(selectedTask.value?.createdAt))
 const formattedUpdatedAt = computed(() => formatDateTime(selectedTask.value?.updatedAt))
-const navigationItems = [
-  { icon: '▣', label: '我的事项', active: true },
-  { icon: '☆', label: '收藏事项', active: false },
-  { icon: '◷', label: '最近运行', active: false },
-  { icon: '▱', label: '模板中心', active: false }
+const selectedShortcutTrigger = computed(
+  () =>
+    selectedTask.value?.triggers.find((trigger): trigger is ShortcutTaskTrigger => trigger.type === 'shortcut') || null
+)
+const favoriteCount = computed(() => taskStore.tasks.filter((task) => task.favorite).length)
+const recentCount = computed(() => taskStore.tasks.filter((task) => task.lastRunAt).length)
+const navigationItems = computed(() => [
+  { key: 'all' as const, icon: '▣', label: '我的事项', count: taskStore.tasks.length, active: activeTaskView.value === 'all', disabled: false },
+  { key: 'favorites' as const, icon: '☆', label: '收藏事项', count: favoriteCount.value, active: activeTaskView.value === 'favorites', disabled: false },
+  { key: 'recent' as const, icon: '◷', label: '最近运行', count: recentCount.value, active: activeTaskView.value === 'recent', disabled: false },
+  { key: 'templates' as const, icon: '▱', label: '模板中心', count: builtInTaskTemplates.length, active: activeTaskView.value === 'templates', disabled: false }
+])
+const taskMenuOptions: DropdownOption[] = [
+  { label: '编辑', key: 'edit' },
+  { label: '复制', key: 'duplicate' },
+  { type: 'divider', key: 'divider' },
+  { label: '删除', key: 'delete' }
 ]
-const tagItems = [
-  { label: '工作', tone: 'blue' },
-  { label: '学习', tone: 'green' },
-  { label: '生活', tone: 'amber' },
-  { label: '其他', tone: 'purple' }
+const shareOptions: DropdownOption[] = [
+  { label: '复制事项摘要', key: 'copy-summary' },
+  { label: '复制事项配置 JSON', key: 'copy-json' }
 ]
+const themeOptions = [
+  { label: '跟随系统', value: 'system' },
+  { label: '浅色', value: 'light' },
+  { label: '深色', value: 'dark' }
+]
+const tagItems = computed(() => taskStore.tags.map((tag, index) => ({ ...tag, tone: tagTone(index) })))
 
 onMounted(async () => {
   shortcutDraft.value = taskStore.settings.globalShortcut
+  settingsShortcutDraft.value = taskStore.settings.globalShortcut
+  themeDraft.value = taskStore.settings.theme
   await executionStore.setupListeners()
   await executionStore.loadLogs()
 })
+
+watch(
+  selectedTask,
+  (task) => {
+    const shortcutTrigger = task?.triggers.find((trigger) => trigger.type === 'shortcut')
+    taskShortcutDraft.value = shortcutTrigger?.shortcut || ''
+  },
+  { immediate: true }
+)
 
 function createTask() {
   wizardMode.value = 'create'
@@ -101,9 +143,156 @@ function toggleSelectedTaskEnabled(enabled: boolean) {
   void taskStore.updateTaskEnabled(selectedTask.value.id, enabled)
 }
 
+function setTaskView(view: TaskView) {
+  activeTaskView.value = view
+  if (view === 'templates') return
+  const nextTasks = getTasksForView(taskStore.tasks, view, selectedTagId.value)
+  if (!nextTasks.some((task) => task.id === taskStore.selectedTaskId)) {
+    taskStore.selectTask(nextTasks[0]?.id || null)
+  }
+}
+
+function selectTag(tagId: string | null) {
+  selectedTagId.value = selectedTagId.value === tagId ? null : tagId
+  if (activeTaskView.value === 'templates') {
+    activeTaskView.value = 'all'
+  }
+  const nextTasks = visibleTasks.value
+  if (!nextTasks.some((task) => task.id === taskStore.selectedTaskId)) {
+    taskStore.selectTask(nextTasks[0]?.id || null)
+  }
+}
+
+async function toggleTaskFavorite(taskId: string) {
+  await taskStore.toggleFavorite(taskId)
+  const task = taskStore.tasks.find((item) => item.id === taskId)
+  message.success(task?.favorite ? '已收藏' : '已取消收藏')
+  if (activeTaskView.value === 'favorites' && !task?.favorite) {
+    const nextTasks = getTasksForView(taskStore.tasks, 'favorites', selectedTagId.value)
+    if (!nextTasks.some((item) => item.id === taskStore.selectedTaskId)) {
+      taskStore.selectTask(nextTasks[0]?.id || null)
+    }
+  }
+}
+
+function openCreateTag() {
+  editingTag.value = null
+  tagDraftName.value = ''
+  tagModalVisible.value = true
+}
+
+function openRenameTag(tag: TaskTag) {
+  editingTag.value = tag
+  tagDraftName.value = tag.name
+  tagModalVisible.value = true
+}
+
+async function saveTag() {
+  try {
+    if (editingTag.value) {
+      await taskStore.renameTag(editingTag.value.id, tagDraftName.value)
+      message.success('已更新标签')
+    } else {
+      await taskStore.createTag(tagDraftName.value)
+      message.success('已新增标签')
+    }
+    tagModalVisible.value = false
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  }
+}
+
+function confirmDeleteTag(tag: TaskTag) {
+  dialog.warning({
+    title: '删除标签',
+    content: `确认删除“${tag.name}”？标签会从已关联事项中移除，事项不会被删除。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      await taskStore.deleteTag(tag.id)
+      if (selectedTagId.value === tag.id) selectedTagId.value = null
+      message.success('已删除标签')
+    }
+  })
+}
+
+function handleTaskMenuSelect(key: string | number) {
+  if (!selectedTask.value) return
+  if (key === 'edit') {
+    editSelectedTask()
+    return
+  }
+  if (key === 'duplicate') {
+    void duplicateTask(selectedTask.value)
+    return
+  }
+  if (key === 'delete') {
+    deleteTask(selectedTask.value)
+  }
+}
+
+async function handleShareSelect(key: string | number) {
+  if (!selectedTask.value) return
+  if (key === 'copy-summary') {
+    await copyText(createTaskSummary(selectedTask.value))
+    message.success('已复制事项摘要')
+    return
+  }
+  if (key === 'copy-json') {
+    await copyText(JSON.stringify(selectedTask.value, null, 2))
+    message.success('已复制事项配置 JSON')
+  }
+}
+
 async function saveShortcut() {
   await taskStore.updateSettings({ ...taskStore.settings, globalShortcut: shortcutDraft.value.trim() || 'Alt+Space' })
   message.success('快捷键设置已保存')
+}
+
+function openSettings() {
+  settingsShortcutDraft.value = taskStore.settings.globalShortcut
+  themeDraft.value = taskStore.settings.theme
+  settingsModalVisible.value = true
+}
+
+async function saveSettings() {
+  await taskStore.updateSettings({
+    ...taskStore.settings,
+    globalShortcut: settingsShortcutDraft.value.trim() || 'Alt+Space',
+    theme: themeDraft.value
+  })
+  shortcutDraft.value = taskStore.settings.globalShortcut
+  settingsModalVisible.value = false
+  message.success('设置已保存')
+}
+
+async function cycleTheme() {
+  const order: AppTheme[] = ['system', 'light', 'dark']
+  const nextTheme = order[(order.indexOf(taskStore.settings.theme) + 1) % order.length]
+  await taskStore.updateSettings({ ...taskStore.settings, theme: nextTheme })
+  themeDraft.value = nextTheme
+  message.success(`主题已切换为${themeLabel(nextTheme)}`)
+}
+
+async function saveTaskShortcutTrigger() {
+  if (!selectedTask.value) return
+  const shortcut = taskShortcutDraft.value.trim()
+  const triggers: TaskTrigger[] = selectedTask.value.triggers.filter((trigger) => trigger.type !== 'shortcut')
+  if (shortcut) {
+    triggers.push({ type: 'shortcut', enabled: true, shortcut })
+  }
+  await taskStore.upsertTask({ ...selectedTask.value, triggers })
+  message.success('触发设置已保存')
+}
+
+async function clearTaskShortcutTrigger() {
+  if (!selectedTask.value) return
+  taskShortcutDraft.value = ''
+  await taskStore.upsertTask({
+    ...selectedTask.value,
+    triggers: selectedTask.value.triggers.filter((trigger) => trigger.type !== 'shortcut')
+  })
+  message.success('已移除事项快捷键')
 }
 
 function runTask(task: TaskItem) {
@@ -113,6 +302,18 @@ function runTask(task: TaskItem) {
 function runSelectedTask() {
   if (!selectedTask.value) return
   void execute(selectedTask.value)
+}
+
+function runSelectedAction(action: TaskAction) {
+  if (!selectedTask.value) return
+  void executeAction(selectedTask.value, action)
+}
+
+function createFromTemplate(template: TaskTemplate) {
+  wizardMode.value = 'create'
+  wizardTask.value = createTaskFromTemplate(template)
+  wizardInitialStep.value = 1
+  wizardVisible.value = true
 }
 
 function actionIcon(type: ActionType) {
@@ -140,6 +341,30 @@ function pad(value: number) {
 
 function actionTypeClass(action: TaskAction) {
   return `action-icon-${action.type}`
+}
+
+function tagTone(index: number) {
+  return ['blue', 'green', 'amber', 'purple'][index % 4]
+}
+
+function createTaskSummary(task: TaskItem) {
+  return [
+    `事项：${task.name}`,
+    `分类：${task.category || '未分类'}`,
+    `描述：${task.description || '无'}`,
+    `动作数：${task.actions.length}`,
+    `风险等级：${task.riskLevel}`
+  ].join('\n')
+}
+
+async function copyText(text: string) {
+  await navigator.clipboard.writeText(text)
+}
+
+function themeLabel(theme: AppTheme) {
+  if (theme === 'light') return '浅色'
+  if (theme === 'dark') return '深色'
+  return '跟随系统'
 }
 </script>
 
@@ -172,26 +397,38 @@ function actionTypeClass(action: TaskAction) {
       <nav class="nav-list" aria-label="主导航">
         <button
           v-for="item in navigationItems"
-          :key="item.label"
+          :key="item.key"
           class="nav-item"
-          :class="{ active: item.active }"
+          :class="{ active: item.active, disabled: item.disabled }"
           type="button"
+          :disabled="item.disabled"
+          @click="!item.disabled && setTaskView(item.key)"
         >
           <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
           <span>{{ item.label }}</span>
+          <span v-if="item.count !== null" class="nav-count">{{ item.count }}</span>
         </button>
       </nav>
 
       <section class="tag-block">
         <header class="tag-header">
           <span>标签</span>
-          <span aria-hidden="true">＋</span>
+          <button type="button" aria-label="新增标签" @click="openCreateTag">＋</button>
         </header>
         <div class="tag-list">
-          <div v-for="item in tagItems" :key="item.label" class="tag-item">
+          <button class="tag-item all-tags" :class="{ active: selectedTagId === null }" type="button" @click="selectTag(null)">
+            <span class="tag-dot slate" aria-hidden="true"></span>
+            <span>全部标签</span>
+          </button>
+          <div v-for="item in tagItems" :key="item.id" class="tag-item-row">
+            <button class="tag-item" :class="{ active: selectedTagId === item.id }" type="button" @click="selectTag(item.id)">
             <span class="tag-dot" :class="item.tone" aria-hidden="true"></span>
-            <span>{{ item.label }}</span>
+              <span>{{ item.name }}</span>
+            </button>
+            <button class="tag-inline-action" type="button" aria-label="编辑标签" @click="openRenameTag(item)">⌕</button>
+            <button class="tag-inline-action" type="button" aria-label="删除标签" @click="confirmDeleteTag(item)">×</button>
           </div>
+          <p v-if="tagItems.length === 0" class="empty-tags">暂无标签</p>
         </div>
       </section>
 
@@ -203,31 +440,58 @@ function actionTypeClass(action: TaskAction) {
         </div>
         <h2>释放效率，从自动化开始</h2>
         <p>将重复的操作流程化，一键触发</p>
-        <button type="button">了解更多 →</button>
+        <button type="button" @click="helpModalVisible = true">了解更多 →</button>
       </section>
 
       <footer class="sidebar-footer">
-        <button type="button" aria-label="设置">⚙</button>
-        <button type="button" aria-label="帮助">?</button>
-        <button type="button" aria-label="主题">☼</button>
+        <button type="button" aria-label="设置" @click="openSettings">⚙</button>
+        <button type="button" aria-label="帮助" @click="helpModalVisible = true">?</button>
+        <button type="button" aria-label="主题" @click="cycleTheme">☼</button>
         <button class="orb-button" type="button" aria-label="状态"></button>
       </footer>
     </aside>
 
     <section class="middle-panel">
       <TaskListPanel
-        :tasks="taskStore.tasks"
+        v-if="!showTemplateCenter"
+        :tasks="visibleTasks"
         :categories="taskStore.categories"
         :selected-task-id="taskStore.selectedTaskId"
         @select="selectTask"
         @create="createTask"
         @run="runTask"
         @toggle-enabled="taskStore.updateTaskEnabled"
+        @toggle-favorite="toggleTaskFavorite"
       />
+
+      <section v-else class="template-center" aria-label="模板中心">
+        <header class="template-header">
+          <span>模板中心</span>
+          <small>{{ builtInTaskTemplates.length }} 个内置模板</small>
+        </header>
+        <div class="template-list">
+          <article v-for="template in builtInTaskTemplates" :key="template.id" class="template-card">
+            <div class="template-card-main">
+              <strong>{{ template.name }}</strong>
+              <span>{{ template.description }}</span>
+              <small>{{ template.category || '未分类' }} · {{ template.actions.length }} 个动作</small>
+            </div>
+            <button class="template-use-button" type="button" @click="createFromTemplate(template)">使用</button>
+          </article>
+        </div>
+      </section>
     </section>
 
     <section class="workspace">
-      <section v-if="selectedTask" class="detail-panel">
+      <section v-if="showTemplateCenter" class="template-intro detail-panel">
+        <div class="template-intro-copy">
+          <span class="template-intro-icon" aria-hidden="true">▱</span>
+          <h2>从模板创建事项</h2>
+          <p>模板只会生成可编辑的事项草稿，不会直接运行任何动作。保存时仍会执行现有校验，后续运行也会保留风险确认。</p>
+        </div>
+      </section>
+
+      <section v-else-if="selectedTask" class="detail-panel">
         <header class="detail-header">
           <div class="detail-hero">
             <div class="hero-icon" :class="selectedCategory">
@@ -253,9 +517,21 @@ function actionTypeClass(action: TaskAction) {
               <span aria-hidden="true">▶</span>
               运行
             </button>
-            <button class="icon-button placeholder" type="button" aria-label="分享">⌘</button>
-            <button class="icon-button placeholder" type="button" aria-label="收藏">☆</button>
-            <button class="icon-button placeholder" type="button" aria-label="更多">•••</button>
+            <NDropdown trigger="click" :options="shareOptions" @select="handleShareSelect">
+              <button class="icon-button" type="button" aria-label="分享">⌘</button>
+            </NDropdown>
+            <button
+              class="icon-button favorite-detail-button"
+              :class="{ active: selectedTask.favorite }"
+              type="button"
+              :aria-label="selectedTask.favorite ? '取消收藏' : '收藏'"
+              @click="toggleTaskFavorite(selectedTask.id)"
+            >
+              {{ selectedTask.favorite ? '★' : '☆' }}
+            </button>
+            <NDropdown trigger="click" :options="taskMenuOptions" @select="handleTaskMenuSelect">
+              <button class="icon-button" type="button" aria-label="更多">•••</button>
+            </NDropdown>
           </div>
         </header>
 
@@ -283,7 +559,15 @@ function actionTypeClass(action: TaskAction) {
               <span class="action-icon" :class="actionTypeClass(action)">{{ actionIcon(action.type) }}</span>
               <span class="action-name">{{ action.name || getActionTypeLabel(action.type) }}</span>
               <span class="action-detail">{{ describeAction(action) }}</span>
-              <button class="action-play placeholder" type="button" aria-label="单动作运行">▶</button>
+              <button
+                class="action-play"
+                type="button"
+                :disabled="running || !selectedTask.enabled || !action.enabled"
+                aria-label="单动作运行"
+                @click="runSelectedAction(action)"
+              >
+                ▶
+              </button>
               <span class="row-more" aria-hidden="true">•••</span>
             </article>
           </div>
@@ -303,7 +587,19 @@ function actionTypeClass(action: TaskAction) {
               <strong>手动触发</strong>
               <small>需要手动点击运行</small>
             </span>
-            <span class="trigger-chevron" aria-hidden="true">⌄</span>
+            <span class="trigger-state">已启用</span>
+          </article>
+          <article class="trigger-card shortcut-trigger-card">
+            <span class="trigger-icon" aria-hidden="true">⌘</span>
+            <span class="trigger-copy">
+              <strong>事项快捷键</strong>
+              <small>{{ selectedShortcutTrigger ? selectedShortcutTrigger.shortcut : '未设置' }}</small>
+            </span>
+            <NInputGroup class="task-shortcut-group">
+              <NInput v-model:value="taskShortcutDraft" size="small" placeholder="例如 Ctrl+Alt+P" />
+              <NButton size="small" @click="saveTaskShortcutTrigger">保存</NButton>
+              <NButton size="small" secondary @click="clearTaskShortcutTrigger">移除</NButton>
+            </NInputGroup>
           </article>
         </section>
 
@@ -336,12 +632,48 @@ function actionTypeClass(action: TaskAction) {
       :mode="wizardMode"
       :task="wizardTask"
       :all-tasks="taskStore.tasks"
+      :tags="taskStore.tags"
       :saving="taskStore.saving"
       :initial-step="wizardInitialStep"
       @save="saveTask"
       @duplicate="duplicateTask"
       @delete="deleteTask"
     />
+
+    <NModal v-model:show="tagModalVisible" preset="card" class="tag-modal" :title="editingTag ? '编辑标签' : '新增标签'">
+      <NInput v-model:value="tagDraftName" placeholder="标签名称" @keyup.enter="saveTag" />
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="tagModalVisible = false">取消</NButton>
+          <NButton type="primary" @click="saveTag">保存</NButton>
+        </NSpace>
+      </template>
+    </NModal>
+
+    <NModal v-model:show="helpModalVisible" preset="card" class="help-modal" title="帮助">
+      <div class="help-content">
+        <p>事项由基础信息和动作序列组成，可以手动运行，也可以配置事项快捷键触发。</p>
+        <p>动作支持打开程序、URL、文件、文件夹、执行命令和延时等待；本地动作始终通过 Tauri 后端执行。</p>
+        <p>包含高风险命令或首次执行命令事项时，需要二次确认。执行结果会写入执行日志。</p>
+      </div>
+    </NModal>
+
+    <NModal v-model:show="settingsModalVisible" preset="card" class="settings-modal" title="全局设置">
+      <NForm label-placement="top">
+        <NFormItem label="全局快捷键">
+          <NInput v-model:value="settingsShortcutDraft" placeholder="Alt+Space" />
+        </NFormItem>
+        <NFormItem label="主题">
+          <NSelect v-model:value="themeDraft" :options="themeOptions" />
+        </NFormItem>
+      </NForm>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="settingsModalVisible = false">取消</NButton>
+          <NButton type="primary" @click="saveSettings">保存</NButton>
+        </NSpace>
+      </template>
+    </NModal>
   </main>
 </template>
 
@@ -365,6 +697,42 @@ function actionTypeClass(action: TaskAction) {
     radial-gradient(circle at 74% 12%, rgba(63, 80, 164, 0.18), transparent 34%),
     linear-gradient(135deg, #070d1e 0%, #0b1124 42%, #090f21 100%);
   color: var(--text);
+}
+
+:global([data-app-theme="light"]) .main-layout {
+  --surface: rgba(255, 255, 255, 0.92);
+  --surface-soft: rgba(247, 249, 253, 0.86);
+  --line: rgba(70, 91, 140, 0.18);
+  --line-strong: rgba(49, 103, 220, 0.58);
+  --text: #172033;
+  --muted: #66728b;
+  background:
+    radial-gradient(circle at 74% 12%, rgba(76, 132, 232, 0.12), transparent 34%),
+    linear-gradient(135deg, #eef3fb 0%, #f8fbff 46%, #edf4ff 100%);
+}
+
+:global([data-app-theme="light"]) .middle-panel,
+:global([data-app-theme="light"]) .detail-panel {
+  background:
+    radial-gradient(circle at 38% -8%, rgba(116, 152, 220, 0.12), transparent 38%),
+    rgba(255, 255, 255, 0.78);
+}
+
+:global([data-app-theme="light"]) .task-name,
+:global([data-app-theme="light"]) .section-title h3,
+:global([data-app-theme="light"]) .trigger-section h3,
+:global([data-app-theme="light"]) .title-row h2,
+:global([data-app-theme="light"]) .template-card-main strong,
+:global([data-app-theme="light"]) .template-header span,
+:global([data-app-theme="light"]) .brand-title {
+  color: #172033;
+}
+
+:global([data-app-theme="light"]) .task-item,
+:global([data-app-theme="light"]) .action-row,
+:global([data-app-theme="light"]) .trigger-card,
+:global([data-app-theme="light"]) .template-card {
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .ambient {
@@ -530,7 +898,7 @@ function actionTypeClass(action: TaskAction) {
 
 .nav-item {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   height: 49px;
@@ -538,9 +906,14 @@ function actionTypeClass(action: TaskAction) {
   border-radius: 11px;
   background: transparent;
   color: #b6c1df;
-  cursor: default;
+  cursor: pointer;
   padding: 0 15px;
   text-align: left;
+}
+
+.nav-item.disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .nav-item.active {
@@ -556,6 +929,11 @@ function actionTypeClass(action: TaskAction) {
   font-size: 19px;
 }
 
+.nav-count {
+  color: #7f8aaa;
+  font-size: 12px;
+}
+
 .tag-block {
   margin-top: 28px;
 }
@@ -569,19 +947,72 @@ function actionTypeClass(action: TaskAction) {
   font-size: 13px;
 }
 
+.tag-header button {
+  border: 0;
+  background: transparent;
+  color: #9faad0;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
 .tag-list {
   display: grid;
-  gap: 16px;
+  gap: 10px;
   margin-top: 20px;
-  padding: 0 16px;
+  padding: 0 8px;
 }
 
 .tag-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: 11px minmax(0, 1fr);
   align-items: center;
+  width: 100%;
   gap: 14px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
   color: #9faad0;
+  cursor: pointer;
   font-size: 13px;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.tag-item.active {
+  border-color: rgba(82, 106, 171, 0.2);
+  background: rgba(27, 35, 55, 0.54);
+  color: #f4f7ff;
+}
+
+.tag-item-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 26px 26px;
+  align-items: center;
+  gap: 4px;
+}
+
+.tag-inline-action {
+  display: grid;
+  height: 26px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #65708f;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.tag-inline-action:hover {
+  background: rgba(82, 106, 171, 0.16);
+  color: #dce9ff;
+}
+
+.empty-tags {
+  margin: 4px 8px 0;
+  color: #65708f;
+  font-size: 12px;
 }
 
 .tag-dot {
@@ -601,6 +1032,10 @@ function actionTypeClass(action: TaskAction) {
 
 .tag-dot.purple {
   background: #ad66ff;
+}
+
+.tag-dot.slate {
+  background: #8b96b8;
 }
 
 .promo-card {
@@ -639,7 +1074,7 @@ function actionTypeClass(action: TaskAction) {
   border-radius: 10px;
   background: rgba(42, 54, 88, 0.86);
   color: #f4f7ff;
-  cursor: default;
+  cursor: pointer;
   padding: 0 18px;
   font-weight: 700;
 }
@@ -688,6 +1123,77 @@ function actionTypeClass(action: TaskAction) {
     rgba(13, 18, 35, 0.68);
 }
 
+.template-center {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 18px;
+  min-height: 0;
+}
+
+.template-header {
+  display: grid;
+  gap: 6px;
+  padding: 4px 2px 0;
+}
+
+.template-header span {
+  color: #f4f7ff;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.template-header small {
+  color: #8b96b8;
+  font-size: 12px;
+}
+
+.template-list {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 0;
+}
+
+.template-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid rgba(82, 106, 171, 0.18);
+  border-radius: 12px;
+  background: rgba(27, 35, 55, 0.68);
+  padding: 16px;
+}
+
+.template-card-main {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.template-card-main strong {
+  color: #f4f7ff;
+  font-size: 15px;
+}
+
+.template-card-main span,
+.template-card-main small {
+  color: #9faad0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.template-use-button {
+  height: 32px;
+  border: 1px solid rgba(82, 106, 171, 0.3);
+  border-radius: 9px;
+  background: rgba(63, 82, 159, 0.58);
+  color: #f4f7ff;
+  cursor: pointer;
+  padding: 0 14px;
+  font-weight: 700;
+}
+
 .workspace {
   display: grid;
   min-width: 0;
@@ -708,6 +1214,46 @@ function actionTypeClass(action: TaskAction) {
     rgba(14, 19, 37, 0.84);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 32px 80px rgba(0, 0, 0, 0.22);
   padding: 42px 36px 36px;
+}
+
+.template-intro {
+  align-content: center;
+}
+
+.template-intro-copy {
+  display: grid;
+  justify-items: start;
+  gap: 16px;
+  max-width: 560px;
+}
+
+.template-intro-icon {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  border: 1px solid rgba(81, 119, 255, 0.42);
+  border-radius: 18px;
+  background: linear-gradient(145deg, #2442a0, #162555);
+  color: #dce9ff;
+  font-size: 32px;
+}
+
+.template-intro-copy h2,
+.template-intro-copy p {
+  margin: 0;
+}
+
+.template-intro-copy h2 {
+  color: #f4f7ff;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.template-intro-copy p {
+  color: #9faad0;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 .detail-header {
@@ -839,8 +1385,8 @@ function actionTypeClass(action: TaskAction) {
   font-size: 18px;
 }
 
-.placeholder {
-  cursor: default;
+.favorite-detail-button.active {
+  color: #ffd76a;
 }
 
 .actions-section {
@@ -986,6 +1532,10 @@ function actionTypeClass(action: TaskAction) {
   padding: 0 20px;
 }
 
+.shortcut-trigger-card {
+  grid-template-columns: 48px minmax(0, 1fr) minmax(280px, 420px);
+}
+
 .trigger-icon {
   display: grid;
   width: 48px;
@@ -1009,8 +1559,18 @@ function actionTypeClass(action: TaskAction) {
 }
 
 .trigger-copy small,
-.trigger-chevron {
+.trigger-state {
   color: #8b96b8;
+}
+
+.trigger-state {
+  justify-self: end;
+  font-size: 12px;
+}
+
+.task-shortcut-group {
+  justify-self: end;
+  max-width: 420px;
 }
 
 .utility-strip {
@@ -1068,6 +1628,23 @@ function actionTypeClass(action: TaskAction) {
 :deep(.n-thing-main__description),
 :deep(.n-timeline-item-content__content) {
   color: #9faad0;
+}
+
+:deep(.tag-modal),
+:deep(.help-modal),
+:deep(.settings-modal) {
+  max-width: 420px;
+}
+
+.help-content {
+  display: grid;
+  gap: 10px;
+  color: #475467;
+  line-height: 1.7;
+}
+
+.help-content p {
+  margin: 0;
 }
 
 @media (max-width: 1280px) {

@@ -1,5 +1,5 @@
 use crate::domain::{
-    ActionExecutionResult, ActionType, ExecutionLogSummary, ExecutionStatus, TaskAction, TaskExecutionSummary, TaskItem,
+    ActionExecutionResult, ActionType, ExecutionLogSummary, ExecutionScope, ExecutionStatus, TaskAction, TaskExecutionSummary, TaskItem,
 };
 use crate::storage;
 use chrono::Utc;
@@ -49,6 +49,8 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
     let summary = TaskExecutionSummary {
         task_id: task.id.clone(),
         task_name: task.name.clone(),
+        scope: ExecutionScope::Task,
+        action_id: None,
         started_at,
         finished_at,
         status: status.clone(),
@@ -59,6 +61,56 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
         id: Uuid::new_v4().to_string(),
         task_id: summary.task_id.clone(),
         task_name: summary.task_name.clone(),
+        scope: summary.scope.clone(),
+        action_id: summary.action_id.clone(),
+        started_at: summary.started_at.clone(),
+        finished_at: summary.finished_at.clone(),
+        status,
+        actions: summary.actions.clone(),
+    };
+    let _ = storage::append_log(app, log);
+    emit_event(app, task, "finished", None, None);
+
+    Ok(summary)
+}
+
+pub fn execute_task_action(app: &AppHandle, task: &TaskItem, action: &TaskAction) -> Result<TaskExecutionSummary, String> {
+    let started_at = Utc::now().to_rfc3339();
+    emit_event(app, task, "started", None, None);
+    emit_event(app, task, "running", None, Some(action));
+
+    let result = match execute_action(action) {
+        Ok(message) => {
+            let result = action_result(action, ExecutionStatus::Success, Some(message));
+            emit_event(app, task, "action-success", Some(&result), Some(action));
+            result
+        }
+        Err(message) => {
+            let result = action_result(action, ExecutionStatus::Failed, Some(message));
+            emit_event(app, task, "failed", Some(&result), Some(action));
+            result
+        }
+    };
+
+    let finished_at = Utc::now().to_rfc3339();
+    let status = result.status.clone();
+    let summary = TaskExecutionSummary {
+        task_id: task.id.clone(),
+        task_name: task.name.clone(),
+        scope: ExecutionScope::Action,
+        action_id: Some(action.id.clone()),
+        started_at,
+        finished_at,
+        status: status.clone(),
+        actions: vec![result],
+    };
+
+    let log = ExecutionLogSummary {
+        id: Uuid::new_v4().to_string(),
+        task_id: summary.task_id.clone(),
+        task_name: summary.task_name.clone(),
+        scope: summary.scope.clone(),
+        action_id: summary.action_id.clone(),
         started_at: summary.started_at.clone(),
         finished_at: summary.finished_at.clone(),
         status,

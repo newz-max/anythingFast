@@ -1,6 +1,52 @@
-use crate::domain::{ActionType, FieldIssue, RiskLevel, TaskAction, TaskItem, ValidationResult};
+use crate::domain::{ActionType, AppConfig, FieldIssue, RiskLevel, TaskAction, TaskItem, TaskTrigger, ValidationResult};
 use crate::risk::{derive_action_risk, derive_task_risk};
+use std::collections::HashSet;
 use std::path::Path;
+
+pub fn validate_config_model(config: &AppConfig) -> Vec<FieldIssue> {
+    let mut issues = Vec::new();
+    let mut tag_names = HashSet::new();
+    let mut tag_ids = HashSet::new();
+    let mut shortcuts = HashSet::new();
+
+    for tag in &config.tags {
+        if tag.name.trim().is_empty() {
+            issues.push(issue("tags", "标签名称不能为空"));
+        }
+        if !tag_names.insert(tag.name.trim().to_string()) {
+            issues.push(issue("tags", "标签名称不能重复"));
+        }
+        tag_ids.insert(tag.id.as_str());
+    }
+
+    for task in &config.tasks {
+        for tag_id in &task.tag_ids {
+            if !tag_ids.contains(tag_id.as_str()) {
+                issues.push(issue("tagIds", "事项引用了不存在的标签"));
+            }
+        }
+
+        for trigger in &task.triggers {
+            if let TaskTrigger::Shortcut { enabled, shortcut } = trigger {
+                let normalized = normalize_shortcut(shortcut);
+                if *enabled && normalized.is_empty() {
+                    issues.push(issue("triggers", "快捷键不能为空"));
+                }
+                if *enabled && normalized == "alt+space" {
+                    issues.push(issue("triggers", "事项快捷键不能与全局快捷键冲突"));
+                }
+                if *enabled && !is_supported_shortcut(shortcut) {
+                    issues.push(issue("triggers", "快捷键格式无效"));
+                }
+                if *enabled && !shortcuts.insert(normalized) {
+                    issues.push(issue("triggers", "事项快捷键不能重复"));
+                }
+            }
+        }
+    }
+
+    issues
+}
 
 pub fn validate_task_model(task: &TaskItem, all_tasks: &[TaskItem]) -> ValidationResult {
     let mut issues = Vec::new();
@@ -111,6 +157,22 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
 
 pub fn normalize_task(mut task: TaskItem) -> TaskItem {
     task.category = Some(task.category.unwrap_or_else(|| "未分类".into()).trim().to_string());
+    task.tag_ids.sort();
+    task.tag_ids.dedup();
+    if task.triggers.is_empty() {
+        task.triggers = vec![TaskTrigger::Manual { enabled: true }];
+    }
+    task.triggers = task
+        .triggers
+        .into_iter()
+        .map(|trigger| match trigger {
+            TaskTrigger::Shortcut { enabled, shortcut } => TaskTrigger::Shortcut {
+                enabled,
+                shortcut: shortcut.trim().to_string(),
+            },
+            manual => manual,
+        })
+        .collect();
     task.risk_level = derive_task_risk(&task);
     task.actions = task
         .actions
@@ -134,6 +196,26 @@ fn issue(field: &str, message: &str) -> FieldIssue {
     }
 }
 
+fn normalize_shortcut(value: &str) -> String {
+    value.split_whitespace().collect::<String>().to_lowercase()
+}
+
+fn is_supported_shortcut(value: &str) -> bool {
+    let parts: Vec<String> = value
+        .split('+')
+        .map(|part| part.trim().to_lowercase())
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.len() < 2 {
+        return false;
+    }
+    let key = parts.last().map(String::as_str).unwrap_or_default();
+    let has_modifier = parts[..parts.len() - 1]
+        .iter()
+        .any(|part| matches!(part.as_str(), "alt" | "ctrl" | "control" | "shift" | "cmd" | "command" | "cmdorctrl" | "commandorcontrol"));
+    has_modifier && (key.len() == 1 && key.chars().all(|ch| ch.is_ascii_alphanumeric()) || key == "space")
+}
+
 #[allow(dead_code)]
 fn _risk_level_used(_: RiskLevel) {}
 
@@ -153,6 +235,9 @@ mod tests {
             actions: Vec::new(),
             risk_level: RiskLevel::Low,
             enabled: true,
+            favorite: false,
+            tag_ids: Vec::new(),
+            triggers: vec![TaskTrigger::Manual { enabled: true }],
             last_run_at: None,
             created_at: "2026-07-01T00:00:00Z".into(),
             updated_at: "2026-07-01T00:00:00Z".into(),
@@ -177,5 +262,41 @@ mod tests {
         };
 
         assert!(!validate_action_model(&action).valid);
+    }
+
+    #[test]
+    fn rejects_unknown_task_tag_reference() {
+        let mut config = AppConfig::default();
+        config.tasks.push(TaskItem {
+            id: "task".into(),
+            name: "事项".into(),
+            category: None,
+            keywords: None,
+            description: None,
+            actions: Vec::new(),
+            risk_level: RiskLevel::Low,
+            enabled: true,
+            favorite: false,
+            tag_ids: vec!["missing".into()],
+            triggers: vec![TaskTrigger::Manual { enabled: true }],
+            last_run_at: None,
+            created_at: "2026-07-01T00:00:00Z".into(),
+            updated_at: "2026-07-01T00:00:00Z".into(),
+        });
+
+        let issues = validate_config_model(&config);
+
+        assert!(issues.iter().any(|issue| issue.field == "tagIds"));
+    }
+
+    #[test]
+    fn rejects_duplicate_tag_names() {
+        let mut config = AppConfig::default();
+        config.tags.push(crate::domain::TaskTag { id: "a".into(), name: "工作".into() });
+        config.tags.push(crate::domain::TaskTag { id: "b".into(), name: "工作".into() });
+
+        let issues = validate_config_model(&config);
+
+        assert!(issues.iter().any(|issue| issue.field == "tags"));
     }
 }

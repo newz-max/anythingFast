@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { TaskItem } from '@/types/domain'
+import type { TaskItem, TaskTag } from '@/types/domain'
 
 const task = defineModel<TaskItem>({ required: true })
+const props = defineProps<{
+  tags?: TaskTag[]
+}>()
+
+const tagOptions = computed(() => (props.tags || []).map((tag) => ({ label: tag.name, value: tag.id })))
 
 const keywordText = computed({
   get: () => task.value.keywords?.join(', ') || '',
@@ -31,6 +36,15 @@ const keywordText = computed({
     </NGrid>
     <NFormItem label="关键词">
       <NInput v-model:value="keywordText" placeholder="用英文逗号分隔，例如 af, 项目, dev" />
+    </NFormItem>
+    <NFormItem label="标签">
+      <NSelect
+        v-model:value="task.tagIds"
+        multiple
+        clearable
+        :options="tagOptions"
+        placeholder="选择标签"
+      />
     </NFormItem>
     <NFormItem label="描述">
       <NInput v-model:value="task.description" type="textarea" :autosize="{ minRows: 3, maxRows: 5 }" />

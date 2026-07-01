@@ -14,6 +14,7 @@ const emit = defineEmits<{
   create: []
   run: [task: TaskItem]
   toggleEnabled: [taskId: string, enabled: boolean]
+  toggleFavorite: [taskId: string]
 }>()
 
 const tasksRef = toRef(props, 'tasks')
@@ -58,7 +59,7 @@ function formatTaskTime(task: TaskItem) {
           :bordered="false"
         />
       </div>
-      <button class="filter-button" type="button" aria-label="筛选事项">
+      <button class="filter-button" type="button" aria-label="筛选事项" disabled>
         <span class="filter-shape" aria-hidden="true"></span>
       </button>
     </div>
@@ -118,6 +119,15 @@ function formatTaskTime(task: TaskItem) {
             <span class="task-time">{{ formatTaskTime(task) }}</span>
           </span>
           <span class="task-actions">
+            <button
+              class="favorite-toggle"
+              :class="{ active: task.favorite }"
+              type="button"
+              :aria-label="task.favorite ? '取消收藏事项' : '收藏事项'"
+              @click.stop="emit('toggleFavorite', task.id)"
+            >
+              {{ task.favorite ? '★' : '☆' }}
+            </button>
             <button
               class="small-run"
               type="button"
@@ -204,7 +214,8 @@ function formatTaskTime(task: TaskItem) {
   place-items: center;
   border-radius: 12px;
   color: #d5def7;
-  cursor: default;
+  cursor: not-allowed;
+  opacity: 0.54;
 }
 
 .filter-shape {
@@ -428,9 +439,10 @@ function formatTaskTime(task: TaskItem) {
 .task-actions {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
+.favorite-toggle,
 .small-run {
   display: grid;
   width: 31px;
@@ -443,6 +455,16 @@ function formatTaskTime(task: TaskItem) {
   cursor: pointer;
   font-size: 11px;
   line-height: 1;
+}
+
+.favorite-toggle {
+  background: rgba(63, 82, 159, 0.32);
+  color: #aeb9d8;
+  font-size: 15px;
+}
+
+.favorite-toggle.active {
+  color: #ffd76a;
 }
 
 .more-dots {

@@ -101,6 +101,33 @@ mod tests {
     }
 
     #[test]
+    fn old_task_without_favorite_defaults_to_false() {
+        let content = r#"{
+            "version": 1,
+            "tasks": [{
+                "id": "task",
+                "name": "旧事项",
+                "category": "未分类",
+                "keywords": [],
+                "description": "",
+                "actions": [],
+                "riskLevel": "low",
+                "enabled": true,
+                "createdAt": "2026-07-01T00:00:00Z",
+                "updatedAt": "2026-07-01T00:00:00Z"
+            }],
+            "settings": {
+                "globalShortcut": "Alt+Space"
+            }
+        }"#;
+        let restored: AppConfig = serde_json::from_str(content).unwrap();
+        assert!(!restored.tasks[0].favorite);
+        assert!(restored.tasks[0].tag_ids.is_empty());
+        assert_eq!(restored.tasks[0].triggers.len(), 1);
+        assert!(matches!(restored.settings.theme, crate::domain::AppTheme::System));
+    }
+
+    #[test]
     fn temp_extension_is_predictable() {
         let path = PathBuf::from("config.json");
         assert_eq!(path.with_extension("json.tmp"), PathBuf::from("config.json.tmp"));

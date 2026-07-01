@@ -53,19 +53,53 @@ export interface TaskItem {
   actions: TaskAction[]
   riskLevel: RiskLevel
   enabled: boolean
+  favorite: boolean
+  tagIds: string[]
+  triggers: TaskTrigger[]
   lastRunAt?: string
   createdAt: string
   updatedAt: string
 }
 
+export type TaskTrigger = ManualTaskTrigger | ShortcutTaskTrigger
+
+export interface ManualTaskTrigger {
+  type: 'manual'
+  enabled: boolean
+}
+
+export interface ShortcutTaskTrigger {
+  type: 'shortcut'
+  enabled: boolean
+  shortcut: string
+}
+
+export interface TaskTag {
+  id: string
+  name: string
+}
+
+export interface TaskTemplate {
+  id: string
+  name: string
+  category?: string
+  keywords?: string[]
+  description?: string
+  actions: Omit<TaskAction, 'id'>[]
+}
+
 export interface AppSettings {
   globalShortcut: string
+  theme: AppTheme
   configPath?: string
 }
+
+export type AppTheme = 'light' | 'dark' | 'system'
 
 export interface AppConfig {
   version: number
   tasks: TaskItem[]
+  tags: TaskTag[]
   settings: AppSettings
 }
 
@@ -96,6 +130,7 @@ export interface RiskAnalysis {
 }
 
 export type ExecutionStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped' | 'cancelled'
+export type ExecutionScope = 'task' | 'action'
 
 export interface ActionExecutionResult {
   actionId: string
@@ -108,6 +143,8 @@ export interface ActionExecutionResult {
 export interface TaskExecutionSummary {
   taskId: string
   taskName: string
+  scope: ExecutionScope
+  actionId?: string
   startedAt: string
   finishedAt: string
   status: ExecutionStatus

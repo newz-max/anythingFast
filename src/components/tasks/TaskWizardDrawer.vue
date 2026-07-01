@@ -6,13 +6,14 @@ import TaskWizardBasicStep from '@/components/tasks/TaskWizardBasicStep.vue'
 import TaskWizardConfirmStep from '@/components/tasks/TaskWizardConfirmStep.vue'
 import { useTaskWizardDraft, type TaskWizardMode } from '@/composables/useTaskWizardDraft'
 import { clonePlainDto } from '@/utils/clonePlainDto'
-import type { TaskAction, TaskItem } from '@/types/domain'
+import type { TaskAction, TaskItem, TaskTag } from '@/types/domain'
 
 const props = defineProps<{
   show: boolean
   mode: TaskWizardMode
   task: TaskItem | null
   allTasks: TaskItem[]
+  tags?: TaskTag[]
   saving: boolean
   initialStep?: number
 }>()
@@ -130,7 +131,7 @@ function saveAction(action: TaskAction) {
           </NSteps>
 
           <section class="step-body">
-            <TaskWizardBasicStep v-show="currentStep === 1" v-model="draft" />
+            <TaskWizardBasicStep v-show="currentStep === 1" v-model="draft" :tags="tags" />
             <TaskWizardActionStep
               v-show="currentStep === 2"
               v-model:actions="draft.actions"
