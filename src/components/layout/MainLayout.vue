@@ -12,7 +12,19 @@ import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { useTaskStore } from '@/stores/taskStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskExecution } from '@/composables/useTaskExecution'
-import type { ActionType, AppTheme, ShortcutTaskTrigger, TaskAction, TaskItem, TaskTag, TaskTemplate, TaskTrigger } from '@/types/domain'
+import { tauriApi } from '@/api/tauri'
+import { listenShortcutStatusEvents } from '@/api/events'
+import type {
+  ActionType,
+  AppTheme,
+  ShortcutStatus,
+  ShortcutTaskTrigger,
+  TaskAction,
+  TaskItem,
+  TaskTag,
+  TaskTemplate,
+  TaskTrigger
+} from '@/types/domain'
 import type { TaskWizardMode } from '@/composables/useTaskWizardDraft'
 
 const taskStore = useTaskStore()
@@ -36,6 +48,7 @@ const editingTag = shallowRef<TaskTag | null>(null)
 const taskShortcutDraft = shallowRef('')
 const helpModalVisible = shallowRef(false)
 const settingsModalVisible = shallowRef(false)
+const shortcutStatus = shallowRef<ShortcutStatus | null>(null)
 
 const selectedTask = computed(() => taskStore.selectedTask)
 const visibleTasks = computed(() => getTasksForView(taskStore.tasks, activeTaskView.value, selectedTagId.value))
@@ -73,12 +86,18 @@ const themeOptions = [
   { label: '深色', value: 'dark' }
 ]
 const tagItems = computed(() => taskStore.tags.map((tag, index) => ({ ...tag, tone: tagTone(index) })))
+const shortcutWarning = computed(() => {
+  const status = shortcutStatus.value
+  if (!status || status.registered) return ''
+  return status.message || `全局快捷键 ${status.shortcut} 当前不可用`
+})
 
 onMounted(async () => {
   shortcutDraft.value = taskStore.settings.globalShortcut
   settingsShortcutDraft.value = taskStore.settings.globalShortcut
   themeDraft.value = taskStore.settings.theme
   await executionStore.setupListeners()
+  await setupShortcutStatus()
   await executionStore.loadLogs()
 })
 
@@ -245,8 +264,15 @@ async function handleShareSelect(key: string | number) {
 }
 
 async function saveShortcut() {
-  await taskStore.updateSettings({ ...taskStore.settings, globalShortcut: shortcutDraft.value.trim() || 'Alt+Space' })
-  message.success('快捷键设置已保存')
+  try {
+    await taskStore.updateSettings({ ...taskStore.settings, globalShortcut: shortcutDraft.value.trim() || 'Alt+Space' })
+    await refreshShortcutStatus()
+    message.success('快捷键设置已保存')
+  } catch (err) {
+    shortcutDraft.value = taskStore.settings.globalShortcut
+    await refreshShortcutStatus()
+    message.error(err instanceof Error ? err.message : String(err))
+  }
 }
 
 function openSettings() {
@@ -256,14 +282,21 @@ function openSettings() {
 }
 
 async function saveSettings() {
-  await taskStore.updateSettings({
-    ...taskStore.settings,
-    globalShortcut: settingsShortcutDraft.value.trim() || 'Alt+Space',
-    theme: themeDraft.value
-  })
-  shortcutDraft.value = taskStore.settings.globalShortcut
-  settingsModalVisible.value = false
-  message.success('设置已保存')
+  try {
+    await taskStore.updateSettings({
+      ...taskStore.settings,
+      globalShortcut: settingsShortcutDraft.value.trim() || 'Alt+Space',
+      theme: themeDraft.value
+    })
+    shortcutDraft.value = taskStore.settings.globalShortcut
+    await refreshShortcutStatus()
+    settingsModalVisible.value = false
+    message.success('设置已保存')
+  } catch (err) {
+    settingsShortcutDraft.value = taskStore.settings.globalShortcut
+    await refreshShortcutStatus()
+    message.error(err instanceof Error ? err.message : String(err))
+  }
 }
 
 async function cycleTheme() {
@@ -281,8 +314,12 @@ async function saveTaskShortcutTrigger() {
   if (shortcut) {
     triggers.push({ type: 'shortcut', enabled: true, shortcut })
   }
-  await taskStore.upsertTask({ ...selectedTask.value, triggers })
-  message.success('触发设置已保存')
+  try {
+    await taskStore.upsertTask({ ...selectedTask.value, triggers })
+    message.success('触发设置已保存')
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  }
 }
 
 async function clearTaskShortcutTrigger() {
@@ -365,6 +402,22 @@ function themeLabel(theme: AppTheme) {
   if (theme === 'light') return '浅色'
   if (theme === 'dark') return '深色'
   return '跟随系统'
+}
+
+async function setupShortcutStatus() {
+  if (!('__TAURI_INTERNALS__' in window)) return
+  await listenShortcutStatusEvents((status) => {
+    shortcutStatus.value = status
+    if (!status.registered && status.message) {
+      message.warning(status.message)
+    }
+  })
+  await refreshShortcutStatus()
+}
+
+async function refreshShortcutStatus() {
+  if (!('__TAURI_INTERNALS__' in window)) return
+  shortcutStatus.value = await tauriApi.loadShortcutStatus()
 }
 </script>
 
@@ -610,6 +663,7 @@ function themeLabel(theme: AppTheme) {
               <NInput v-model:value="shortcutDraft" size="small" placeholder="Alt+Space" />
               <NButton size="small" @click="saveShortcut">保存</NButton>
             </NInputGroup>
+            <p v-if="shortcutWarning" class="shortcut-warning">{{ shortcutWarning }}</p>
           </div>
           <button class="logs-button" type="button" @click="showLogs = !showLogs">
             {{ showLogs ? '隐藏执行日志' : '执行日志' }}
@@ -1589,6 +1643,13 @@ function themeLabel(theme: AppTheme) {
 
 .shortcut-group {
   max-width: 320px;
+}
+
+.shortcut-warning {
+  max-width: 420px;
+  margin: 0;
+  color: #ffb15c;
+  line-height: 1.5;
 }
 
 .logs-button {

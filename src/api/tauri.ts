@@ -5,6 +5,7 @@ import type {
   ExecutionLogSummary,
   PreviewAction,
   RiskAnalysis,
+  ShortcutStatus,
   TaskAction,
   TaskExecutionSummary,
   TaskItem,
@@ -25,5 +26,6 @@ export const tauriApi = {
     invoke<TaskExecutionSummary>('run_task_action', { taskId, actionId, confirmationToken }),
   previewAction: (action: TaskAction) => invoke<PreviewAction>('preview_action', { action }),
   loadExecutionLogs: (limit: number) => invoke<ExecutionLogSummary[]>('load_execution_logs', { limit }),
+  loadShortcutStatus: () => invoke<ShortcutStatus>('load_shortcut_status'),
   updateSettings: (settings: AppSettings) => invoke<AppConfig>('update_settings', { settings })
 }

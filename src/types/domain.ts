@@ -94,6 +94,12 @@ export interface AppSettings {
   configPath?: string
 }
 
+export interface ShortcutStatus {
+  shortcut: string
+  registered: boolean
+  message?: string
+}
+
 export type AppTheme = 'light' | 'dark' | 'system'
 
 export interface AppConfig {

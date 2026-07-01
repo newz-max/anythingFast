@@ -1,6 +1,6 @@
 use crate::domain::{
-    AppConfig, AppSettings, ExecutionLogSummary, PreviewAction, RiskAnalysis, RiskLevel, TaskAction, TaskExecutionSummary, TaskItem,
-    ValidationResult,
+    AppConfig, AppSettings, ExecutionLogSummary, PreviewAction, RiskAnalysis, RiskLevel, ShortcutStatus, TaskAction,
+    TaskExecutionSummary, TaskItem, ValidationResult,
 };
 use crate::executor;
 use crate::risk::{action_detail, analyze_task_risk, derive_action_risk};
@@ -217,9 +217,27 @@ pub fn load_execution_logs(app: AppHandle, limit: usize) -> Result<Vec<Execution
 }
 
 #[tauri::command]
+pub fn load_shortcut_status(app: AppHandle) -> ShortcutStatus {
+    crate::shortcut_status(&app)
+}
+
+#[tauri::command]
 pub fn update_settings(app: AppHandle, settings: AppSettings) -> Result<AppConfig, String> {
     let mut config = storage::load_config(&app).map_err(|err| err.to_string())?;
+    let shortcut = settings.global_shortcut.trim().to_string();
+    if shortcut.is_empty() {
+        return Err("全局快捷键不能为空".to_string());
+    }
     config.settings = settings;
+    let issues = validate_config_model(&config);
+    if !issues.is_empty() {
+        return Err(issues
+            .into_iter()
+            .map(|issue| format!("{}: {}", issue.field, issue.message))
+            .collect::<Vec<_>>()
+            .join("; "));
+    }
+    crate::register_global_shortcut(&app, &shortcut)?;
     storage::save_config(&app, &config).map_err(|err| err.to_string())?;
     storage::load_config(&app).map_err(|err| err.to_string())
 }

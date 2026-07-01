@@ -7,25 +7,49 @@ mod validation;
 
 use commands::*;
 use chrono::Utc;
-use domain::TaskTrigger;
+use domain::{ShortcutStatus, TaskTrigger};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[derive(Default)]
 struct TaskShortcutRegistry(Mutex<Vec<(Shortcut, String)>>);
+
+#[derive(Default)]
+struct GlobalShortcutState(Mutex<GlobalShortcutRegistration>);
+
+struct GlobalShortcutRegistration {
+    shortcut: Option<Shortcut>,
+    label: String,
+    status: ShortcutStatus,
+}
+
+impl Default for GlobalShortcutRegistration {
+    fn default() -> Self {
+        Self {
+            shortcut: None,
+            label: String::new(),
+            status: ShortcutStatus {
+                shortcut: String::new(),
+                registered: false,
+                message: None,
+            },
+        }
+    }
+}
 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(TaskShortcutRegistry::default())
+        .manage(GlobalShortcutState::default())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
                     if event.state() != ShortcutState::Pressed {
                         return;
                     }
-                    if shortcut.matches(Modifiers::ALT, Code::Space) {
+                    if is_global_shortcut(app, shortcut) {
                         toggle_quick_panel(app);
                         return;
                     }
@@ -48,10 +72,12 @@ pub fn run() {
         )
         .setup(|app| {
             ensure_quick_panel(app.handle())?;
-            register_default_shortcut(app.handle())?;
-            if let Ok(config) = storage::load_config(app.handle()) {
-                refresh_task_shortcuts(app.handle(), &config).map_err(|err| tauri::Error::Anyhow(anyhow::anyhow!(err)))?;
+            let config = storage::load_config(app.handle()).unwrap_or_default();
+            let global_shortcut = config.settings.global_shortcut.trim();
+            if let Err(message) = register_global_shortcut(app.handle(), global_shortcut) {
+                set_global_shortcut_status(app.handle(), None, global_shortcut, Some(message));
             }
+            refresh_task_shortcuts(app.handle(), &config).map_err(|err| tauri::Error::Anyhow(anyhow::anyhow!(err)))?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -65,6 +91,7 @@ pub fn run() {
             run_task_action,
             preview_action,
             load_execution_logs,
+            load_shortcut_status,
             update_settings
         ])
         .run(tauri::generate_context!())
@@ -85,15 +112,6 @@ fn ensure_quick_panel(app: &tauri::AppHandle) -> tauri::Result<()> {
         .skip_taskbar(true)
         .visible(false)
         .build()?;
-
-    Ok(())
-}
-
-fn register_default_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let shortcut = Shortcut::new(Some(Modifiers::ALT), Code::Space);
-    app.global_shortcut()
-        .register(shortcut)
-        .map_err(|err| tauri::Error::Anyhow(anyhow::anyhow!(err.to_string())))?;
 
     Ok(())
 }
@@ -123,6 +141,100 @@ pub fn refresh_task_shortcuts(app: &tauri::AppHandle, config: &domain::AppConfig
     }
 
     Ok(())
+}
+
+pub fn register_global_shortcut(app: &tauri::AppHandle, shortcut_label: &str) -> Result<(), String> {
+    let trimmed = shortcut_label.trim();
+    let parsed: Shortcut = trimmed.parse().map_err(|_| format!("全局快捷键格式无效：{trimmed}"))?;
+
+    let state = app.state::<GlobalShortcutState>();
+    let mut registration = state
+        .0
+        .lock()
+        .map_err(|_| "无法更新全局快捷键注册表".to_string())?;
+
+    if registration.shortcut.as_ref() == Some(&parsed) {
+        registration.status = ShortcutStatus {
+            shortcut: trimmed.to_string(),
+            registered: true,
+            message: None,
+        };
+        emit_shortcut_status(app, registration.status.clone());
+        return Ok(());
+    }
+
+    if let Err(err) = app.global_shortcut().register(parsed) {
+        let message = format_shortcut_registration_error(trimmed, &err.to_string());
+        registration.status = ShortcutStatus {
+            shortcut: trimmed.to_string(),
+            registered: false,
+            message: Some(message.clone()),
+        };
+        emit_shortcut_status(app, registration.status.clone());
+        return Err(message);
+    }
+
+    if let Some(previous) = registration.shortcut {
+        if previous != parsed {
+            let _ = app.global_shortcut().unregister(previous);
+        }
+    }
+
+    registration.shortcut = Some(parsed);
+    registration.label = trimmed.to_string();
+    registration.status = ShortcutStatus {
+        shortcut: trimmed.to_string(),
+        registered: true,
+        message: None,
+    };
+    emit_shortcut_status(app, registration.status.clone());
+    Ok(())
+}
+
+pub fn shortcut_status(app: &tauri::AppHandle) -> ShortcutStatus {
+    app.state::<GlobalShortcutState>()
+        .0
+        .lock()
+        .map(|registration| registration.status.clone())
+        .unwrap_or_else(|_| ShortcutStatus {
+            shortcut: String::new(),
+            registered: false,
+            message: Some("无法读取全局快捷键状态".to_string()),
+        })
+}
+
+fn set_global_shortcut_status(app: &tauri::AppHandle, shortcut: Option<Shortcut>, label: &str, message: Option<String>) {
+    if let Ok(mut registration) = app.state::<GlobalShortcutState>().0.lock() {
+        registration.shortcut = shortcut;
+        registration.label = label.trim().to_string();
+        registration.status = ShortcutStatus {
+            shortcut: registration.label.clone(),
+            registered: registration.shortcut.is_some() && message.is_none(),
+            message,
+        };
+        emit_shortcut_status(app, registration.status.clone());
+    }
+}
+
+fn is_global_shortcut(app: &tauri::AppHandle, shortcut: &Shortcut) -> bool {
+    app.state::<GlobalShortcutState>()
+        .0
+        .lock()
+        .map(|registration| registration.shortcut.as_ref() == Some(shortcut))
+        .unwrap_or(false)
+}
+
+fn emit_shortcut_status(app: &tauri::AppHandle, status: ShortcutStatus) {
+    let _ = app.emit("shortcut-status", status);
+}
+
+fn format_shortcut_registration_error(shortcut: &str, raw_error: &str) -> String {
+    let lower = raw_error.to_lowercase();
+    if lower.contains("already registered") || lower.contains("hotkey already registered") {
+        format!("无法注册全局快捷键 {shortcut}：该快捷键已被占用")
+    } else {
+        format!("无法注册全局快捷键 {shortcut}：{raw_error}")
+    }
 }
 
 fn toggle_quick_panel(app: &tauri::AppHandle) {

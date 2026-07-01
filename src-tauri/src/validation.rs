@@ -32,7 +32,7 @@ pub fn validate_config_model(config: &AppConfig) -> Vec<FieldIssue> {
                 if *enabled && normalized.is_empty() {
                     issues.push(issue("triggers", "快捷键不能为空"));
                 }
-                if *enabled && normalized == "alt+space" {
+                if *enabled && normalized == normalize_shortcut(&config.settings.global_shortcut) {
                     issues.push(issue("triggers", "事项快捷键不能与全局快捷键冲突"));
                 }
                 if *enabled && !is_supported_shortcut(shortcut) {
