@@ -14,26 +14,30 @@ const resolvedTheme = computed<'dark' | 'light'>(() => {
 
 const theme = computed(() => resolvedTheme.value === 'dark' ? darkTheme : undefined)
 
+const scrollbarWidth = '7px'
+const scrollbarHeight = '7px'
+const scrollbarBorderRadius = '999px'
+const scrollbarRailColor = 'transparent'
+
 const themeOverrides = computed<GlobalThemeOverrides>(() => {
   const dark = resolvedTheme.value === 'dark'
-  const scrollbarColor = dark ? 'rgba(84, 99, 126, 0.72)' : 'rgba(102, 119, 148, 0.46)'
-  const scrollbarColorHover = dark ? 'rgba(98, 116, 148, 0.84)' : 'rgba(88, 106, 137, 0.64)'
-  const scrollbarRailColor = 'transparent'
+  const scrollbarColor = dark ? 'rgba(87, 100, 128, 0.8)' : 'rgba(87, 100, 128, 0.48)'
+  const scrollbarColorHover = dark ? 'rgba(101, 116, 148, 0.9)' : 'rgba(87, 100, 128, 0.64)'
 
   return {
     common: {
       scrollbarColor,
       scrollbarColorHover,
-      scrollbarWidth: '7px',
-      scrollbarHeight: '7px',
-      scrollbarBorderRadius: '999px'
+      scrollbarWidth,
+      scrollbarHeight,
+      scrollbarBorderRadius
     },
     Scrollbar: {
       color: scrollbarColor,
       colorHover: scrollbarColorHover,
-      width: '7px',
-      height: '7px',
-      borderRadius: '999px',
+      width: scrollbarWidth,
+      height: scrollbarHeight,
+      borderRadius: scrollbarBorderRadius,
       railColor: scrollbarRailColor
     }
   }

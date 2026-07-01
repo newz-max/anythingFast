@@ -789,6 +789,7 @@ async function refreshShortcutStatus() {
   display: grid;
   grid-template-rows: 56px minmax(0, 1fr);
   min-width: 1180px;
+  height: 100vh;
   min-height: 100vh;
   overflow: hidden;
   background:
@@ -1028,6 +1029,9 @@ async function refreshShortcutStatus() {
   display: grid;
   grid-template-columns: 298px 352px minmax(0, 1fr);
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .sidebar,
