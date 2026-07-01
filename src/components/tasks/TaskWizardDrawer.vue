@@ -14,6 +14,7 @@ const props = defineProps<{
   task: TaskItem | null
   allTasks: TaskItem[]
   saving: boolean
+  initialStep?: number
 }>()
 
 const emit = defineEmits<{
@@ -45,7 +46,7 @@ const canSave = computed(() => Boolean(draft.value && validation.value?.valid !=
 watch(
   () => props.show,
   (show) => {
-    if (show) currentStep.value = 1
+    if (show) currentStep.value = props.initialStep ?? 1
   }
 )
 
