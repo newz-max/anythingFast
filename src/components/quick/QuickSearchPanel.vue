@@ -86,8 +86,11 @@ async function hideWindow() {
 <style scoped>
 .quick-panel {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 12px;
+  min-width: 0;
   min-height: 100vh;
+  overflow: hidden;
   padding: 14px;
   background: #ffffff;
 }
@@ -96,11 +99,15 @@ async function hideWindow() {
   display: grid;
   align-content: start;
   gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .result-item {
   display: flex;
   width: 100%;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -121,6 +128,7 @@ async function hideWindow() {
 
 .result-main {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .result-name,
@@ -143,9 +151,28 @@ async function hideWindow() {
 
 .status {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   border-top: 1px solid #eef2f7;
   padding-top: 8px;
+}
+
+@media (max-width: 520px) {
+  .quick-panel {
+    min-height: 100vh;
+    padding: 10px;
+  }
+
+  .result-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .status {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 </style>

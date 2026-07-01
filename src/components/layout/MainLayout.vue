@@ -777,6 +777,9 @@ async function refreshShortcutStatus() {
 
 <style scoped>
 .main-layout {
+  --sidebar-width: 298px;
+  --middle-width: clamp(320px, 28vw, 372px);
+  --content-padding: 24px;
   --surface: rgba(15, 20, 40, 0.86);
   --surface-soft: rgba(27, 35, 55, 0.72);
   --line: rgba(82, 106, 171, 0.24);
@@ -788,9 +791,9 @@ async function refreshShortcutStatus() {
   position: relative;
   display: grid;
   grid-template-rows: 56px minmax(0, 1fr);
-  min-width: 1180px;
   height: 100vh;
   min-height: 100vh;
+  min-width: 0;
   overflow: hidden;
   background:
     radial-gradient(circle at 74% 12%, rgba(63, 80, 164, 0.18), transparent 34%),
@@ -860,6 +863,13 @@ async function refreshShortcutStatus() {
   padding-left: 30px;
   font-size: 16px;
   font-weight: 700;
+}
+
+.window-brand > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :global([data-app-theme="light"]) .window-brand {
@@ -1027,11 +1037,9 @@ async function refreshShortcutStatus() {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 298px 352px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) var(--middle-width) minmax(0, 1fr);
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  overflow: hidden;
 }
 
 .sidebar,
@@ -1045,6 +1053,8 @@ async function refreshShortcutStatus() {
 .sidebar {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  min-width: 0;
+  overflow: hidden;
   padding: 32px 22px 24px;
 }
 
@@ -1213,7 +1223,9 @@ async function refreshShortcutStatus() {
 .tag-list {
   display: grid;
   gap: 10px;
+  max-height: min(24vh, 220px);
   margin-top: 20px;
+  overflow-y: auto;
   padding: 0 8px;
 }
 
@@ -1368,8 +1380,11 @@ async function refreshShortcutStatus() {
 
 .middle-panel {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
   padding: 44px 22px 34px;
+  overflow: hidden;
   border-left: 1px solid rgba(82, 106, 171, 0.08);
   border-radius: 36px 0 0 36px;
   background:
@@ -1406,6 +1421,7 @@ async function refreshShortcutStatus() {
   align-content: start;
   gap: 12px;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .template-card {
@@ -1451,15 +1467,18 @@ async function refreshShortcutStatus() {
 .workspace {
   display: grid;
   min-width: 0;
-  padding: 32px 24px 32px 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 32px var(--content-padding) 32px 0;
 }
 
 .detail-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, auto) auto auto auto;
+  align-content: start;
   gap: 30px;
   min-width: 0;
   min-height: 0;
+  overflow-y: auto;
   border: 1px solid rgba(82, 106, 171, 0.28);
   border-radius: 24px;
   background:
@@ -1515,10 +1534,12 @@ async function refreshShortcutStatus() {
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
+  min-width: 0;
 }
 
 .detail-hero {
   display: flex;
+  flex: 1 1 420px;
   min-width: 0;
   gap: 26px;
 }
@@ -1547,6 +1568,7 @@ async function refreshShortcutStatus() {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .title-row h2 {
@@ -1566,9 +1588,13 @@ async function refreshShortcutStatus() {
 }
 
 .hero-copy p {
+  display: -webkit-box;
   margin: 16px 0 10px;
+  overflow: hidden;
   color: var(--muted);
   font-size: 14px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .category-badge {
@@ -1599,10 +1625,19 @@ async function refreshShortcutStatus() {
   font-size: 12px;
 }
 
+.meta-line span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .detail-actions {
   display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 18px;
+  min-width: 0;
   padding-top: 0;
 }
 
@@ -1787,7 +1822,7 @@ async function refreshShortcutStatus() {
 }
 
 .shortcut-trigger-card {
-  grid-template-columns: 48px minmax(0, 1fr) minmax(280px, 420px);
+  grid-template-columns: 48px minmax(0, 1fr) minmax(0, 420px);
 }
 
 .trigger-icon {
@@ -1823,15 +1858,18 @@ async function refreshShortcutStatus() {
 }
 
 .task-shortcut-group {
+  width: 100%;
+  min-width: 0;
   justify-self: end;
   max-width: 420px;
 }
 
 .utility-strip {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: end;
   gap: 16px;
+  min-width: 0;
 }
 
 .shortcut-card {
@@ -1842,6 +1880,7 @@ async function refreshShortcutStatus() {
 }
 
 .shortcut-group {
+  width: 100%;
   max-width: 320px;
 }
 
@@ -1908,22 +1947,247 @@ async function refreshShortcutStatus() {
   margin: 0;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1279px) {
   .main-layout {
-    min-width: 1040px;
+    --sidebar-width: 76px;
+    --middle-width: clamp(300px, 34vw, 336px);
+    --content-padding: 18px;
   }
 
-  .app-content {
-    grid-template-columns: 260px 330px minmax(0, 1fr);
+  .sidebar {
+    justify-items: center;
+    padding: 22px 12px 18px;
+  }
+
+  .brand {
+    grid-template-columns: 44px;
+    justify-items: center;
+  }
+
+  .brand > div:not(.brand-mark),
+  .collapse-mark,
+  .nav-item span:not(.nav-icon),
+  .tag-block,
+  .promo-card,
+  .orb-button {
+    display: none;
+  }
+
+  .nav-list {
+    margin-top: 30px;
+  }
+
+  .create-button:not(.compact) {
+    width: 48px;
+    height: 48px;
+    margin-top: 26px;
+    border-radius: 12px;
+    font-size: 0;
+    gap: 0;
+    padding: 0;
+  }
+
+  .create-button:not(.compact) span {
+    font-size: 24px;
+  }
+
+  .nav-item {
+    grid-template-columns: 1fr;
+    width: 48px;
+    height: 48px;
+    justify-items: center;
+    padding: 0;
+  }
+
+  .nav-icon {
+    font-size: 20px;
+  }
+
+  .sidebar-footer {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .middle-panel {
+    padding: 30px 16px 24px;
+    border-radius: 24px 0 0 24px;
   }
 
   .detail-panel {
-    padding: 34px 28px;
+    gap: 24px;
+    padding: 30px 22px;
+  }
+
+  .detail-header {
+    flex-wrap: wrap;
+  }
+
+  .detail-actions {
+    width: 100%;
+  }
+
+  .hero-icon {
+    width: 76px;
+    height: 76px;
+    flex-basis: 76px;
+    font-size: 32px;
   }
 
   .action-row {
-    grid-template-columns: 18px 22px 40px minmax(96px, 125px) minmax(0, 1fr) 38px 28px;
+    grid-template-columns: 18px 22px 38px minmax(0, 1fr) 34px 24px;
     gap: 10px;
+    min-height: 76px;
+    padding: 12px 14px;
+  }
+
+  .action-name {
+    min-width: 0;
+  }
+
+  .action-detail {
+    grid-column: 4 / -1;
+  }
+
+  .shortcut-trigger-card,
+  .utility-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .trigger-card {
+    align-items: start;
+    padding: 18px;
+  }
+
+  .task-shortcut-group,
+  .shortcut-group,
+  .shortcut-warning {
+    max-width: none;
+  }
+}
+
+@media (max-width: 959px) {
+  .main-layout {
+    --sidebar-width: 100%;
+    --middle-width: 100%;
+    height: auto;
+    min-height: 100vh;
+    overflow-y: auto;
+  }
+
+  .app-content {
+    grid-template-columns: 1fr;
+    grid-auto-rows: auto;
+    overflow: visible;
+  }
+
+  .sidebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+  }
+
+  .brand {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .brand > div:not(.brand-mark) {
+    display: block;
+  }
+
+  .nav-list,
+  .sidebar-footer {
+    display: flex;
+    margin-top: 0;
+  }
+
+  .middle-panel,
+  .workspace {
+    padding: 16px;
+  }
+
+  .middle-panel {
+    border-radius: 0;
+  }
+
+  .workspace,
+  .detail-panel {
+    overflow: visible;
+  }
+
+  .detail-hero {
+    flex-wrap: wrap;
+  }
+
+  .section-title-row,
+  .template-card {
+    flex-wrap: wrap;
+  }
+
+  .template-card {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-titlebar {
+    height: auto;
+    min-height: 56px;
+  }
+
+  .window-brand {
+    padding-left: 14px;
+    font-size: 14px;
+  }
+
+  .titlebar-mark {
+    width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+  }
+
+  .window-control {
+    width: 44px;
+  }
+
+  .window-control-close {
+    width: 42px;
+    margin-right: 8px;
+  }
+
+  .sidebar {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .detail-panel {
+    border-radius: 18px;
+    padding: 20px 16px;
+  }
+
+  .action-row {
+    grid-template-columns: 18px 34px minmax(0, 1fr) 34px;
+  }
+
+  .action-index,
+  .row-more {
+    display: none;
+  }
+
+  .action-detail {
+    grid-column: 3 / -1;
+  }
+
+  .run-button,
+  .add-action-button {
+    width: 100%;
+  }
+
+  .detail-actions,
+  .section-title-row {
+    justify-content: stretch;
   }
 }
 </style>

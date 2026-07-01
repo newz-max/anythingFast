@@ -71,6 +71,7 @@ defineEmits<{
 
 .action-step-header {
   justify-content: space-between;
+  min-width: 0;
 }
 
 .section-title {
@@ -95,6 +96,8 @@ defineEmits<{
 
 .action-row {
   justify-content: space-between;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .order {
@@ -128,5 +131,43 @@ defineEmits<{
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .action-step-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .action-step-header :deep(.n-button) {
+    width: 100%;
+  }
+
+  .action-row {
+    align-items: flex-start;
+  }
+
+  .action-main {
+    flex-basis: calc(100% - 40px);
+  }
+
+  .action-title-row {
+    flex-wrap: wrap;
+  }
+
+  .action-row :deep(.n-space) {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 480px) {
+  .action-row :deep(.n-space) {
+    justify-content: flex-start;
+  }
+
+  .action-row :deep(.n-button) {
+    flex: 1 1 72px;
+  }
 }
 </style>

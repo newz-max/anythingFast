@@ -154,6 +154,7 @@ function formatTaskTime(task: TaskItem) {
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 18px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .search-row {
@@ -268,6 +269,9 @@ function formatTaskTime(task: TaskItem) {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  max-height: 74px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .category-pill {
@@ -303,7 +307,7 @@ function formatTaskTime(task: TaskItem) {
 
 .scroll {
   min-height: 0;
-  max-height: calc(100vh - 246px);
+  height: 100%;
 }
 
 .items {
@@ -438,6 +442,7 @@ function formatTaskTime(task: TaskItem) {
 
 .task-actions {
   display: inline-flex;
+  min-width: max-content;
   align-items: center;
   gap: 10px;
 }
@@ -483,5 +488,80 @@ function formatTaskTime(task: TaskItem) {
   padding-top: 48px;
   --n-text-color: #8b96b8 !important;
   --n-icon-color: #445071 !important;
+}
+
+@media (max-width: 1279px) {
+  .task-list {
+    gap: 14px;
+  }
+
+  .section-row {
+    padding-top: 14px;
+  }
+
+  .task-item {
+    grid-template-columns: 40px minmax(0, 1fr) 68px;
+    gap: 10px;
+    min-height: 72px;
+    padding: 12px;
+  }
+
+  .task-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .task-actions {
+    display: grid;
+    grid-template-columns: repeat(2, 30px);
+    justify-content: end;
+    gap: 6px;
+  }
+
+  .more-dots {
+    display: none;
+  }
+
+  .favorite-toggle,
+  .small-run {
+    width: 30px;
+    height: 30px;
+  }
+}
+
+@media (max-width: 959px) {
+  .task-list {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .scroll {
+    max-height: 420px;
+  }
+}
+
+@media (max-width: 520px) {
+  .search-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filter-button {
+    display: none;
+  }
+
+  .task-item {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .task-actions {
+    grid-column: 2;
+    grid-row: 2;
+    justify-content: start;
+  }
+
+  .task-icon {
+    width: 36px;
+    height: 36px;
+  }
 }
 </style>

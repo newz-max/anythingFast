@@ -91,7 +91,7 @@ function normalizeRisk() {
   <NDrawer
     :show="show"
     placement="right"
-    width="min(720px, 88vw)"
+    width="min(720px, calc(100vw - 24px))"
     :mask-closable="false"
     @update:show="(value: boolean) => (value ? emit('update:show', true) : close())"
   >
@@ -163,7 +163,10 @@ function normalizeRisk() {
 }
 
 .step-body {
-  min-height: 420px;
+  min-height: min(420px, calc(100vh - 220px));
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .type-grid {
@@ -212,9 +215,29 @@ function normalizeRisk() {
 
 .footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   width: 100%;
+}
+
+.footer :deep(.n-space) {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .step-body {
+    min-height: 0;
+    max-height: calc(100vh - 180px);
+  }
+
+  .type-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .footer {
+    justify-content: flex-end;
+  }
 }
 </style>

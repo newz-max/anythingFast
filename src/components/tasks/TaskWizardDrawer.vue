@@ -117,7 +117,7 @@ function saveAction(action: TaskAction) {
   <NDrawer
     :show="show"
     placement="right"
-    width="min(860px, 92vw)"
+    width="min(860px, calc(100vw - 24px))"
     :mask-closable="true"
     @update:show="(value: boolean) => (value ? emit('update:show', true) : close())"
   >
@@ -184,14 +184,37 @@ function saveAction(action: TaskAction) {
 }
 
 .step-body {
-  min-height: 440px;
+  min-height: min(440px, calc(100vh - 220px));
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   width: 100%;
+}
+
+.footer :deep(.n-space) {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .step-body {
+    min-height: 0;
+    max-height: calc(100vh - 180px);
+  }
+
+  .footer {
+    justify-content: flex-end;
+  }
+
+  .footer > span {
+    display: none;
+  }
 }
 </style>
