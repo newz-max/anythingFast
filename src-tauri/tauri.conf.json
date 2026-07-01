@@ -45,6 +45,11 @@
       "icons/icon.ico"
     ],
     "windows": {
+      "nsis": {
+        "languages": [
+          "SimpChinese"
+        ]
+      },
       "wix": {
         "language": "zh-CN"
       }
