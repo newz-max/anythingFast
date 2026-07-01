@@ -1,10 +1,11 @@
 :root {
-  --app-scrollbar-size: 10px;
+  --app-scrollbar-size: 11px;
   --app-scrollbar-radius: 999px;
+  --app-scrollbar-thumb-border: 2px;
   --app-scrollbar-track: transparent;
-  --app-scrollbar-thumb: rgba(114, 133, 177, 0.42);
-  --app-scrollbar-thumb-hover: rgba(87, 126, 238, 0.72);
-  --app-scrollbar-thumb-active: rgba(91, 83, 255, 0.84);
+  --app-scrollbar-thumb: rgba(84, 99, 126, 0.7);
+  --app-scrollbar-thumb-hover: rgba(98, 116, 148, 0.82);
+  --app-scrollbar-thumb-active: rgba(112, 132, 168, 0.9);
   color: #1f2933;
   background: #f5f7fb;
   font-family:
@@ -17,16 +18,16 @@
 
 html[data-app-theme="dark"] {
   --app-scrollbar-track: transparent;
-  --app-scrollbar-thumb: rgba(122, 143, 192, 0.34);
-  --app-scrollbar-thumb-hover: rgba(72, 119, 255, 0.7);
-  --app-scrollbar-thumb-active: rgba(108, 78, 255, 0.82);
+  --app-scrollbar-thumb: rgba(84, 99, 126, 0.72);
+  --app-scrollbar-thumb-hover: rgba(98, 116, 148, 0.84);
+  --app-scrollbar-thumb-active: rgba(112, 132, 168, 0.92);
 }
 
 html[data-app-theme="light"] {
-  --app-scrollbar-track: rgba(236, 242, 250, 0.42);
-  --app-scrollbar-thumb: rgba(107, 124, 163, 0.36);
-  --app-scrollbar-thumb-hover: rgba(49, 103, 220, 0.58);
-  --app-scrollbar-thumb-active: rgba(58, 139, 255, 0.76);
+  --app-scrollbar-track: transparent;
+  --app-scrollbar-thumb: rgba(102, 119, 148, 0.46);
+  --app-scrollbar-thumb-hover: rgba(88, 106, 137, 0.64);
+  --app-scrollbar-thumb-active: rgba(77, 96, 126, 0.74);
 }
 
 * {
@@ -45,7 +46,7 @@ html[data-app-theme="light"] {
 }
 
 *::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
+  border: var(--app-scrollbar-thumb-border) solid transparent;
   border-radius: var(--app-scrollbar-radius);
   background: var(--app-scrollbar-thumb);
   background-clip: content-box;
