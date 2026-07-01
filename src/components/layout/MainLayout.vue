@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { NDropdown, NModal, useDialog, useMessage } from 'naive-ui'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { DropdownOption } from 'naive-ui'
@@ -50,6 +50,9 @@ const taskShortcutDraft = shallowRef('')
 const helpModalVisible = shallowRef(false)
 const settingsModalVisible = shallowRef(false)
 const shortcutStatus = shallowRef<ShortcutStatus | null>(null)
+const layoutRef = useTemplateRef<HTMLElement>('layout')
+const contentRef = useTemplateRef<HTMLElement>('content')
+let desktopMediaQuery: MediaQueryList | null = null
 
 const selectedTask = computed(() => taskStore.selectedTask)
 const visibleTasks = computed(() => getTasksForView(taskStore.tasks, activeTaskView.value, selectedTagId.value))
@@ -94,12 +97,17 @@ const shortcutWarning = computed(() => {
 })
 
 onMounted(async () => {
+  setupResponsiveScrollReset()
   shortcutDraft.value = taskStore.settings.globalShortcut
   settingsShortcutDraft.value = taskStore.settings.globalShortcut
   themeDraft.value = taskStore.settings.theme
   await executionStore.setupListeners()
   await setupShortcutStatus()
   await executionStore.loadLogs()
+})
+
+onUnmounted(() => {
+  desktopMediaQuery?.removeEventListener('change', handleDesktopBreakpointChange)
 })
 
 watch(
@@ -439,10 +447,28 @@ async function refreshShortcutStatus() {
   if (!isTauriRuntime()) return
   shortcutStatus.value = await tauriApi.loadShortcutStatus()
 }
+
+function setupResponsiveScrollReset() {
+  desktopMediaQuery = window.matchMedia('(min-width: 960px)')
+  desktopMediaQuery.addEventListener('change', handleDesktopBreakpointChange)
+}
+
+function handleDesktopBreakpointChange(event: MediaQueryListEvent) {
+  if (!event.matches) return
+  void resetLayoutScroll()
+}
+
+async function resetLayoutScroll() {
+  await nextTick()
+  layoutRef.value?.scrollTo({ top: 0, left: 0 })
+  contentRef.value?.scrollTo({ top: 0, left: 0 })
+  document.documentElement.scrollTop = 0
+  document.body.scrollTop = 0
+}
 </script>
 
 <template>
-  <main class="main-layout">
+  <main ref="layout" class="main-layout">
     <div class="ambient ambient-one" aria-hidden="true"></div>
     <div class="ambient ambient-two" aria-hidden="true"></div>
     <div class="light-arc light-arc-one" aria-hidden="true"></div>
@@ -470,7 +496,7 @@ async function refreshShortcutStatus() {
       </div>
     </header>
 
-    <div class="app-content">
+    <div ref="content" class="app-content">
       <aside class="sidebar">
         <section class="brand">
           <div class="brand-mark" aria-hidden="true">
@@ -2071,15 +2097,13 @@ async function refreshShortcutStatus() {
   .main-layout {
     --sidebar-width: 100%;
     --middle-width: 100%;
-    height: auto;
-    min-height: 100vh;
-    overflow-y: auto;
   }
 
   .app-content {
     grid-template-columns: 1fr;
     grid-auto-rows: auto;
-    overflow: visible;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .sidebar {
