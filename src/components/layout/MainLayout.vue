@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { NDropdown, NModal, useDialog, useMessage } from 'naive-ui'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { DropdownOption } from 'naive-ui'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
@@ -404,8 +405,27 @@ function themeLabel(theme: AppTheme) {
   return '跟随系统'
 }
 
+function isTauriRuntime() {
+  return '__TAURI_INTERNALS__' in window
+}
+
+async function minimizeWindow() {
+  if (!isTauriRuntime()) return
+  await getCurrentWindow().minimize()
+}
+
+async function toggleMaximizeWindow() {
+  if (!isTauriRuntime()) return
+  await getCurrentWindow().toggleMaximize()
+}
+
+async function closeWindow() {
+  if (!isTauriRuntime()) return
+  await getCurrentWindow().close()
+}
+
 async function setupShortcutStatus() {
-  if (!('__TAURI_INTERNALS__' in window)) return
+  if (!isTauriRuntime()) return
   await listenShortcutStatusEvents((status) => {
     shortcutStatus.value = status
     if (!status.registered && status.message) {
@@ -416,7 +436,7 @@ async function setupShortcutStatus() {
 }
 
 async function refreshShortcutStatus() {
-  if (!('__TAURI_INTERNALS__' in window)) return
+  if (!isTauriRuntime()) return
   shortcutStatus.value = await tauriApi.loadShortcutStatus()
 }
 </script>
@@ -428,81 +448,104 @@ async function refreshShortcutStatus() {
     <div class="light-arc light-arc-one" aria-hidden="true"></div>
     <div class="light-arc light-arc-two" aria-hidden="true"></div>
 
-    <aside class="sidebar">
-      <section class="brand">
-        <div class="brand-mark" aria-hidden="true">
+    <header class="app-titlebar" data-tauri-drag-region>
+      <div class="window-brand" data-tauri-drag-region>
+        <div class="titlebar-mark" aria-hidden="true" data-tauri-drag-region>
           <span></span>
           <span></span>
           <span></span>
         </div>
-        <div>
-          <h1 class="brand-title">FlowTask</h1>
-          <p class="brand-subtitle">事项管理器</p>
-        </div>
-        <span class="collapse-mark" aria-hidden="true">‹‹</span>
-      </section>
-
-      <button class="create-button" type="button" @click="createTask">
-        <span aria-hidden="true">＋</span>
-        创建事项
-      </button>
-
-      <nav class="nav-list" aria-label="主导航">
-        <button
-          v-for="item in navigationItems"
-          :key="item.key"
-          class="nav-item"
-          :class="{ active: item.active, disabled: item.disabled }"
-          type="button"
-          :disabled="item.disabled"
-          @click="!item.disabled && setTaskView(item.key)"
-        >
-          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
-          <span>{{ item.label }}</span>
-          <span v-if="item.count !== null" class="nav-count">{{ item.count }}</span>
+        <span data-tauri-drag-region>FlowTask - 事项管理器</span>
+      </div>
+      <div class="window-controls" aria-label="窗口操作">
+        <button class="window-control" type="button" aria-label="最小化" @click.stop="minimizeWindow">
+          <span aria-hidden="true"></span>
         </button>
-      </nav>
+        <button class="window-control" type="button" aria-label="最大化" @click.stop="toggleMaximizeWindow">
+          <span aria-hidden="true"></span>
+        </button>
+        <button class="window-control window-control-close" type="button" aria-label="关闭" @click.stop="closeWindow">
+          <span aria-hidden="true"></span>
+        </button>
+      </div>
+    </header>
 
-      <section class="tag-block">
-        <header class="tag-header">
-          <span>标签</span>
-          <button type="button" aria-label="新增标签" @click="openCreateTag">＋</button>
-        </header>
-        <div class="tag-list">
-          <button class="tag-item all-tags" :class="{ active: selectedTagId === null }" type="button" @click="selectTag(null)">
-            <span class="tag-dot slate" aria-hidden="true"></span>
-            <span>全部标签</span>
-          </button>
-          <div v-for="item in tagItems" :key="item.id" class="tag-item-row">
-            <button class="tag-item" :class="{ active: selectedTagId === item.id }" type="button" @click="selectTag(item.id)">
-            <span class="tag-dot" :class="item.tone" aria-hidden="true"></span>
-              <span>{{ item.name }}</span>
-            </button>
-            <button class="tag-inline-action" type="button" aria-label="编辑标签" @click="openRenameTag(item)">⌕</button>
-            <button class="tag-inline-action" type="button" aria-label="删除标签" @click="confirmDeleteTag(item)">×</button>
+    <div class="app-content">
+      <aside class="sidebar">
+        <section class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
           </div>
-          <p v-if="tagItems.length === 0" class="empty-tags">暂无标签</p>
-        </div>
-      </section>
+          <div>
+            <h1 class="brand-title">FlowTask</h1>
+            <p class="brand-subtitle">事项管理器</p>
+          </div>
+          <span class="collapse-mark" aria-hidden="true">‹‹</span>
+        </section>
 
-      <section class="promo-card" aria-label="自动化提示">
-        <div class="promo-logo" aria-hidden="true">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
-        <h2>释放效率，从自动化开始</h2>
-        <p>将重复的操作流程化，一键触发</p>
-        <button type="button" @click="helpModalVisible = true">了解更多 →</button>
-      </section>
+        <button class="create-button" type="button" @click="createTask">
+          <span aria-hidden="true">＋</span>
+          创建事项
+        </button>
 
-      <footer class="sidebar-footer">
-        <button type="button" aria-label="设置" @click="openSettings">⚙</button>
-        <button type="button" aria-label="帮助" @click="helpModalVisible = true">?</button>
-        <button type="button" aria-label="主题" @click="cycleTheme">☼</button>
-        <button class="orb-button" type="button" aria-label="状态"></button>
-      </footer>
-    </aside>
+        <nav class="nav-list" aria-label="主导航">
+          <button
+            v-for="item in navigationItems"
+            :key="item.key"
+            class="nav-item"
+            :class="{ active: item.active, disabled: item.disabled }"
+            type="button"
+            :disabled="item.disabled"
+            @click="!item.disabled && setTaskView(item.key)"
+          >
+            <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
+            <span>{{ item.label }}</span>
+            <span v-if="item.count !== null" class="nav-count">{{ item.count }}</span>
+          </button>
+        </nav>
+
+        <section class="tag-block">
+          <header class="tag-header">
+            <span>标签</span>
+            <button type="button" aria-label="新增标签" @click="openCreateTag">＋</button>
+          </header>
+          <div class="tag-list">
+            <button class="tag-item all-tags" :class="{ active: selectedTagId === null }" type="button" @click="selectTag(null)">
+              <span class="tag-dot slate" aria-hidden="true"></span>
+              <span>全部标签</span>
+            </button>
+            <div v-for="item in tagItems" :key="item.id" class="tag-item-row">
+              <button class="tag-item" :class="{ active: selectedTagId === item.id }" type="button" @click="selectTag(item.id)">
+                <span class="tag-dot" :class="item.tone" aria-hidden="true"></span>
+                <span>{{ item.name }}</span>
+              </button>
+              <button class="tag-inline-action" type="button" aria-label="编辑标签" @click="openRenameTag(item)">⌕</button>
+              <button class="tag-inline-action" type="button" aria-label="删除标签" @click="confirmDeleteTag(item)">×</button>
+            </div>
+            <p v-if="tagItems.length === 0" class="empty-tags">暂无标签</p>
+          </div>
+        </section>
+
+        <section class="promo-card" aria-label="自动化提示">
+          <div class="promo-logo" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <h2>释放效率，从自动化开始</h2>
+          <p>将重复的操作流程化，一键触发</p>
+          <button type="button" @click="helpModalVisible = true">了解更多 →</button>
+        </section>
+
+        <footer class="sidebar-footer">
+          <button type="button" aria-label="设置" @click="openSettings">⚙</button>
+          <button type="button" aria-label="帮助" @click="helpModalVisible = true">?</button>
+          <button type="button" aria-label="主题" @click="cycleTheme">☼</button>
+          <button class="orb-button" type="button" aria-label="状态"></button>
+        </footer>
+      </aside>
 
     <section class="middle-panel">
       <TaskListPanel
@@ -680,6 +723,7 @@ async function refreshShortcutStatus() {
         </template>
       </NEmpty>
     </section>
+    </div>
 
     <TaskWizardDrawer
       v-model:show="wizardVisible"
@@ -743,7 +787,7 @@ async function refreshShortcutStatus() {
   --purple: #4d4bff;
   position: relative;
   display: grid;
-  grid-template-columns: 298px 352px minmax(0, 1fr);
+  grid-template-rows: 56px minmax(0, 1fr);
   min-width: 1180px;
   min-height: 100vh;
   overflow: hidden;
@@ -787,6 +831,150 @@ async function refreshShortcutStatus() {
 :global([data-app-theme="light"]) .trigger-card,
 :global([data-app-theme="light"]) .template-card {
   background: rgba(255, 255, 255, 0.72);
+}
+
+.app-titlebar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  height: 56px;
+  border-bottom: 1px solid rgba(82, 106, 171, 0.16);
+  background: rgba(5, 11, 27, 0.42);
+  color: #f4f7ff;
+  user-select: none;
+}
+
+:global([data-app-theme="light"]) .app-titlebar {
+  background: rgba(238, 243, 251, 0.72);
+}
+
+.window-brand {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding-left: 30px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+:global([data-app-theme="light"]) .window-brand {
+  color: #172033;
+}
+
+.titlebar-mark {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 11px;
+  background: rgba(28, 48, 107, 0.64);
+  box-shadow: 0 8px 18px rgba(35, 101, 255, 0.26);
+}
+
+.titlebar-mark span {
+  position: absolute;
+  border-radius: 10px 10px 14px 4px;
+  background: linear-gradient(145deg, #3aa3ff, #5444ff);
+}
+
+.titlebar-mark span:nth-child(1) {
+  inset: 4px 10px 18px 6px;
+  transform: skewX(-16deg);
+}
+
+.titlebar-mark span:nth-child(2) {
+  inset: 12px 5px 5px 15px;
+  transform: rotate(38deg);
+}
+
+.titlebar-mark span:nth-child(3) {
+  inset: 19px 20px 3px 4px;
+  background: linear-gradient(145deg, #2467ff, #6c4eff);
+  transform: rotate(20deg);
+}
+
+.window-controls {
+  display: flex;
+  height: 56px;
+  align-items: stretch;
+}
+
+.window-control {
+  position: relative;
+  display: grid;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: #d5def7;
+  cursor: pointer;
+}
+
+.window-control:hover {
+  background: rgba(82, 106, 171, 0.18);
+}
+
+.window-control span {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.window-control:first-child span::before {
+  position: absolute;
+  right: 1px;
+  bottom: 3px;
+  left: 1px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+}
+
+.window-control:nth-child(2) span::before {
+  position: absolute;
+  inset: 2px;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+  content: "";
+}
+
+.window-control-close {
+  margin: 8px 14px 8px 0;
+  width: 48px;
+  height: 40px;
+  border-radius: 13px;
+  color: #ff6b7b;
+}
+
+.window-control-close:hover {
+  background: rgba(255, 72, 96, 0.18);
+}
+
+.window-control-close span::before,
+.window-control-close span::after {
+  position: absolute;
+  top: 7px;
+  left: 1px;
+  width: 15px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+}
+
+.window-control-close span::before {
+  transform: rotate(45deg);
+}
+
+.window-control-close span::after {
+  transform: rotate(-45deg);
 }
 
 .ambient {
@@ -834,6 +1022,14 @@ async function refreshShortcutStatus() {
   box-shadow: 16px -16px 28px rgba(118, 65, 255, 0.45);
 }
 
+.app-content {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 298px 352px minmax(0, 1fr);
+  min-height: 0;
+}
+
 .sidebar,
 .middle-panel,
 .workspace {
@@ -845,7 +1041,7 @@ async function refreshShortcutStatus() {
 .sidebar {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
-  padding: 40px 22px 24px;
+  padding: 32px 22px 24px;
 }
 
 .brand {
@@ -1710,8 +1906,11 @@ async function refreshShortcutStatus() {
 
 @media (max-width: 1280px) {
   .main-layout {
-    grid-template-columns: 260px 330px minmax(0, 1fr);
     min-width: 1040px;
+  }
+
+  .app-content {
+    grid-template-columns: 260px 330px minmax(0, 1fr);
   }
 
   .detail-panel {
