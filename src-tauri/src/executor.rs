@@ -183,6 +183,7 @@ fn run_command(action: &TaskAction) -> Result<String, String> {
         ps
     };
     command.current_dir(working_dir);
+    hide_command_window(&mut command);
 
     if let Some(env_map) = action.params.get("env").and_then(|value| value.as_object()) {
         let envs: HashMap<String, String> = env_map
@@ -204,6 +205,17 @@ fn run_command(action: &TaskAction) -> Result<String, String> {
         ))
     }
 }
+
+#[cfg(windows)]
+fn hide_command_window(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_command_window(_command: &mut Command) {}
 
 fn delay(action: &TaskAction) -> Result<String, String> {
     let duration = action
