@@ -18,3 +18,12 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ''
 Write-Host 'Build completed.'
 Write-Host 'Bundle output: src-tauri/target/release/bundle'
+
+$NsisOutputDir = Join-Path -Path $ProjectRoot -ChildPath 'src-tauri/target/release/bundle/nsis'
+
+if (Test-Path -LiteralPath $NsisOutputDir -PathType Container) {
+    Write-Host "Opening NSIS output directory: $NsisOutputDir"
+    Invoke-Item -LiteralPath $NsisOutputDir
+} else {
+    Write-Warning "NSIS output directory not found: $NsisOutputDir"
+}
