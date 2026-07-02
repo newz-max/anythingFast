@@ -12,7 +12,7 @@ type RiskTagType = 'success' | 'warning' | 'error'
 
 const taskStore = useTaskStore()
 const enabledTasks = computed(() => taskStore.tasks.filter((task) => task.enabled))
-const { query, results } = useTaskSearch(enabledTasks)
+const { query, results } = useTaskSearch(enabledTasks, { ranking: 'quickRecent' })
 const { execute, running } = useTaskExecution()
 const selectedIndex = shallowRef(0)
 const inputRef = useTemplateRef<{ focus: () => void }>('searchInput')

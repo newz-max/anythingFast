@@ -1,27 +1,55 @@
 import type { TaskItem } from '@/types/domain'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 
-export function searchTasks(tasks: TaskItem[], query: string, category: string | null) {
+export type TaskSearchRanking = 'default' | 'quickRecent'
+
+export interface SearchTasksOptions {
+  ranking?: TaskSearchRanking
+}
+
+interface ScoredTask {
+  task: TaskItem
+  score: number
+}
+
+export function searchTasks(tasks: TaskItem[], query: string, category: string | null, options: SearchTasksOptions = {}) {
   const normalizedQuery = normalize(query)
   const categoryFilter = category && category !== '全部' ? category : null
+  const ranking = options.ranking ?? 'default'
 
   return tasks
     .filter((task) => !categoryFilter || (task.category || '未分类') === categoryFilter)
-    .map((task) => ({ task, score: scoreTask(task, normalizedQuery) }))
+    .map((task) => ({ task, score: scoreTask(task, normalizedQuery, ranking) }))
     .filter(({ score }) => !normalizedQuery || score > 0)
-    .sort((left, right) => {
-      if (left.task.enabled !== right.task.enabled) {
-        return left.task.enabled ? -1 : 1
-      }
-      if (left.score !== right.score) {
-        return right.score - left.score
-      }
-      return (Date.parse(right.task.lastRunAt || '0') || 0) - (Date.parse(left.task.lastRunAt || '0') || 0)
-    })
+    .sort((left, right) => compareScoredTasks(left, right, normalizedQuery, ranking))
     .map(({ task }) => task)
 }
 
-function scoreTask(task: TaskItem, query: string) {
+function compareScoredTasks(left: ScoredTask, right: ScoredTask, query: string, ranking: TaskSearchRanking) {
+  if (left.task.enabled !== right.task.enabled) {
+    return left.task.enabled ? -1 : 1
+  }
+
+  if (ranking === 'quickRecent' && !query) {
+    return compareLastRunAtDesc(left.task, right.task)
+  }
+
+  if (left.score !== right.score) {
+    return right.score - left.score
+  }
+
+  return compareLastRunAtDesc(left.task, right.task)
+}
+
+function compareLastRunAtDesc(left: TaskItem, right: TaskItem) {
+  return getLastRunTimestamp(right) - getLastRunTimestamp(left)
+}
+
+function getLastRunTimestamp(task: TaskItem) {
+  return Date.parse(task.lastRunAt || '0') || 0
+}
+
+function scoreTask(task: TaskItem, query: string, ranking: TaskSearchRanking) {
   if (!query) {
     return task.lastRunAt ? 2 : 1
   }
@@ -45,7 +73,7 @@ function scoreTask(task: TaskItem, query: string) {
   if (category.includes(query)) score += 20
   if (actionTypes.some((actionType) => actionType.includes(query))) score += 18
   if (description.includes(query)) score += 10
-  if (task.lastRunAt) score += 5
+  if (ranking === 'default' && task.lastRunAt) score += 5
 
   return score
 }

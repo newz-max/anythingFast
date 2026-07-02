@@ -60,6 +60,52 @@ describe('searchTasks', () => {
 
     expect(results.map((task) => task.id)).toEqual(['3', '1'])
   })
+
+  it('orders quick search empty results by last run time', () => {
+    const tasks: TaskItem[] = [
+      { ...makeTask('1', '旧事项', true, []), lastRunAt: '2026-07-01T09:00:00.000Z' },
+      makeTask('2', '未运行事项', true, []),
+      { ...makeTask('3', '最新事项', true, []), lastRunAt: '2026-07-03T09:00:00.000Z' },
+      { ...makeTask('4', '中间事项', true, []), lastRunAt: '2026-07-02T09:00:00.000Z' }
+    ]
+
+    const results = searchTasks(tasks, '', '全部', { ranking: 'quickRecent' })
+
+    expect(results.map((task) => task.id)).toEqual(['3', '4', '1', '2'])
+  })
+
+  it('keeps quick search relevance ahead of recent weaker matches', () => {
+    const tasks: TaskItem[] = [
+      makeTask('1', '发布服务', true, [], [
+        makeAction(
+          'runCommand',
+          { source: 'inline', command: 'yarn release', workingDir: '', env: {}, showTerminal: false, shell: 'powershell', scriptPath: '', scriptArgs: [] },
+          'deploy backend'
+        )
+      ]),
+      {
+        ...makeTask('2', '最近脚本', true, [], [
+          makeAction('runCommand', { source: 'inline', command: 'deploy --dry-run', workingDir: '', env: {}, showTerminal: false, shell: 'powershell', scriptPath: '', scriptArgs: [] })
+        ]),
+        lastRunAt: '2026-07-03T09:00:00.000Z'
+      }
+    ]
+
+    const results = searchTasks(tasks, 'deploy', '全部', { ranking: 'quickRecent' })
+
+    expect(results.map((task) => task.id)).toEqual(['1', '2'])
+  })
+
+  it('uses last run time as quick search tie breaker', () => {
+    const tasks: TaskItem[] = [
+      { ...makeTask('1', '打开控制台', true, []), lastRunAt: '2026-07-01T09:00:00.000Z' },
+      { ...makeTask('2', '打开控制台', true, []), lastRunAt: '2026-07-03T09:00:00.000Z' }
+    ]
+
+    const results = searchTasks(tasks, '控制台', '全部', { ranking: 'quickRecent' })
+
+    expect(results.map((task) => task.id)).toEqual(['2', '1'])
+  })
 })
 
 function makeTask(id: string, name: string, enabled: boolean, keywords: string[], actions: TaskAction[] = []): TaskItem {
