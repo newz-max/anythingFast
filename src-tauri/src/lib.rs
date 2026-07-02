@@ -10,6 +10,7 @@ use chrono::Utc;
 use domain::{ShortcutStatus, TaskTrigger};
 use std::sync::Mutex;
 use tauri::{
+    image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
@@ -159,12 +160,14 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
             }
         });
 
-    if let Some(icon) = app.default_window_icon().cloned() {
-        tray = tray.icon(icon);
-    }
+    tray = tray.icon(app_tray_icon());
 
     tray.build(app)?;
     Ok(())
+}
+
+fn app_tray_icon() -> Image<'static> {
+    tauri::include_image!("icons/32x32.png").clone()
 }
 
 pub fn refresh_task_shortcuts(app: &tauri::AppHandle, config: &domain::AppConfig) -> Result<(), String> {
