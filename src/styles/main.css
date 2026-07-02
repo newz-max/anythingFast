@@ -111,6 +111,14 @@ body {
   min-height: 100vh;
   margin: 0;
   overflow: hidden;
+  background: #07101f;
+  color: #f4f7ff;
+}
+
+html[data-app-window="quick"],
+html[data-app-window="quick"] body,
+html[data-app-window="quick"] #app {
+  background: #07101f;
 }
 
 button,
