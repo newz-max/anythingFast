@@ -9,7 +9,11 @@ use commands::*;
 use chrono::Utc;
 use domain::{ShortcutStatus, TaskTrigger};
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    menu::{MenuBuilder, MenuItemBuilder},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[derive(Default)]
@@ -70,8 +74,18 @@ pub fn run() {
                 })
                 .build(),
         )
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             ensure_quick_panel(app.handle())?;
+            setup_tray(app)?;
             let config = storage::load_config(app.handle()).unwrap_or_default();
             let global_shortcut = config.settings.global_shortcut.trim();
             if let Err(message) = register_global_shortcut(app.handle(), global_shortcut) {
@@ -113,6 +127,43 @@ fn ensure_quick_panel(app: &tauri::AppHandle) -> tauri::Result<()> {
         .visible(false)
         .build()?;
 
+    Ok(())
+}
+
+fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
+    let open_main = MenuItemBuilder::with_id("open-main", "打开主窗口").build(app)?;
+    let open_quick = MenuItemBuilder::with_id("open-quick", "快捷搜索").build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
+    let menu = MenuBuilder::new(app)
+        .items(&[&open_main, &open_quick, &quit])
+        .build()?;
+
+    let mut tray = TrayIconBuilder::with_id("main-tray")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .tooltip("事项入口管理器")
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "open-main" => show_main_window(app),
+            "open-quick" => show_quick_panel(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+
+    tray.build(app)?;
     Ok(())
 }
 
@@ -237,14 +288,28 @@ fn format_shortcut_registration_error(shortcut: &str, raw_error: &str) -> String
     }
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn show_quick_panel(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("quick-panel") {
+        let _ = window.center();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 fn toggle_quick_panel(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("quick-panel") {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
-            let _ = window.center();
-            let _ = window.show();
-            let _ = window.set_focus();
+            show_quick_panel(app);
         }
     }
 }
