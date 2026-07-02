@@ -13,6 +13,7 @@ const props = defineProps<{
   mode: TaskWizardMode
   task: TaskItem | null
   allTasks: TaskItem[]
+  categories?: string[]
   tags?: TaskTag[]
   saving: boolean
   initialStep?: number
@@ -117,21 +118,21 @@ function saveAction(action: TaskAction) {
   <NDrawer
     :show="show"
     placement="right"
-    width="min(860px, calc(100vw - 24px))"
+    width="min(542px, 100vw)"
     :mask-closable="true"
     @update:show="(value: boolean) => (value ? emit('update:show', true) : close())"
   >
-    <NDrawerContent :title="title" closable>
+    <NDrawerContent :title="title" closable class="task-wizard-drawer">
       <template v-if="draft">
         <div class="wizard">
-          <NSteps v-model:current="currentStep" :status="stepStatus" size="small">
+          <NSteps v-model:current="currentStep" :status="stepStatus" size="small" class="wizard-steps">
             <NStep title="基础信息" />
             <NStep title="动作序列" />
             <NStep title="确认保存" />
           </NSteps>
 
           <section class="step-body">
-            <TaskWizardBasicStep v-show="currentStep === 1" v-model="draft" :tags="tags" />
+            <TaskWizardBasicStep v-show="currentStep === 1" v-model="draft" :categories="categories" :tags="tags" />
             <TaskWizardActionStep
               v-show="currentStep === 2"
               v-model:actions="draft.actions"
@@ -153,17 +154,18 @@ function saveAction(action: TaskAction) {
 
       <template #footer>
         <div class="footer">
-          <NSpace v-if="mode === 'edit'">
-            <NButton secondary @click="duplicate">复制</NButton>
-            <NButton secondary type="error" @click="remove">删除</NButton>
-          </NSpace>
-          <span v-else />
-          <NSpace>
+          <div class="footer-secondary">
             <NButton @click="close">关闭</NButton>
+            <template v-if="mode === 'edit'">
+              <NButton class="compact-footer-button" secondary @click="duplicate">复制</NButton>
+              <NButton class="compact-footer-button" secondary type="error" @click="remove">删除</NButton>
+            </template>
+          </div>
+          <div class="footer-primary">
             <NButton :disabled="currentStep === 1" @click="previousStep">上一步</NButton>
             <NButton v-if="currentStep < 3" type="primary" :disabled="!canGoNext" @click="nextStep">下一步</NButton>
             <NButton v-else type="primary" :loading="saving" :disabled="!canSave" @click="save">保存</NButton>
-          </NSpace>
+          </div>
         </div>
       </template>
     </NDrawerContent>
@@ -180,41 +182,70 @@ function saveAction(action: TaskAction) {
 <style scoped>
 .wizard {
   display: grid;
-  gap: 18px;
+  gap: 0;
+}
+
+.wizard-steps {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .step-body {
-  min-height: min(440px, calc(100vh - 220px));
-  max-height: calc(100vh - 190px);
+  min-height: min(640px, calc(100vh - 214px));
+  max-height: calc(100vh - 214px);
   overflow-y: auto;
-  padding-right: 2px;
+  padding-right: 4px;
 }
 
 .footer {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   width: 100%;
 }
 
-.footer :deep(.n-space) {
-  flex-wrap: wrap;
+.footer-secondary,
+.footer-primary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.footer-primary {
+  justify-content: flex-end;
+}
+
+.compact-footer-button {
+  min-width: 72px;
+  height: 40px;
+  font-size: 14px;
 }
 
 @media (max-width: 640px) {
   .step-body {
     min-height: 0;
-    max-height: calc(100vh - 180px);
+    max-height: calc(100vh - 196px);
   }
 
   .footer {
-    justify-content: flex-end;
+    grid-template-columns: 1fr;
   }
 
-  .footer > span {
-    display: none;
+  .footer-secondary,
+  .footer-primary {
+    justify-content: stretch;
+  }
+
+  .footer :deep(.n-button) {
+    flex: 1 1 0;
+    min-width: 0;
   }
 }
 </style>

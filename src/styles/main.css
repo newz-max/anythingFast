@@ -6,6 +6,22 @@
   --app-scrollbar-thumb: rgba(87, 100, 128, 0.78);
   --app-scrollbar-thumb-hover: rgba(101, 116, 148, 0.88);
   --app-scrollbar-thumb-active: rgba(116, 132, 168, 0.96);
+  --app-titlebar-height: 70px;
+  --app-overlay-mask: rgba(3, 8, 21, 0.42);
+  --app-drawer-bg: rgba(20, 27, 47, 0.96);
+  --app-drawer-border: rgba(67, 84, 124, 0.66);
+  --app-drawer-title: #f4f7ff;
+  --app-text: #f4f7ff;
+  --app-muted: #9ba8cc;
+  --app-subtle: #6f7a99;
+  --app-field-bg: rgba(25, 32, 54, 0.72);
+  --app-field-border: rgba(74, 91, 132, 0.54);
+  --app-field-border-hover: rgba(91, 116, 178, 0.76);
+  --app-divider: rgba(61, 76, 109, 0.66);
+  --app-primary: #3d78fd;
+  --app-primary-end: #524cff;
+  --app-primary-hover: #4d87ff;
+  --app-button-bg: rgba(17, 23, 42, 0.58);
   color: #1f2933;
   background: #f5f7fb;
   font-family:
@@ -21,6 +37,18 @@ html[data-app-theme="dark"] {
   --app-scrollbar-thumb: rgba(87, 100, 128, 0.8);
   --app-scrollbar-thumb-hover: rgba(101, 116, 148, 0.9);
   --app-scrollbar-thumb-active: rgba(116, 132, 168, 0.96);
+  --app-overlay-mask: rgba(3, 8, 21, 0.42);
+  --app-drawer-bg: rgba(20, 27, 47, 0.96);
+  --app-drawer-border: rgba(67, 84, 124, 0.66);
+  --app-drawer-title: #f4f7ff;
+  --app-text: #f4f7ff;
+  --app-muted: #9ba8cc;
+  --app-subtle: #6f7a99;
+  --app-field-bg: rgba(25, 32, 54, 0.72);
+  --app-field-border: rgba(74, 91, 132, 0.54);
+  --app-field-border-hover: rgba(91, 116, 178, 0.76);
+  --app-divider: rgba(61, 76, 109, 0.66);
+  --app-button-bg: rgba(17, 23, 42, 0.58);
 }
 
 html[data-app-theme="light"] {
@@ -28,6 +56,18 @@ html[data-app-theme="light"] {
   --app-scrollbar-thumb: rgba(87, 100, 128, 0.48);
   --app-scrollbar-thumb-hover: rgba(87, 100, 128, 0.64);
   --app-scrollbar-thumb-active: rgba(87, 100, 128, 0.74);
+  --app-overlay-mask: rgba(21, 32, 54, 0.18);
+  --app-drawer-bg: #ffffff;
+  --app-drawer-border: rgba(210, 219, 237, 0.9);
+  --app-drawer-title: #172033;
+  --app-text: #172033;
+  --app-muted: #64708a;
+  --app-subtle: #9aa6bd;
+  --app-field-bg: #f8fbff;
+  --app-field-border: rgba(130, 148, 184, 0.42);
+  --app-field-border-hover: rgba(74, 117, 224, 0.56);
+  --app-divider: rgba(210, 219, 237, 0.9);
+  --app-button-bg: #ffffff;
 }
 
 * {
@@ -94,4 +134,108 @@ textarea {
 
 .risk-high {
   color: #c01f28;
+}
+
+.n-drawer-mask {
+  top: var(--app-titlebar-height);
+  background-color: var(--app-overlay-mask);
+}
+
+.n-drawer {
+  top: var(--app-titlebar-height) !important;
+  bottom: 0 !important;
+  height: calc(100vh - var(--app-titlebar-height)) !important;
+  border-left: 1px solid var(--app-drawer-border);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(89, 111, 176, 0.2), transparent 36%),
+    radial-gradient(circle at 100% 100%, rgba(61, 66, 180, 0.16), transparent 34%),
+    var(--app-drawer-bg);
+  backdrop-filter: blur(18px);
+}
+
+.n-drawer .n-drawer-header {
+  min-height: 70px;
+}
+
+.n-drawer .n-drawer-header__main {
+  color: var(--app-drawer-title);
+  letter-spacing: 0;
+}
+
+.n-drawer .n-drawer-body-content-wrapper {
+  min-height: 0;
+}
+
+.n-drawer .n-drawer-footer {
+  min-height: 112px;
+  background: linear-gradient(180deg, rgba(20, 27, 47, 0), rgba(20, 27, 47, 0.1));
+}
+
+html[data-app-theme="light"] .n-drawer .n-drawer-footer {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(246, 249, 255, 0.82));
+}
+
+.n-drawer .n-form-item {
+  margin-bottom: 26px;
+}
+
+.n-drawer .n-form-item-label {
+  letter-spacing: 0;
+}
+
+.n-drawer .n-input,
+.n-drawer .n-base-selection {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.n-drawer .n-input .n-input__input-el,
+.n-drawer .n-input .n-input__textarea-el,
+.n-drawer .n-base-selection-input__content {
+  font-weight: 600;
+}
+
+.n-drawer .n-input .n-input__placeholder,
+.n-drawer .n-base-selection-placeholder {
+  font-weight: 600;
+}
+
+.n-drawer .n-input .n-input__count {
+  padding-right: 2px;
+  color: var(--app-subtle);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.n-drawer .n-input.n-input--textarea {
+  min-height: 78px;
+}
+
+.n-drawer .n-drawer-footer .n-button {
+  min-width: 148px;
+  height: 60px;
+  border-radius: 9px;
+  font-size: 16px;
+}
+
+.n-drawer .n-button--primary-type {
+  background: linear-gradient(135deg, var(--app-primary), var(--app-primary-end)) !important;
+  box-shadow: 0 14px 28px rgba(61, 120, 253, 0.28);
+}
+
+.n-drawer .n-button--primary-type:hover {
+  background: linear-gradient(135deg, var(--app-primary-hover), #5d58ff) !important;
+}
+
+.n-drawer .n-button.n-button--disabled {
+  box-shadow: none;
+}
+
+.n-base-select-menu {
+  border: 1px solid var(--app-drawer-border);
+}
+
+html[data-app-theme="dark"] .n-base-select-menu {
+  background:
+    radial-gradient(circle at 18% 0%, rgba(89, 111, 176, 0.16), transparent 36%),
+    rgba(24, 31, 52, 0.98);
 }

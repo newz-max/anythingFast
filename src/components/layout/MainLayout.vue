@@ -756,6 +756,7 @@ async function resetLayoutScroll() {
       :mode="wizardMode"
       :task="wizardTask"
       :all-tasks="taskStore.tasks"
+      :categories="taskStore.categories"
       :tags="taskStore.tags"
       :saving="taskStore.saving"
       :initial-step="wizardInitialStep"
