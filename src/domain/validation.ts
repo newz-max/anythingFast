@@ -32,7 +32,7 @@ export function validateTaskLocal(task: TaskItem, allTasks: TaskItem[] = []): Va
 export function validateActionLocal(action: TaskAction): ValidationResult {
   const issues: FieldIssue[] = []
 
-  if (action.timeoutMs !== undefined && action.timeoutMs <= 0) {
+  if (action.timeoutMs !== undefined && action.timeoutMs !== null && action.timeoutMs <= 0) {
     issues.push({ field: 'timeoutMs', message: '超时时间必须大于 0' })
   }
 

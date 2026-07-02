@@ -119,4 +119,20 @@ describe('validation', () => {
     expect(result.valid).toBe(false)
     expect(result.issues.map((issue) => issue.field)).toContain('durationMs')
   })
+
+  it('allows cleared optional timeout locally', () => {
+    const action: TaskAction = {
+      id: 'action-1',
+      type: 'delay',
+      name: 'wait',
+      params: {},
+      enabled: true,
+      timeoutMs: null,
+      riskLevel: 'low'
+    }
+
+    const result = validateActionLocal(action)
+
+    expect(result.valid).toBe(true)
+  })
 })

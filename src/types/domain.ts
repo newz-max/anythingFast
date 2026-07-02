@@ -43,7 +43,7 @@ export interface TaskAction {
   name?: string
   params: ActionParams
   enabled: boolean
-  timeoutMs?: number
+  timeoutMs?: number | null
   continueOnError?: boolean
   riskLevel: RiskLevel
 }
