@@ -51,13 +51,38 @@ export function normalizeTask(task: TaskItem): TaskItem {
     favorite: task.favorite ?? false,
     tagIds: task.tagIds || [],
     triggers: normalizeTriggers(task.triggers),
-    actions: (task.actions || []).map((action) => ({
-      ...action,
-      enabled: action.enabled ?? true,
-      riskLevel: deriveActionRisk(action)
-    })),
+    actions: (task.actions || []).map(normalizeAction),
     riskLevel: deriveTaskRisk(task),
     enabled: task.enabled ?? true
+  }
+}
+
+function normalizeAction(action: TaskAction): TaskAction {
+  const normalized = {
+    ...action,
+    enabled: action.enabled ?? true,
+    params: normalizeActionParams(action)
+  }
+  return {
+    ...normalized,
+    riskLevel: deriveActionRisk(normalized)
+  }
+}
+
+function normalizeActionParams(action: TaskAction): TaskAction['params'] {
+  if (action.type !== 'runCommand' || !('command' in action.params)) {
+    return action.params
+  }
+
+  return {
+    source: action.params.source || 'inline',
+    command: action.params.command || '',
+    workingDir: action.params.workingDir || '',
+    env: action.params.env || {},
+    showTerminal: action.params.showTerminal ?? false,
+    shell: action.params.shell || 'powershell',
+    scriptPath: action.params.scriptPath || '',
+    scriptArgs: action.params.scriptArgs || []
   }
 }
 
@@ -148,7 +173,7 @@ function defaultParams(type: ActionType) {
     case 'openFolder':
       return { path: '' }
     case 'runCommand':
-      return { command: '', workingDir: '', env: {}, showTerminal: false, shell: 'powershell' as const }
+      return { source: 'inline' as const, command: '', workingDir: '', env: {}, showTerminal: false, shell: 'powershell' as const, scriptPath: '', scriptArgs: [] }
     case 'delay':
       return { durationMs: 1000 }
   }

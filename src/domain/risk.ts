@@ -15,6 +15,10 @@ export function deriveActionRisk(action: TaskAction): RiskLevel {
     return 'low'
   }
 
+  if ('command' in action.params && action.params.source === 'script') {
+    return 'high'
+  }
+
   const command = 'command' in action.params ? action.params.command.toLowerCase() : ''
   if (/\b(rm|del|erase|rmdir|rd|format|shutdown|reg\s+delete|takeown|icacls|install|npm\s+i|pnpm\s+add|yarn\s+add)\b/.test(command)) {
     return 'high'

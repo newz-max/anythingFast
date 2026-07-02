@@ -42,4 +42,50 @@ describe('validation', () => {
 
     expect(result.riskLevel).toBe('high')
   })
+
+  it('validates script command parameters locally', () => {
+    const action: TaskAction = {
+      id: 'action-1',
+      type: 'runCommand',
+      name: 'script',
+      params: {
+        source: 'script',
+        command: '',
+        workingDir: 'D:\\Project\\anythingFast',
+        shell: 'powershell',
+        scriptPath: 'D:\\Project\\anythingFast\\start.ps1',
+        scriptArgs: ['dev']
+      },
+      enabled: true,
+      riskLevel: 'medium'
+    }
+
+    const result = validateActionLocal(action)
+
+    expect(result.valid).toBe(true)
+    expect(result.riskLevel).toBe('high')
+  })
+
+  it('rejects unsupported script extensions locally', () => {
+    const action: TaskAction = {
+      id: 'action-1',
+      type: 'runCommand',
+      name: 'script',
+      params: {
+        source: 'script',
+        command: '',
+        workingDir: 'D:\\Project\\anythingFast',
+        shell: 'powershell',
+        scriptPath: 'D:\\Project\\anythingFast\\start.txt',
+        scriptArgs: []
+      },
+      enabled: true,
+      riskLevel: 'medium'
+    }
+
+    const result = validateActionLocal(action)
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.field)).toContain('scriptPath')
+  })
 })

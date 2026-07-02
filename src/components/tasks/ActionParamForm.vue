@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { usePathPicker } from '@/composables/usePathPicker'
 import type { TaskAction } from '@/types/domain'
 
 const action = defineModel<TaskAction>({ required: true })
 type MutableParams = Record<string, any>
+const { pickDirectory, pickScriptFile } = usePathPicker()
 
 const commandShellOptions = [
   { label: 'PowerShell', value: 'powershell' },
   { label: 'cmd', value: 'cmd' }
+]
+
+const commandSourceOptions = [
+  { label: '命令文本', value: 'inline' },
+  { label: '脚本文件', value: 'script' }
 ]
 
 const actionTypeOptions = [
@@ -21,6 +28,12 @@ const actionTypeOptions = [
 
 const pathLabel = computed(() => (action.value.type === 'openProgram' ? '程序路径' : action.value.type === 'openFolder' ? '文件夹路径' : '文件路径'))
 const params = computed(() => action.value.params as MutableParams)
+const commandSource = computed({
+  get: () => params.value.source || 'inline',
+  set: (value: string) => {
+    params.value.source = value
+  }
+})
 
 function resetParams() {
   switch (action.value.type) {
@@ -35,12 +48,30 @@ function resetParams() {
       action.value.params = { path: '' }
       break
     case 'runCommand':
-      action.value.params = { command: '', workingDir: '', env: {}, showTerminal: false, shell: 'powershell' }
+      action.value.params = { source: 'inline', command: '', workingDir: '', env: {}, showTerminal: false, shell: 'powershell', scriptPath: '', scriptArgs: [] }
       break
     case 'delay':
       action.value.params = { durationMs: 1000 }
       break
   }
+}
+
+async function chooseWorkingDir() {
+  const selected = await pickDirectory(params.value.workingDir)
+  if (selected) {
+    params.value.workingDir = selected
+  }
+}
+
+async function chooseScriptFile() {
+  const selected = await pickScriptFile(params.value.scriptPath)
+  if (selected) {
+    params.value.scriptPath = selected
+  }
+}
+
+function updateScriptArgs(value: string) {
+  params.value.scriptArgs = value.split(' ').filter(Boolean)
 }
 </script>
 
@@ -102,22 +133,57 @@ function resetParams() {
 
     <template v-else-if="action.type === 'runCommand' && 'command' in action.params">
       <NGrid :cols="3" :x-gap="12" responsive="screen">
-        <NGi :span="2">
-          <NFormItem label="命令内容" required>
-            <NInput v-model:value="params.command" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" />
+        <NGi>
+          <NFormItem label="输入方式">
+            <NRadioGroup v-model:value="commandSource">
+              <NRadioButton v-for="option in commandSourceOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </NRadioButton>
+            </NRadioGroup>
           </NFormItem>
         </NGi>
-        <NGi>
+        <NGi v-if="commandSource === 'inline'">
           <NFormItem label="Shell">
             <NSelect v-model:value="params.shell" :options="commandShellOptions" />
           </NFormItem>
+        </NGi>
+        <NGi>
           <NFormItem label="显示终端窗口">
             <NSwitch v-model:value="params.showTerminal" />
           </NFormItem>
         </NGi>
       </NGrid>
+      <NGrid v-if="commandSource === 'inline'" :cols="3" :x-gap="12" responsive="screen">
+        <NGi :span="3">
+          <NFormItem label="命令内容" required>
+            <NInput v-model:value="params.command" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" />
+          </NFormItem>
+        </NGi>
+      </NGrid>
+      <NGrid v-else :cols="3" :x-gap="12" responsive="screen">
+        <NGi :span="2">
+          <NFormItem label="脚本文件" required>
+            <NInputGroup>
+              <NInput v-model:value="params.scriptPath" placeholder="选择 .ps1、.cmd 或 .bat 文件" />
+              <NButton secondary @click="chooseScriptFile">选择</NButton>
+            </NInputGroup>
+          </NFormItem>
+        </NGi>
+        <NGi>
+          <NFormItem label="脚本参数">
+            <NInput
+              :value="params.scriptArgs?.join(' ')"
+              placeholder="按空格分隔"
+              @update:value="updateScriptArgs"
+            />
+          </NFormItem>
+        </NGi>
+      </NGrid>
       <NFormItem label="工作目录" required>
-        <NInput v-model:value="params.workingDir" placeholder="C:\\Project\\anythingFast" />
+        <NInputGroup>
+          <NInput v-model:value="params.workingDir" placeholder="C:\\Project\\anythingFast" />
+          <NButton secondary @click="chooseWorkingDir">选择</NButton>
+        </NInputGroup>
       </NFormItem>
     </template>
 

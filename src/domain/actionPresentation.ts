@@ -23,8 +23,13 @@ export function describeAction(action: TaskAction) {
       return textParam((action.params as PathParams).path) || '未设置文件路径'
     case 'openFolder':
       return textParam((action.params as PathParams).path) || '未设置文件夹路径'
-    case 'runCommand':
-      return textParam((action.params as CommandParams).command) || '未设置命令'
+    case 'runCommand': {
+      const params = action.params as CommandParams
+      if (params.source === 'script') {
+        return textParam(params.scriptPath) || '未设置脚本文件'
+      }
+      return textParam(params.command) || '未设置命令'
+    }
     case 'delay':
       return `等待 ${numberParam((action.params as DelayParams).durationMs, 0)} ms`
   }

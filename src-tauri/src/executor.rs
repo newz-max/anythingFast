@@ -1,5 +1,6 @@
 use crate::domain::{
-    ActionExecutionResult, ActionType, ExecutionLogSummary, ExecutionScope, ExecutionStatus, TaskAction, TaskExecutionSummary, TaskItem,
+    ActionExecutionResult, ActionType, ExecutionLogSummary, ExecutionScope, ExecutionStatus,
+    TaskAction, TaskExecutionSummary, TaskItem,
 };
 use crate::storage;
 use chrono::Utc;
@@ -21,7 +22,11 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
 
     for action in task.actions.iter() {
         if !action.enabled {
-            results.push(action_result(action, ExecutionStatus::Skipped, Some("动作已停用".into())));
+            results.push(action_result(
+                action,
+                ExecutionStatus::Skipped,
+                Some("动作已停用".into()),
+            ));
             continue;
         }
 
@@ -45,7 +50,11 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
     }
 
     let finished_at = Utc::now().to_rfc3339();
-    let status = if failed { ExecutionStatus::Failed } else { ExecutionStatus::Success };
+    let status = if failed {
+        ExecutionStatus::Failed
+    } else {
+        ExecutionStatus::Success
+    };
     let summary = TaskExecutionSummary {
         task_id: task.id.clone(),
         task_name: task.name.clone(),
@@ -74,7 +83,11 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
     Ok(summary)
 }
 
-pub fn execute_task_action(app: &AppHandle, task: &TaskItem, action: &TaskAction) -> Result<TaskExecutionSummary, String> {
+pub fn execute_task_action(
+    app: &AppHandle,
+    task: &TaskItem,
+    action: &TaskAction,
+) -> Result<TaskExecutionSummary, String> {
     let started_at = Utc::now().to_rfc3339();
     emit_event(app, task, "started", None, None);
     emit_event(app, task, "running", None, Some(action));
@@ -141,7 +154,11 @@ fn open_program(action: &TaskAction) -> Result<String, String> {
     if let Some(args) = action.params.get("args").and_then(|value| value.as_array()) {
         command.args(args.iter().filter_map(|arg| arg.as_str()));
     }
-    if let Some(working_dir) = action.params.get("workingDir").and_then(|value| value.as_str()) {
+    if let Some(working_dir) = action
+        .params
+        .get("workingDir")
+        .and_then(|value| value.as_str())
+    {
         if !working_dir.trim().is_empty() {
             command.current_dir(working_dir);
         }
@@ -166,22 +183,17 @@ fn open_target(action: &TaskAction) -> Result<String, String> {
 }
 
 fn run_command(action: &TaskAction) -> Result<String, String> {
-    let command_text = string_param(action, "command")?;
     let working_dir = string_param(action, "workingDir")?;
     if !Path::new(working_dir).is_dir() {
         return Err(format!("工作目录不存在：{working_dir}"));
     }
-    let shell = action.params.get("shell").and_then(|value| value.as_str()).unwrap_or("powershell");
 
-    let mut command = if shell == "cmd" {
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/C", command_text]);
-        cmd
+    let mut command = if command_source(action) == "script" {
+        script_command(action)?
     } else {
-        let mut ps = Command::new("powershell");
-        ps.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command_text]);
-        ps
+        inline_command(action)?
     };
+
     command.current_dir(working_dir);
     hide_command_window(&mut command);
 
@@ -204,6 +216,92 @@ fn run_command(action: &TaskAction) -> Result<String, String> {
             stderr.trim()
         ))
     }
+}
+
+fn inline_command(action: &TaskAction) -> Result<Command, String> {
+    let command_text = string_param(action, "command")?;
+    let shell = action
+        .params
+        .get("shell")
+        .and_then(|value| value.as_str())
+        .unwrap_or("powershell");
+
+    if shell == "cmd" {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", command_text]);
+        Ok(cmd)
+    } else {
+        let mut ps = Command::new("powershell");
+        ps.args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            command_text,
+        ]);
+        Ok(ps)
+    }
+}
+
+fn script_command(action: &TaskAction) -> Result<Command, String> {
+    let script_path = string_param(action, "scriptPath")?;
+    if !Path::new(script_path).is_file() {
+        return Err(format!("脚本文件不存在：{script_path}"));
+    }
+
+    let extension = script_extension(script_path)
+        .ok_or_else(|| "脚本文件必须是 ps1、cmd 或 bat".to_string())?;
+    if extension == "ps1" {
+        let mut ps = Command::new("powershell");
+        ps.args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            script_path,
+        ]);
+        ps.args(script_args(action));
+        Ok(ps)
+    } else {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", script_path]);
+        cmd.args(script_args(action));
+        Ok(cmd)
+    }
+}
+
+fn command_source(action: &TaskAction) -> &str {
+    let source = action
+        .params
+        .get("source")
+        .and_then(|value| value.as_str())
+        .unwrap_or("inline");
+    if source == "script" {
+        "script"
+    } else {
+        "inline"
+    }
+}
+
+fn script_extension(path: &str) -> Option<String> {
+    let extension = Path::new(path).extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "ps1" | "cmd" | "bat" => Some(extension),
+        _ => None,
+    }
+}
+
+fn script_args(action: &TaskAction) -> Vec<String> {
+    action
+        .params
+        .get("scriptArgs")
+        .and_then(|value| value.as_array())
+        .map(|args| {
+            args.iter()
+                .filter_map(|arg| arg.as_str().map(ToString::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(windows)]
@@ -239,7 +337,11 @@ fn string_param<'a>(action: &'a TaskAction, key: &str) -> Result<&'a str, String
         .ok_or_else(|| format!("缺少参数：{key}"))
 }
 
-fn action_result(action: &TaskAction, status: ExecutionStatus, message: Option<String>) -> ActionExecutionResult {
+fn action_result(
+    action: &TaskAction,
+    status: ExecutionStatus,
+    message: Option<String>,
+) -> ActionExecutionResult {
     ActionExecutionResult {
         action_id: action.id.clone(),
         action_name: action.name.clone().unwrap_or_else(|| "未命名动作".into()),

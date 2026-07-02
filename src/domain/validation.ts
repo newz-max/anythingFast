@@ -54,10 +54,20 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
       }
       break
     case 'runCommand':
-      if (!('command' in action.params) || !action.params.command.trim()) {
+      if (!('command' in action.params)) {
+        issues.push({ field: 'command', message: '命令内容不能为空' })
+        break
+      }
+      if ((action.params.source || 'inline') === 'script') {
+        if (!action.params.scriptPath?.trim()) {
+          issues.push({ field: 'scriptPath', message: '脚本文件不能为空' })
+        } else if (!isSupportedScriptPath(action.params.scriptPath)) {
+          issues.push({ field: 'scriptPath', message: '脚本文件必须是 ps1、cmd 或 bat' })
+        }
+      } else if (!action.params.command.trim()) {
         issues.push({ field: 'command', message: '命令内容不能为空' })
       }
-      if (!('workingDir' in action.params) || !action.params.workingDir?.trim()) {
+      if (!action.params.workingDir?.trim()) {
         issues.push({ field: 'workingDir', message: '工作目录不能为空' })
       }
       break
@@ -73,6 +83,10 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
     issues,
     riskLevel: deriveActionRisk(action)
   }
+}
+
+function isSupportedScriptPath(value: string) {
+  return /\.(ps1|cmd|bat)$/i.test(value.trim())
 }
 
 function isHttpUrl(value: string) {

@@ -6,6 +6,10 @@ pub fn derive_action_risk(action: &TaskAction) -> RiskLevel {
         return RiskLevel::Low;
     }
 
+    if command_source(action) == "script" {
+        return RiskLevel::High;
+    }
+
     let command = action
         .params
         .get("command")
@@ -46,7 +50,10 @@ pub fn analyze_task_risk(task: &TaskItem) -> RiskAnalysis {
             }
             Some(RiskActionSummary {
                 action_id: action.id.clone(),
-                name: action.name.clone().unwrap_or_else(|| "未命名动作".to_string()),
+                name: action
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "未命名动作".to_string()),
                 action_type: action.action_type.clone(),
                 risk_level: risk,
                 detail: action_detail(action),
@@ -77,15 +84,54 @@ pub fn analyze_task_risk(task: &TaskItem) -> RiskAnalysis {
 
 pub fn action_detail(action: &TaskAction) -> String {
     match action.action_type {
-        ActionType::OpenUrl => action.params.get("url").and_then(|value| value.as_str()).unwrap_or("").to_string(),
-        ActionType::RunCommand => action.params.get("command").and_then(|value| value.as_str()).unwrap_or("").to_string(),
+        ActionType::OpenUrl => action
+            .params
+            .get("url")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string(),
+        ActionType::RunCommand => {
+            if command_source(action) == "script" {
+                action
+                    .params
+                    .get("scriptPath")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                action
+                    .params
+                    .get("command")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            }
+        }
         ActionType::Delay => action
             .params
             .get("durationMs")
             .and_then(|value| value.as_u64())
             .map(|duration| format!("{duration} ms"))
             .unwrap_or_default(),
-        _ => action.params.get("path").and_then(|value| value.as_str()).unwrap_or("").to_string(),
+        _ => action
+            .params
+            .get("path")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string(),
+    }
+}
+
+fn command_source(action: &TaskAction) -> &str {
+    let source = action
+        .params
+        .get("source")
+        .and_then(|value| value.as_str())
+        .unwrap_or("inline");
+    if source == "script" {
+        "script"
+    } else {
+        "inline"
     }
 }
 
@@ -116,5 +162,28 @@ mod tests {
         };
 
         assert_eq!(derive_action_risk(&action), RiskLevel::High);
+    }
+
+    #[test]
+    fn treats_script_commands_as_high_risk() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: None,
+            params: json!({
+                "source": "script",
+                "command": "",
+                "workingDir": "D:\\Project",
+                "shell": "powershell",
+                "scriptPath": "D:\\Project\\start.ps1"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: RiskLevel::Medium,
+        };
+
+        assert_eq!(derive_action_risk(&action), RiskLevel::High);
+        assert_eq!(action_detail(&action), "D:\\Project\\start.ps1");
     }
 }

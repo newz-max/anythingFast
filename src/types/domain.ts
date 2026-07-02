@@ -3,6 +3,7 @@ export type RiskLevel = 'low' | 'medium' | 'high'
 export type ActionType = 'openProgram' | 'openUrl' | 'openFile' | 'openFolder' | 'runCommand' | 'delay'
 
 export type CommandShell = 'powershell' | 'cmd'
+export type CommandSource = 'inline' | 'script'
 
 export interface OpenProgramParams {
   path: string
@@ -20,11 +21,14 @@ export interface PathParams {
 }
 
 export interface CommandParams {
+  source?: CommandSource
   command: string
   workingDir: string
   env?: Record<string, string>
   showTerminal?: boolean
   shell: CommandShell
+  scriptPath?: string
+  scriptArgs?: string[]
 }
 
 export interface DelayParams {
