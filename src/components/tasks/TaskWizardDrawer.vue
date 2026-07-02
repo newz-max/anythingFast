@@ -155,16 +155,20 @@ function saveAction(action: TaskAction) {
       <template #footer>
         <div class="footer">
           <div class="footer-secondary">
-            <NButton @click="close">关闭</NButton>
+            <NButton class="close-footer-button" @click="close">关闭</NButton>
             <template v-if="mode === 'edit'">
               <NButton class="compact-footer-button" secondary @click="duplicate">复制</NButton>
               <NButton class="compact-footer-button" secondary type="error" @click="remove">删除</NButton>
             </template>
           </div>
           <div class="footer-primary">
-            <NButton :disabled="currentStep === 1" @click="previousStep">上一步</NButton>
-            <NButton v-if="currentStep < 3" type="primary" :disabled="!canGoNext" @click="nextStep">下一步</NButton>
-            <NButton v-else type="primary" :loading="saving" :disabled="!canSave" @click="save">保存</NButton>
+            <NButton class="nav-footer-button" :disabled="currentStep === 1" @click="previousStep">上一步</NButton>
+            <NButton v-if="currentStep < 3" class="nav-footer-button" type="primary" :disabled="!canGoNext" @click="nextStep">
+              下一步
+            </NButton>
+            <NButton v-else class="nav-footer-button" type="primary" :loading="saving" :disabled="!canSave" @click="save">
+              保存
+            </NButton>
           </div>
         </div>
       </template>
@@ -202,30 +206,46 @@ function saveAction(action: TaskAction) {
 }
 
 .footer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px 16px;
   width: 100%;
 }
 
 .footer-secondary,
 .footer-primary {
   display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
 }
 
 .footer-primary {
+  flex: 1 1 244px;
   justify-content: flex-end;
 }
 
+.close-footer-button {
+  flex: 1 1 112px;
+  min-width: 112px !important;
+  max-width: 148px;
+}
+
 .compact-footer-button {
-  min-width: 72px;
-  height: 40px;
+  flex: 0 1 76px;
+  min-width: 76px !important;
+  height: 44px;
   font-size: 14px;
+}
+
+.nav-footer-button {
+  flex: 1 1 116px;
+  min-width: 116px !important;
+  max-width: 148px;
 }
 
 @media (max-width: 640px) {
@@ -235,11 +255,12 @@ function saveAction(action: TaskAction) {
   }
 
   .footer {
-    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .footer-secondary,
   .footer-primary {
+    flex-basis: 100%;
     justify-content: stretch;
   }
 

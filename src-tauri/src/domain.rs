@@ -102,7 +102,7 @@ pub enum AppTheme {
 }
 
 fn default_app_theme() -> AppTheme {
-    AppTheme::System
+    AppTheme::Dark
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,12 +222,12 @@ pub struct PreviewAction {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             tasks: Vec::new(),
             tags: Vec::new(),
             settings: AppSettings {
                 global_shortcut: "Alt+Space".to_string(),
-                theme: AppTheme::System,
+                theme: AppTheme::Dark,
                 config_path: None,
             },
         }

@@ -8,29 +8,37 @@ const uid = (prefix: string) => `${prefix}-${crypto.randomUUID()}`
 
 export function createDefaultConfig(): AppConfig {
   return {
-    version: 1,
+    version: 2,
     tasks: [],
     tags: [],
     settings: {
       globalShortcut: 'Alt+Space',
-      theme: 'system'
+      theme: 'dark'
     }
   }
 }
 
 export function normalizeConfig(config: AppConfig): AppConfig {
+  const defaultConfig = createDefaultConfig()
+  const settings = {
+    ...defaultConfig.settings,
+    ...(config.settings || {})
+  }
+
+  if ((config.version || 1) < 2 && settings.theme === 'system') {
+    settings.theme = 'dark'
+  }
+
   return {
-    ...createDefaultConfig(),
+    ...defaultConfig,
     ...config,
+    version: defaultConfig.version,
     tasks: (config.tasks || []).map(normalizeTask),
     tags: (config.tags || []).map((tag) => ({
       ...tag,
       name: tag.name.trim()
     })),
-    settings: {
-      ...createDefaultConfig().settings,
-      ...(config.settings || {})
-    }
+    settings
   }
 }
 

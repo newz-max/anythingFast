@@ -96,7 +96,7 @@ mod tests {
         let config = AppConfig::default();
         let content = serde_json::to_string_pretty(&config).unwrap();
         let restored: AppConfig = serde_json::from_str(&content).unwrap();
-        assert_eq!(restored.version, 1);
+        assert_eq!(restored.version, 2);
         assert_eq!(restored.settings.global_shortcut, "Alt+Space");
     }
 
@@ -124,7 +124,7 @@ mod tests {
         assert!(!restored.tasks[0].favorite);
         assert!(restored.tasks[0].tag_ids.is_empty());
         assert_eq!(restored.tasks[0].triggers.len(), 1);
-        assert!(matches!(restored.settings.theme, crate::domain::AppTheme::System));
+        assert!(matches!(restored.settings.theme, crate::domain::AppTheme::Dark));
     }
 
     #[test]
