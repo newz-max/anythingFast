@@ -6,6 +6,7 @@ import type { DropdownOption } from 'naive-ui'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
 import ExecutionProgress from '@/components/execution/ExecutionProgress.vue'
+import logoUrl from '@/assets/logo.png'
 import { createTaskDraft, cloneTask } from '@/domain/taskFactory'
 import { builtInTaskTemplates, createTaskFromTemplate } from '@/domain/taskTemplates'
 import { getTasksForView, type TaskView } from '@/domain/taskViews'
@@ -477,9 +478,7 @@ async function resetLayoutScroll() {
     <header class="app-titlebar" data-tauri-drag-region>
       <div class="window-brand" data-tauri-drag-region>
         <div class="titlebar-mark" aria-hidden="true" data-tauri-drag-region>
-          <span></span>
-          <span></span>
-          <span></span>
+          <img :src="logoUrl" alt="" data-tauri-drag-region />
         </div>
         <span data-tauri-drag-region>FlowTask - 事项管理器</span>
       </div>
@@ -500,9 +499,7 @@ async function resetLayoutScroll() {
       <aside class="sidebar">
         <section class="brand">
           <div class="brand-mark" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
+            <img :src="logoUrl" alt="" />
           </div>
           <div>
             <h1 class="brand-title">FlowTask</h1>
@@ -556,9 +553,7 @@ async function resetLayoutScroll() {
 
         <section class="promo-card" aria-label="自动化提示">
           <div class="promo-logo" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
+            <img :src="logoUrl" alt="" />
           </div>
           <h2>释放效率，从自动化开始</h2>
           <p>将重复的操作流程化，一键触发</p>
@@ -905,34 +900,19 @@ async function resetLayoutScroll() {
 
 .titlebar-mark {
   position: relative;
+  display: grid;
   width: 34px;
   height: 34px;
   flex: 0 0 34px;
-  border-radius: 11px;
-  background: rgba(28, 48, 107, 0.64);
-  box-shadow: 0 8px 18px rgba(35, 101, 255, 0.26);
+  place-items: center;
 }
 
-.titlebar-mark span {
-  position: absolute;
-  border-radius: 10px 10px 14px 4px;
-  background: linear-gradient(145deg, #3aa3ff, #5444ff);
-}
-
-.titlebar-mark span:nth-child(1) {
-  inset: 4px 10px 18px 6px;
-  transform: skewX(-16deg);
-}
-
-.titlebar-mark span:nth-child(2) {
-  inset: 12px 5px 5px 15px;
-  transform: rotate(38deg);
-}
-
-.titlebar-mark span:nth-child(3) {
-  inset: 19px 20px 3px 4px;
-  background: linear-gradient(145deg, #2467ff, #6c4eff);
-  transform: rotate(20deg);
+.titlebar-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .window-controls {
@@ -1095,35 +1075,20 @@ async function resetLayoutScroll() {
 .brand-mark,
 .promo-logo {
   position: relative;
+  display: grid;
   width: 44px;
   height: 44px;
+  place-items: center;
 }
 
-.brand-mark span,
-.promo-logo span {
-  position: absolute;
-  border-radius: 12px 12px 18px 4px;
-  background: linear-gradient(145deg, #3aa3ff, #5444ff);
+.brand-mark img,
+.promo-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   filter: drop-shadow(0 8px 14px rgba(35, 101, 255, 0.28));
-}
-
-.brand-mark span:nth-child(1),
-.promo-logo span:nth-child(1) {
-  inset: 3px 9px 22px 4px;
-  transform: skewX(-16deg);
-}
-
-.brand-mark span:nth-child(2),
-.promo-logo span:nth-child(2) {
-  inset: 14px 5px 4px 15px;
-  transform: rotate(38deg);
-}
-
-.brand-mark span:nth-child(3),
-.promo-logo span:nth-child(3) {
-  inset: 22px 22px 2px 1px;
-  background: linear-gradient(145deg, #2467ff, #6c4eff);
-  transform: rotate(20deg);
+  pointer-events: none;
 }
 
 .brand-title,
