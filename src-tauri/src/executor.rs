@@ -320,11 +320,10 @@ fn delay(action: &TaskAction) -> Result<String, String> {
         .params
         .get("durationMs")
         .and_then(|value| value.as_u64())
-        .ok_or_else(|| "等待时长必须大于 0".to_string())?;
-    if duration == 0 {
-        return Err("等待时长必须大于 0".into());
+        .unwrap_or(0);
+    if duration > 0 {
+        thread::sleep(Duration::from_millis(duration));
     }
-    thread::sleep(Duration::from_millis(duration));
     Ok(format!("已等待 {duration} ms"))
 }
 
@@ -401,5 +400,23 @@ mod tests {
 
         let result = action_result(&action, ExecutionStatus::Skipped, None);
         assert_eq!(result.status, ExecutionStatus::Skipped);
+    }
+
+    #[test]
+    fn delay_without_duration_succeeds_as_zero_ms() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::Delay,
+            name: Some("wait".into()),
+            params: json!({}),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Low,
+        };
+
+        let result = delay(&action);
+
+        assert_eq!(result, Ok("已等待 0 ms".into()));
     }
 }

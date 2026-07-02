@@ -151,14 +151,13 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
             }
         }
         ActionType::Delay => {
-            if action
-                .params
-                .get("durationMs")
-                .and_then(|value| value.as_u64())
-                .unwrap_or(0)
-                == 0
-            {
-                issues.push(issue("durationMs", "等待时长必须大于 0"));
+            if let Some(duration) = action.params.get("durationMs") {
+                if !duration.is_null() {
+                    match duration.as_u64() {
+                        Some(0) | None => issues.push(issue("durationMs", "等待时长必须大于 0")),
+                        Some(_) => {}
+                    }
+                }
             }
         }
     }
@@ -457,6 +456,38 @@ mod tests {
                 .any(|issue| issue.field == "scriptPath")
         );
         let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn allows_missing_delay_duration() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::Delay,
+            name: None,
+            params: json!({}),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: RiskLevel::Low,
+        };
+
+        assert!(validate_action_model(&action).valid);
+    }
+
+    #[test]
+    fn allows_null_delay_duration() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::Delay,
+            name: None,
+            params: json!({ "durationMs": null }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: RiskLevel::Low,
+        };
+
+        assert!(validate_action_model(&action).valid);
     }
 
     fn temp_validation_dir() -> PathBuf {

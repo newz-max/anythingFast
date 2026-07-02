@@ -72,7 +72,7 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
       }
       break
     case 'delay':
-      if (!('durationMs' in action.params) || action.params.durationMs <= 0) {
+      if ('durationMs' in action.params && action.params.durationMs !== undefined && action.params.durationMs !== null && action.params.durationMs <= 0) {
         issues.push({ field: 'durationMs', message: '等待时长必须大于 0' })
       }
       break

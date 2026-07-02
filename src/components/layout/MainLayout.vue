@@ -128,15 +128,23 @@ function createTask() {
 }
 
 async function saveTask(task: TaskItem) {
-  await taskStore.upsertTask(task)
-  message.success('已保存')
-  wizardVisible.value = false
+  try {
+    await taskStore.upsertTask(task)
+    message.success('已保存')
+    wizardVisible.value = false
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  }
 }
 
 async function duplicateTask(task: TaskItem) {
-  await taskStore.upsertTask(cloneTask(task))
-  message.success('已复制事项')
-  wizardVisible.value = false
+  try {
+    await taskStore.upsertTask(cloneTask(task))
+    message.success('已复制事项')
+    wizardVisible.value = false
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  }
 }
 
 function deleteTask(task: TaskItem) {

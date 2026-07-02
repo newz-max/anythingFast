@@ -32,7 +32,7 @@ export interface CommandParams {
 }
 
 export interface DelayParams {
-  durationMs: number
+  durationMs?: number
 }
 
 export type ActionParams = OpenProgramParams | OpenUrlParams | PathParams | CommandParams | DelayParams

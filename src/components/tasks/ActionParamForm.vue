@@ -187,9 +187,9 @@ function updateScriptArgs(value: string) {
       </NFormItem>
     </template>
 
-    <template v-else-if="action.type === 'delay' && 'durationMs' in action.params">
-      <NFormItem label="等待时长 ms" required>
-        <NInputNumber v-model:value="params.durationMs" :min="1" />
+    <template v-else-if="action.type === 'delay'">
+      <NFormItem label="等待时长 ms">
+        <NInputNumber v-model:value="params.durationMs" clearable :min="1" placeholder="可选，留空为 0ms" />
       </NFormItem>
     </template>
   </NForm>

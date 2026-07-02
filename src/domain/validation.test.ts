@@ -88,4 +88,35 @@ describe('validation', () => {
     expect(result.valid).toBe(false)
     expect(result.issues.map((issue) => issue.field)).toContain('scriptPath')
   })
+
+  it('allows missing delay duration locally', () => {
+    const action: TaskAction = {
+      id: 'action-1',
+      type: 'delay',
+      name: 'wait',
+      params: {},
+      enabled: true,
+      riskLevel: 'low'
+    }
+
+    const result = validateActionLocal(action)
+
+    expect(result.valid).toBe(true)
+  })
+
+  it('rejects non-positive delay duration locally when provided', () => {
+    const action: TaskAction = {
+      id: 'action-1',
+      type: 'delay',
+      name: 'wait',
+      params: { durationMs: 0 },
+      enabled: true,
+      riskLevel: 'low'
+    }
+
+    const result = validateActionLocal(action)
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.field)).toContain('durationMs')
+  })
 })
