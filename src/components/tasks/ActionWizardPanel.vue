@@ -178,27 +178,49 @@ function normalizeRisk() {
 .type-option {
   display: grid;
   gap: 6px;
-  border: 1px solid #d9e1ec;
+  border: 1px solid var(--app-field-border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--app-field-bg);
   padding: 14px;
-  color: inherit;
+  color: var(--app-text);
   cursor: pointer;
   text-align: left;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .type-option:hover,
 .type-option-active {
-  border-color: #3b82f6;
-  background: #edf4ff;
+  border-color: var(--app-primary);
+  color: var(--app-text);
+}
+
+:global([data-app-theme="dark"]) .type-option:hover,
+:global([data-app-theme="dark"]) .type-option-active {
+  background:
+    linear-gradient(135deg, rgba(61, 120, 253, 0.18), rgba(82, 76, 255, 0.12)),
+    rgba(25, 32, 54, 0.86);
+  box-shadow: 0 14px 30px rgba(6, 12, 28, 0.22);
+}
+
+:global([data-app-theme="light"]) .type-option:hover,
+:global([data-app-theme="light"]) .type-option-active {
+  background:
+    linear-gradient(135deg, rgba(61, 120, 253, 0.1), rgba(82, 76, 255, 0.06)),
+    #f8fbff;
+  box-shadow: 0 12px 24px rgba(49, 90, 166, 0.12);
 }
 
 .type-title {
+  color: var(--app-text);
   font-weight: 700;
 }
 
 .type-description {
-  color: #667085;
+  color: var(--app-muted);
   font-size: 13px;
   line-height: 1.5;
 }
