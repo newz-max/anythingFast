@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
 import { tauriApi } from '@/api/tauri'
-import { createDefaultConfig, normalizeConfig } from '@/domain/taskFactory'
-import { deriveTaskRisk } from '@/domain/risk'
+import { builtInTaskTemplates } from '@/domain/taskTemplates'
+import { createDefaultConfig, normalizeConfig, normalizeTemplate } from '@/domain/taskFactory'
+import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
 import { getErrorMessage, logDevError } from '@/utils/errors'
-import type { AppConfig, AppSettings, TaskItem, TaskTag } from '@/types/domain'
+import type { AppConfig, AppSettings, TaskItem, TaskTag, TaskTemplate } from '@/types/domain'
 
 const isTauri = () => Boolean('__TAURI_INTERNALS__' in window)
 
@@ -17,6 +18,8 @@ export const useTaskStore = defineStore('tasks', () => {
 
   const tasks = computed(() => config.value.tasks)
   const tags = computed(() => config.value.tags)
+  const savedTemplates = computed(() => config.value.templates)
+  const templates = computed(() => [...builtInTaskTemplates, ...savedTemplates.value])
   const settings = computed(() => config.value.settings)
   const selectedTask = computed(() => tasks.value.find((task) => task.id === selectedTaskId.value) || null)
   const categories = computed(() => {
@@ -51,7 +54,8 @@ export const useTaskStore = defineStore('tasks', () => {
           tagIds: task.tagIds || [],
           riskLevel: deriveTaskRisk(task),
           updatedAt: new Date().toISOString()
-        }))
+        })),
+        templates: config.value.templates.map(normalizeTemplate)
       }
       config.value = normalizeConfig(isTauri() ? await tauriApi.saveConfig(nextConfig) : saveBrowserConfig(nextConfig))
     } catch (err) {
@@ -146,6 +150,38 @@ export const useTaskStore = defineStore('tasks', () => {
     await persist()
   }
 
+  async function saveTaskAsTemplate(task: TaskItem) {
+    const template: TaskTemplate = normalizeTemplate({
+      id: `template-${crypto.randomUUID()}`,
+      name: task.name,
+      category: task.category,
+      keywords: task.keywords || [],
+      description: task.description || '',
+      actions: task.actions.map((action) => {
+        const templateAction = actionWithoutId(action)
+        const normalized = {
+          ...templateAction,
+          riskLevel: deriveActionRisk(action)
+        }
+        return normalized
+      })
+    })
+    config.value = {
+      ...config.value,
+      templates: [template, ...config.value.templates]
+    }
+    await persist()
+    return template
+  }
+
+  async function deleteTemplate(templateId: string) {
+    config.value = {
+      ...config.value,
+      templates: config.value.templates.filter((template) => template.id !== templateId)
+    }
+    await persist()
+  }
+
   function markTaskLastRun(taskId: string, lastRunAt: string) {
     config.value = {
       ...config.value,
@@ -179,7 +215,7 @@ export const useTaskStore = defineStore('tasks', () => {
   }
 
   function replaceConfig(nextConfig: AppConfig) {
-    config.value = nextConfig
+    config.value = normalizeConfig(nextConfig)
     selectedTaskId.value = nextConfig.tasks[0]?.id || null
   }
 
@@ -187,6 +223,8 @@ export const useTaskStore = defineStore('tasks', () => {
     config,
     tasks,
     tags,
+    savedTemplates,
+    templates,
     settings,
     categories,
     selectedTaskId,
@@ -203,6 +241,8 @@ export const useTaskStore = defineStore('tasks', () => {
     createTag,
     renameTag,
     deleteTag,
+    saveTaskAsTemplate,
+    deleteTemplate,
     markTaskLastRun,
     updateSettings,
     selectTask,
@@ -219,4 +259,16 @@ function saveBrowserConfig(config: AppConfig) {
   const normalized = normalizeConfig(config)
   localStorage.setItem('anything-fast-config', JSON.stringify(normalized))
   return normalized
+}
+
+function actionWithoutId(action: TaskItem['actions'][number]): TaskTemplate['actions'][number] {
+  return {
+    type: action.type,
+    name: action.name,
+    params: action.params,
+    enabled: action.enabled,
+    timeoutMs: action.timeoutMs,
+    continueOnError: action.continueOnError,
+    riskLevel: action.riskLevel
+  }
 }

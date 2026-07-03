@@ -1,6 +1,7 @@
 import { createTaskDraft } from '@/domain/taskFactory'
+import { deriveActionRisk, maxRisk } from '@/domain/risk'
 import { clonePlainDto } from '@/utils/clonePlainDto'
-import type { TaskItem, TaskTemplate } from '@/types/domain'
+import type { RiskLevel, TaskItem, TaskTemplate } from '@/types/domain'
 
 export const builtInTaskTemplates: TaskTemplate[] = [
   {
@@ -70,4 +71,12 @@ export function createTaskFromTemplate(template: TaskTemplate): TaskItem {
       id: `action-${crypto.randomUUID()}`
     }))
   }
+}
+
+export function deriveTemplateRisk(template: TaskTemplate): RiskLevel {
+  return maxRisk(
+    template.actions
+      .filter((action) => action.enabled)
+      .map((action) => deriveActionRisk({ ...action, id: 'template-action' }))
+  )
 }

@@ -2,6 +2,7 @@ mod commands;
 mod diagnostics;
 mod domain;
 mod executor;
+mod import_export;
 mod risk;
 mod storage;
 mod validation;
@@ -118,6 +119,13 @@ pub fn run() {
             run_task,
             run_task_action,
             preview_action,
+            export_task_bundle,
+            save_task_bundle_file,
+            preview_import_bundle,
+            preview_import_bundle_file,
+            confirm_import_bundle,
+            confirm_import_bundle_file,
+            create_task_from_template,
             load_execution_logs,
             load_shortcut_status,
             update_settings

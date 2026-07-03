@@ -78,6 +78,30 @@ pub struct TaskTag {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskTemplateAction {
+    #[serde(rename = "type")]
+    pub action_type: ActionType,
+    pub name: Option<String>,
+    pub params: Value,
+    pub enabled: bool,
+    pub timeout_ms: Option<u64>,
+    pub continue_on_error: Option<bool>,
+    pub risk_level: RiskLevel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTemplate {
+    pub id: String,
+    pub name: String,
+    pub category: Option<String>,
+    pub keywords: Option<Vec<String>>,
+    pub description: Option<String>,
+    pub actions: Vec<TaskTemplateAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub global_shortcut: String,
     #[serde(default = "default_app_theme")]
@@ -112,7 +136,98 @@ pub struct AppConfig {
     pub tasks: Vec<TaskItem>,
     #[serde(default)]
     pub tags: Vec<TaskTag>,
+    #[serde(default)]
+    pub templates: Vec<TaskTemplate>,
     pub settings: AppSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskExportBundle {
+    pub schema_version: u32,
+    pub exported_at: String,
+    pub source_app: String,
+    pub tasks: Vec<TaskItem>,
+    #[serde(default)]
+    pub templates: Vec<TaskTemplate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportBundleRequest {
+    #[serde(default)]
+    pub task_ids: Vec<String>,
+    #[serde(default)]
+    pub template_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreview {
+    pub schema_version: u32,
+    pub valid_task_count: usize,
+    pub template_count: usize,
+    pub total_action_count: usize,
+    pub risk_summary: ImportRiskSummary,
+    pub conflict_summary: ImportConflictSummary,
+    pub path_hints: Vec<ImportPathHint>,
+    pub tasks: Vec<ImportTaskPreview>,
+    pub templates: Vec<ImportTemplatePreview>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportRiskSummary {
+    pub low: usize,
+    pub medium: usize,
+    pub high: usize,
+    pub command_actions: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportConflictSummary {
+    pub task_ids_regenerated: usize,
+    pub action_ids_regenerated: usize,
+    pub template_ids_regenerated: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPathHint {
+    pub owner_id: String,
+    pub owner_name: String,
+    pub action_name: String,
+    pub field: String,
+    pub path: String,
+    pub exists: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportTaskPreview {
+    pub id: String,
+    pub original_id: String,
+    pub name: String,
+    pub action_types: Vec<ActionType>,
+    pub action_count: usize,
+    pub risk_level: RiskLevel,
+    pub command_action_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportTemplatePreview {
+    pub id: String,
+    pub original_id: String,
+    pub name: String,
+    pub category: Option<String>,
+    pub keywords: Vec<String>,
+    pub action_types: Vec<ActionType>,
+    pub action_count: usize,
+    pub risk_level: RiskLevel,
+    pub command_action_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,6 +346,7 @@ impl Default for AppConfig {
             version: 2,
             tasks: Vec::new(),
             tags: Vec::new(),
+            templates: Vec::new(),
             settings: AppSettings {
                 global_shortcut: "Alt+Space".to_string(),
                 theme: AppTheme::Dark,

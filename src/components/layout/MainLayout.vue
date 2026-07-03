@@ -4,11 +4,12 @@ import { NDropdown, NModal, useDialog, useMessage } from 'naive-ui'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { DropdownOption } from 'naive-ui'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
+import TaskImportPreviewModal from '@/components/tasks/TaskImportPreviewModal.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
 import ExecutionProgress from '@/components/execution/ExecutionProgress.vue'
 import logoUrl from '@/assets/logo.png'
 import { createTaskDraft, cloneTask } from '@/domain/taskFactory'
-import { builtInTaskTemplates, createTaskFromTemplate } from '@/domain/taskTemplates'
+import { createTaskFromTemplate, deriveTemplateRisk } from '@/domain/taskTemplates'
 import { getTasksForView, type TaskView } from '@/domain/taskViews'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { useTaskStore } from '@/stores/taskStore'
@@ -17,16 +18,19 @@ import { useTaskExecution } from '@/composables/useTaskExecution'
 import { tauriApi } from '@/api/tauri'
 import { listenShortcutStatusEvents } from '@/api/events'
 import { getErrorMessage, logDevError } from '@/utils/errors'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import type {
   ActionType,
   AppTheme,
+  ImportPreview,
   ShortcutStatus,
   ShortcutTaskTrigger,
   TaskAction,
   TaskItem,
   TaskTag,
   TaskTemplate,
-  TaskTrigger
+  TaskTrigger,
+  RiskLevel
 } from '@/types/domain'
 import type { TaskWizardMode } from '@/composables/useTaskWizardDraft'
 
@@ -53,6 +57,10 @@ const taskShortcutDraft = shallowRef('')
 const helpModalVisible = shallowRef(false)
 const settingsModalVisible = shallowRef(false)
 const shortcutStatus = shallowRef<ShortcutStatus | null>(null)
+const importPreviewVisible = shallowRef(false)
+const importPreview = shallowRef<ImportPreview | null>(null)
+const importFilePath = shallowRef('')
+const importConfirming = shallowRef(false)
 const layoutRef = useTemplateRef<HTMLElement>('layout')
 const contentRef = useTemplateRef<HTMLElement>('content')
 let desktopMediaQuery: MediaQueryList | null = null
@@ -60,6 +68,7 @@ let desktopMediaQuery: MediaQueryList | null = null
 const selectedTask = computed(() => taskStore.selectedTask)
 const visibleTasks = computed(() => getTasksForView(taskStore.tasks, activeTaskView.value, selectedTagId.value))
 const showTemplateCenter = computed(() => activeTaskView.value === 'templates')
+const templateCountLabel = computed(() => `${taskStore.templates.length} 个模板`)
 const selectedActionCount = computed(() => selectedTask.value?.actions.filter((action) => action.enabled).length ?? 0)
 const selectedKeywords = computed(() => selectedTask.value?.keywords?.join('、') || '无')
 const selectedCategory = computed(() => selectedTask.value?.category || '未分类')
@@ -75,17 +84,21 @@ const navigationItems = computed(() => [
   { key: 'all' as const, icon: '▣', label: '我的事项', count: taskStore.tasks.length, active: activeTaskView.value === 'all', disabled: false },
   { key: 'favorites' as const, icon: '☆', label: '收藏事项', count: favoriteCount.value, active: activeTaskView.value === 'favorites', disabled: false },
   { key: 'recent' as const, icon: '◷', label: '最近运行', count: recentCount.value, active: activeTaskView.value === 'recent', disabled: false },
-  { key: 'templates' as const, icon: '▱', label: '模板中心', count: builtInTaskTemplates.length, active: activeTaskView.value === 'templates', disabled: false }
+  { key: 'templates' as const, icon: '▱', label: '模板中心', count: taskStore.templates.length, active: activeTaskView.value === 'templates', disabled: false }
 ])
 const taskMenuOptions: DropdownOption[] = [
   { label: '编辑', key: 'edit' },
   { label: '复制', key: 'duplicate' },
+  { label: '保存为模板', key: 'save-template' },
   { type: 'divider', key: 'divider' },
   { label: '删除', key: 'delete' }
 ]
 const shareOptions: DropdownOption[] = [
   { label: '复制事项摘要', key: 'copy-summary' },
-  { label: '复制事项配置 JSON', key: 'copy-json' }
+  { label: '复制事项配置 JSON', key: 'copy-json' },
+  { label: '导出当前事项 JSON', key: 'export-current' },
+  { label: '导出当前列表 JSON', key: 'export-visible' },
+  { label: '导入配置 JSON', key: 'import-json' }
 ]
 const themeOptions = [
   { label: '跟随系统', value: 'system' },
@@ -285,6 +298,10 @@ function handleTaskMenuSelect(key: string | number) {
     void duplicateTask(selectedTask.value)
     return
   }
+  if (key === 'save-template') {
+    void saveSelectedTaskAsTemplate()
+    return
+  }
   if (key === 'delete') {
     deleteTask(selectedTask.value)
   }
@@ -298,8 +315,110 @@ async function handleShareSelect(key: string | number) {
     return
   }
   if (key === 'copy-json') {
-    await copyText(JSON.stringify(selectedTask.value, null, 2))
+    const bundle = isTauriRuntime()
+      ? await tauriApi.exportTaskBundle({ taskIds: [selectedTask.value.id], templateIds: [] })
+      : {
+          schemaVersion: 1,
+          exportedAt: new Date().toISOString(),
+          sourceApp: 'anything-fast',
+          tasks: [selectedTask.value],
+          templates: []
+        }
+    await copyText(JSON.stringify(bundle, null, 2))
     message.success('已复制事项配置 JSON')
+    return
+  }
+  if (key === 'export-current') {
+    await exportTaskBundle([selectedTask.value.id])
+    return
+  }
+  if (key === 'export-visible') {
+    await exportTaskBundle(visibleTasks.value.map((task) => task.id))
+    return
+  }
+  if (key === 'import-json') {
+    await openImportFile()
+  }
+}
+
+async function exportTaskBundle(taskIds: string[]) {
+  if (!isTauriRuntime()) {
+    message.warning('导出文件需要在桌面应用中使用')
+    return
+  }
+  if (taskIds.length === 0) {
+    message.warning('没有可导出的事项')
+    return
+  }
+  const targetPath = await save({
+    defaultPath: `anything-fast-${new Date().toISOString().slice(0, 10)}.json`,
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  })
+  if (!targetPath) return
+  await tauriApi.saveTaskBundleFile({ taskIds, templateIds: [] }, targetPath)
+  message.success('已导出 JSON')
+}
+
+async function exportSavedTemplates() {
+  if (!isTauriRuntime()) {
+    message.warning('导出文件需要在桌面应用中使用')
+    return
+  }
+  if (taskStore.savedTemplates.length === 0) {
+    message.warning('没有可导出的已保存模板')
+    return
+  }
+  const targetPath = await save({
+    defaultPath: `anything-fast-templates-${new Date().toISOString().slice(0, 10)}.json`,
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  })
+  if (!targetPath) return
+  await tauriApi.saveTaskBundleFile(
+    { taskIds: [], templateIds: taskStore.savedTemplates.map((template) => template.id) },
+    targetPath
+  )
+  message.success('已导出模板 JSON')
+}
+
+async function openImportFile() {
+  if (!isTauriRuntime()) {
+    message.warning('导入文件需要在桌面应用中使用')
+    return
+  }
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  })
+  if (!selected || Array.isArray(selected)) return
+  importFilePath.value = selected
+  importPreview.value = await tauriApi.previewImportBundleFile(selected)
+  importPreviewVisible.value = true
+}
+
+async function confirmImport() {
+  if (!importFilePath.value) return
+  importConfirming.value = true
+  try {
+    const nextConfig = await tauriApi.confirmImportBundleFile(importFilePath.value)
+    taskStore.replaceConfig(nextConfig)
+    importPreviewVisible.value = false
+    importPreview.value = null
+    importFilePath.value = ''
+    message.success('已导入配置')
+  } catch (err) {
+    reportUiError('Confirm import failed', err)
+  } finally {
+    importConfirming.value = false
+  }
+}
+
+async function saveSelectedTaskAsTemplate() {
+  if (!selectedTask.value) return
+  try {
+    await taskStore.saveTaskAsTemplate(selectedTask.value)
+    message.success('已保存为模板')
+  } catch (err) {
+    reportUiError('Save task as template failed', err, { taskId: selectedTask.value.id })
   }
 }
 
@@ -397,6 +516,17 @@ function createFromTemplate(template: TaskTemplate) {
   wizardTask.value = createTaskFromTemplate(template)
   wizardInitialStep.value = 1
   wizardVisible.value = true
+}
+
+function templateMeta(template: TaskTemplate) {
+  const types = Array.from(new Set(template.actions.map((action) => action.type))).map(getActionTypeLabel)
+  return `${template.category || '未分类'} · ${template.actions.length} 个动作 · ${types.join('、') || '无动作'} · ${riskLabel(deriveTemplateRisk(template))}`
+}
+
+function riskLabel(risk: RiskLevel) {
+  if (risk === 'high') return '高风险'
+  if (risk === 'medium') return '中风险'
+  return '低风险'
 }
 
 function actionIcon(type: ActionType) {
@@ -633,17 +763,22 @@ async function resetLayoutScroll() {
       <section v-else class="template-center" aria-label="模板中心">
         <header class="template-header">
           <span>模板中心</span>
-          <small>{{ builtInTaskTemplates.length }} 个内置模板</small>
+          <small>{{ templateCountLabel }}</small>
+          <div class="template-header-actions">
+            <button class="template-use-button" type="button" @click="openImportFile">导入配置</button>
+            <button class="template-use-button" type="button" @click="exportSavedTemplates">导出模板</button>
+          </div>
         </header>
         <div class="template-list">
-          <article v-for="template in builtInTaskTemplates" :key="template.id" class="template-card">
+          <article v-for="template in taskStore.templates" :key="template.id" class="template-card">
             <div class="template-card-main">
               <strong>{{ template.name }}</strong>
               <span>{{ template.description }}</span>
-              <small>{{ template.category || '未分类' }} · {{ template.actions.length }} 个动作</small>
+              <small>{{ templateMeta(template) }}</small>
             </div>
             <button class="template-use-button" type="button" @click="createFromTemplate(template)">使用</button>
           </article>
+          <NEmpty v-if="taskStore.templates.length === 0" description="没有可用模板" />
         </div>
       </section>
     </section>
@@ -813,6 +948,13 @@ async function resetLayoutScroll() {
       @save="saveTask"
       @duplicate="duplicateTask"
       @delete="deleteTask"
+    />
+
+    <TaskImportPreviewModal
+      v-model:show="importPreviewVisible"
+      :preview="importPreview"
+      :confirming="importConfirming"
+      @confirm="confirmImport"
     />
 
     <NModal v-model:show="tagModalVisible" preset="card" class="tag-modal" :title="editingTag ? '编辑标签' : '新增标签'">
@@ -1450,6 +1592,13 @@ async function resetLayoutScroll() {
   display: grid;
   gap: 6px;
   padding: 4px 2px 0;
+}
+
+.template-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .template-header span {

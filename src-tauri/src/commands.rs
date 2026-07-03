@@ -1,9 +1,11 @@
 use crate::diagnostics::dev_log_error;
 use crate::domain::{
-    AppConfig, AppSettings, ExecutionLogSummary, PreviewAction, RiskAnalysis, RiskLevel,
-    ShortcutStatus, TaskAction, TaskExecutionSummary, TaskItem, ValidationResult,
+    AppConfig, AppSettings, ExecutionLogSummary, ExportBundleRequest, ImportPreview, PreviewAction,
+    RiskAnalysis, RiskLevel, ShortcutStatus, TaskAction, TaskExecutionSummary, TaskExportBundle,
+    TaskItem, ValidationResult,
 };
 use crate::executor;
+use crate::import_export;
 use crate::risk::{action_detail, analyze_task_risk, derive_action_risk};
 use crate::storage;
 use crate::validation::{
@@ -30,6 +32,11 @@ pub fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig, Strin
         })
         .collect();
     normalized.tasks = normalized.tasks.into_iter().map(normalize_task).collect();
+    normalized.templates = normalized
+        .templates
+        .into_iter()
+        .map(import_export::normalize_template)
+        .collect();
 
     let mut issues = Vec::new();
     issues.extend(validate_config_model(&normalized));
@@ -261,6 +268,74 @@ pub fn preview_action(action: TaskAction) -> PreviewAction {
         detail: action_detail(&action),
         risk_level,
     }
+}
+
+#[tauri::command]
+pub fn export_task_bundle(
+    app: AppHandle,
+    request: ExportBundleRequest,
+) -> Result<TaskExportBundle, String> {
+    let config = storage::load_config(&app)
+        .map_err(|err| log_command_error("export_task_bundle load config failed", err))?;
+    import_export::create_export_bundle(&config, request)
+        .map_err(|err| log_command_error("export_task_bundle create bundle failed", err))
+}
+
+#[tauri::command]
+pub fn save_task_bundle_file(
+    app: AppHandle,
+    request: ExportBundleRequest,
+    path: String,
+) -> Result<TaskExportBundle, String> {
+    let config = storage::load_config(&app)
+        .map_err(|err| log_command_error("save_task_bundle_file load config failed", err))?;
+    let bundle = import_export::create_export_bundle(&config, request)
+        .map_err(|err| log_command_error("save_task_bundle_file create bundle failed", err))?;
+    import_export::write_bundle_file(&path, &bundle)
+        .map_err(|err| log_command_error("save_task_bundle_file write failed", err))?;
+    Ok(bundle)
+}
+
+#[tauri::command]
+pub fn preview_import_bundle(app: AppHandle, bundle_json: String) -> Result<ImportPreview, String> {
+    let config = storage::load_config(&app)
+        .map_err(|err| log_command_error("preview_import_bundle load config failed", err))?;
+    import_export::process_import(&bundle_json, &config)
+        .map(|processed| processed.preview)
+        .map_err(|err| log_command_error("preview_import_bundle process failed", err))
+}
+
+#[tauri::command]
+pub fn preview_import_bundle_file(app: AppHandle, path: String) -> Result<ImportPreview, String> {
+    let content = import_export::read_bundle_file(&path)
+        .map_err(|err| log_command_error("preview_import_bundle_file read failed", err))?;
+    preview_import_bundle(app, content)
+}
+
+#[tauri::command]
+pub fn confirm_import_bundle(app: AppHandle, bundle_json: String) -> Result<AppConfig, String> {
+    let config = storage::load_config(&app)
+        .map_err(|err| log_command_error("confirm_import_bundle load config failed", err))?;
+    let next_config = import_export::confirm_import(&bundle_json, &config)
+        .map_err(|err| log_command_error("confirm_import_bundle process failed", err))?;
+    crate::refresh_task_shortcuts(&app, &next_config)
+        .map_err(|err| log_command_error("confirm_import_bundle refresh shortcuts failed", err))?;
+    storage::save_config(&app, &next_config)
+        .map_err(|err| log_command_error("confirm_import_bundle save failed", err))?;
+    storage::load_config(&app)
+        .map_err(|err| log_command_error("confirm_import_bundle reload failed", err))
+}
+
+#[tauri::command]
+pub fn confirm_import_bundle_file(app: AppHandle, path: String) -> Result<AppConfig, String> {
+    let content = import_export::read_bundle_file(&path)
+        .map_err(|err| log_command_error("confirm_import_bundle_file read failed", err))?;
+    confirm_import_bundle(app, content)
+}
+
+#[tauri::command]
+pub fn create_task_from_template(template: crate::domain::TaskTemplate) -> TaskItem {
+    import_export::template_to_task(&template)
 }
 
 #[tauri::command]

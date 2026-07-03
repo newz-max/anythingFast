@@ -92,6 +92,76 @@ export interface TaskTemplate {
   actions: Omit<TaskAction, 'id'>[]
 }
 
+export interface TaskExportBundle {
+  schemaVersion: number
+  exportedAt: string
+  sourceApp: string
+  tasks: TaskItem[]
+  templates: TaskTemplate[]
+}
+
+export interface ExportBundleRequest {
+  taskIds: string[]
+  templateIds: string[]
+}
+
+export interface ImportPreview {
+  schemaVersion: number
+  validTaskCount: number
+  templateCount: number
+  totalActionCount: number
+  riskSummary: ImportRiskSummary
+  conflictSummary: ImportConflictSummary
+  pathHints: ImportPathHint[]
+  tasks: ImportTaskPreview[]
+  templates: ImportTemplatePreview[]
+}
+
+export interface ImportRiskSummary {
+  low: number
+  medium: number
+  high: number
+  commandActions: number
+}
+
+export interface ImportConflictSummary {
+  taskIdsRegenerated: number
+  actionIdsRegenerated: number
+  templateIdsRegenerated: number
+}
+
+export interface ImportPathHint {
+  ownerId: string
+  ownerName: string
+  actionName: string
+  field: string
+  path: string
+  exists: boolean
+  message: string
+}
+
+export interface ImportTaskPreview {
+  id: string
+  originalId: string
+  name: string
+  actionTypes: ActionType[]
+  actionCount: number
+  riskLevel: RiskLevel
+  commandActionCount: number
+}
+
+export interface ImportTemplatePreview {
+  id: string
+  originalId: string
+  name: string
+  category?: string
+  keywords: string[]
+  actionTypes: ActionType[]
+  actionCount: number
+  riskLevel: RiskLevel
+  commandActionCount: number
+}
+
 export interface AppSettings {
   globalShortcut: string
   theme: AppTheme
@@ -110,6 +180,7 @@ export interface AppConfig {
   version: number
   tasks: TaskItem[]
   tags: TaskTag[]
+  templates: TaskTemplate[]
   settings: AppSettings
 }
 

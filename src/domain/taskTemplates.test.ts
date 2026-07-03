@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { builtInTaskTemplates, createTaskFromTemplate } from '@/domain/taskTemplates'
+import { builtInTaskTemplates, createTaskFromTemplate, deriveTemplateRisk } from '@/domain/taskTemplates'
 
 describe('task templates', () => {
   it('creates an editable task draft from a built-in template', () => {
@@ -12,5 +12,9 @@ describe('task templates', () => {
     expect(task.actions[0].id).toMatch(/^action-/)
     expect(task.enabled).toBe(true)
     expect(task.favorite).toBe(false)
+  })
+
+  it('derives template risk from its action sequence', () => {
+    expect(deriveTemplateRisk(builtInTaskTemplates[2])).toBe('medium')
   })
 })

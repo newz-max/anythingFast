@@ -3,13 +3,17 @@ import { getErrorMessage, logDevError } from '@/utils/errors'
 import type {
   AppConfig,
   AppSettings,
+  ExportBundleRequest,
+  ImportPreview,
   ExecutionLogSummary,
   PreviewAction,
   RiskAnalysis,
   ShortcutStatus,
   TaskAction,
+  TaskExportBundle,
   TaskExecutionSummary,
   TaskItem,
+  TaskTemplate,
   ValidationResult
 } from '@/types/domain'
 
@@ -37,6 +41,14 @@ export const tauriApi = {
   runTaskAction: (taskId: string, actionId: string, confirmationToken?: string) =>
     invokeCommand<TaskExecutionSummary>('run_task_action', { taskId, actionId, confirmationToken }),
   previewAction: (action: TaskAction) => invokeCommand<PreviewAction>('preview_action', { action }),
+  exportTaskBundle: (request: ExportBundleRequest) => invokeCommand<TaskExportBundle>('export_task_bundle', { request }),
+  saveTaskBundleFile: (request: ExportBundleRequest, path: string) =>
+    invokeCommand<TaskExportBundle>('save_task_bundle_file', { request, path }),
+  previewImportBundle: (bundleJson: string) => invokeCommand<ImportPreview>('preview_import_bundle', { bundleJson }),
+  previewImportBundleFile: (path: string) => invokeCommand<ImportPreview>('preview_import_bundle_file', { path }),
+  confirmImportBundle: (bundleJson: string) => invokeCommand<AppConfig>('confirm_import_bundle', { bundleJson }),
+  confirmImportBundleFile: (path: string) => invokeCommand<AppConfig>('confirm_import_bundle_file', { path }),
+  createTaskFromTemplate: (template: TaskTemplate) => invokeCommand<TaskItem>('create_task_from_template', { template }),
   loadExecutionLogs: (limit: number) => invokeCommand<ExecutionLogSummary[]>('load_execution_logs', { limit }),
   loadShortcutStatus: () => invokeCommand<ShortcutStatus>('load_shortcut_status'),
   updateSettings: (settings: AppSettings) => invokeCommand<AppConfig>('update_settings', { settings })

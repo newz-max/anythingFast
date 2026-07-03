@@ -97,8 +97,6 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
             let path = string_param(action, "path");
             if path.trim().is_empty() {
                 issues.push(issue("path", "程序路径不能为空"));
-            } else if !Path::new(path).exists() {
-                issues.push(issue("path", "程序路径不存在"));
             }
         }
         ActionType::OpenUrl => {
@@ -111,16 +109,12 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
             let path = string_param(action, "path");
             if path.trim().is_empty() {
                 issues.push(issue("path", "文件路径不能为空"));
-            } else if !Path::new(path).is_file() {
-                issues.push(issue("path", "文件不存在"));
             }
         }
         ActionType::OpenFolder => {
             let path = string_param(action, "path");
             if path.trim().is_empty() {
                 issues.push(issue("path", "文件夹路径不能为空"));
-            } else if !Path::new(path).is_dir() {
-                issues.push(issue("path", "文件夹不存在"));
             }
         }
         ActionType::RunCommand => {
@@ -129,8 +123,6 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
                 let script_path = string_param(action, "scriptPath");
                 if script_path.trim().is_empty() {
                     issues.push(issue("scriptPath", "脚本文件不能为空"));
-                } else if !Path::new(script_path).is_file() {
-                    issues.push(issue("scriptPath", "脚本文件不存在"));
                 } else if !is_supported_script_path(script_path) {
                     issues.push(issue("scriptPath", "脚本文件必须是 ps1、cmd 或 bat"));
                 } else if is_powershell_script_path(script_path)
@@ -144,8 +136,6 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
             let working_dir = string_param(action, "workingDir");
             if working_dir.trim().is_empty() {
                 issues.push(issue("workingDir", "工作目录不能为空"));
-            } else if !Path::new(working_dir).is_dir() {
-                issues.push(issue("workingDir", "工作目录不存在"));
             }
             let shell = string_param(action, "shell");
             if !is_supported_command_shell(shell) {
@@ -525,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_script_file() {
+    fn allows_missing_script_file_for_portable_config() {
         let temp_dir = temp_validation_dir();
         let action = TaskAction {
             id: "a".into(),
@@ -546,13 +536,7 @@ mod tests {
 
         let result = validate_action_model(&action);
 
-        assert!(!result.valid);
-        assert!(
-            result
-                .issues
-                .iter()
-                .any(|issue| issue.field == "scriptPath")
-        );
+        assert!(result.valid);
         let _ = fs::remove_dir_all(temp_dir);
     }
 

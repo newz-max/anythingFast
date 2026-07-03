@@ -1,6 +1,6 @@
 import { clonePlainDto } from '@/utils/clonePlainDto'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
-import type { ActionType, AppConfig, RiskLevel, TaskAction, TaskItem } from '@/types/domain'
+import type { ActionType, AppConfig, RiskLevel, TaskAction, TaskItem, TaskTemplate } from '@/types/domain'
 
 const now = () => new Date().toISOString()
 
@@ -11,6 +11,7 @@ export function createDefaultConfig(): AppConfig {
     version: 2,
     tasks: [],
     tags: [],
+    templates: [],
     settings: {
       globalShortcut: 'Alt+Space',
       theme: 'dark'
@@ -18,7 +19,7 @@ export function createDefaultConfig(): AppConfig {
   }
 }
 
-export function normalizeConfig(config: AppConfig): AppConfig {
+export function normalizeConfig(config: Partial<AppConfig>): AppConfig {
   const defaultConfig = createDefaultConfig()
   const settings = {
     ...defaultConfig.settings,
@@ -38,6 +39,7 @@ export function normalizeConfig(config: AppConfig): AppConfig {
       ...tag,
       name: tag.name.trim()
     })),
+    templates: (config.templates || []).map(normalizeTemplate),
     settings
   }
 }
@@ -66,6 +68,28 @@ function normalizeAction(action: TaskAction): TaskAction {
   return {
     ...normalized,
     riskLevel: deriveActionRisk(normalized)
+  }
+}
+
+export function normalizeTemplate(template: TaskTemplate): TaskTemplate {
+  const actions = (template.actions || []).map((action) => {
+    const normalized = {
+      ...action,
+      enabled: action.enabled ?? true,
+      params: normalizeActionParams(action as TaskAction)
+    }
+    return {
+      ...normalized,
+      riskLevel: deriveActionRisk({ ...normalized, id: 'template-action' })
+    }
+  })
+
+  return {
+    ...template,
+    category: template.category?.trim() || '未分类',
+    keywords: template.keywords || [],
+    description: template.description || '',
+    actions
   }
 }
 
