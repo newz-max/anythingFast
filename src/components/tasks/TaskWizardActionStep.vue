@@ -42,13 +42,15 @@ defineEmits<{
             </div>
             <div class="action-detail">{{ describeAction(action) }}</div>
           </div>
-          <NSpace align="center">
-            <NSwitch v-model:value="action.enabled" size="small" />
-            <NButton size="small" secondary @click="$emit('edit', action)">编辑</NButton>
-            <NButton size="small" :disabled="index === 0" @click="$emit('move', action.id, -1)">上移</NButton>
-            <NButton size="small" :disabled="index === actions.length - 1" @click="$emit('move', action.id, 1)">下移</NButton>
-            <NButton size="small" type="error" secondary @click="$emit('remove', action.id)">删除</NButton>
-          </NSpace>
+          <div class="action-controls">
+            <NSpace align="center">
+              <NSwitch v-model:value="action.enabled" size="small" />
+              <NButton size="small" secondary @click="$emit('edit', action)">编辑</NButton>
+              <NButton size="small" :disabled="index === 0" @click="$emit('move', action.id, -1)">上移</NButton>
+              <NButton size="small" :disabled="index === actions.length - 1" @click="$emit('move', action.id, 1)">下移</NButton>
+              <NButton size="small" type="error" secondary @click="$emit('remove', action.id)">删除</NButton>
+            </NSpace>
+          </div>
         </div>
       </NCard>
     </div>
@@ -59,10 +61,11 @@ defineEmits<{
 .action-step {
   display: grid;
   gap: 12px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .action-step-header,
-.action-row,
 .action-title-row {
   display: flex;
   align-items: center;
@@ -99,23 +102,38 @@ defineEmits<{
 .action-list {
   display: grid;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .action-card {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   border-radius: 8px;
 }
 
-.action-row {
-  justify-content: space-between;
+.action-card :deep(.n-card__content) {
   min-width: 0;
-  flex-wrap: wrap;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.action-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .order {
   display: inline-grid;
   width: 28px;
   height: 28px;
-  flex: 0 0 28px;
   place-items: center;
   border-radius: 50%;
   background: #edf4ff;
@@ -125,7 +143,14 @@ defineEmits<{
 
 .action-main {
   min-width: 0;
-  flex: 1;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.action-title-row {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .action-title {
@@ -144,6 +169,25 @@ defineEmits<{
   white-space: nowrap;
 }
 
+.action-controls {
+  grid-column: 2;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  justify-self: end;
+}
+
+.action-controls :deep(.n-space) {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.action-controls :deep(.n-button) {
+  min-width: 0;
+}
+
 @media (max-width: 720px) {
   .action-step-header {
     align-items: flex-start;
@@ -158,26 +202,30 @@ defineEmits<{
     align-items: flex-start;
   }
 
-  .action-main {
-    flex-basis: calc(100% - 40px);
-  }
-
   .action-title-row {
     flex-wrap: wrap;
+    overflow: visible;
   }
 
-  .action-row :deep(.n-space) {
+  .action-controls {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-self: stretch;
+    overflow: visible;
+  }
+
+  .action-controls :deep(.n-space) {
     width: 100%;
     justify-content: flex-end;
   }
 }
 
 @media (max-width: 480px) {
-  .action-row :deep(.n-space) {
+  .action-controls :deep(.n-space) {
     justify-content: flex-start;
   }
 
-  .action-row :deep(.n-button) {
+  .action-controls :deep(.n-button) {
     flex: 1 1 72px;
   }
 }
