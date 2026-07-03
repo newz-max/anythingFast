@@ -105,4 +105,20 @@ describe('ActionParamForm', () => {
     expect(updatedAction.params).not.toBe(sourceAction.params)
     expect((updatedAction.params as CommandParams).showTerminal).toBe(true)
   })
+
+  it('offers PowerShell 7 as a command shell option', () => {
+    const wrapper = mount(ActionParamForm, {
+      props: {
+        modelValue: makeCommandAction()
+      },
+      global: {
+        stubs: formStubs
+      }
+    })
+
+    const selects = wrapper.findAllComponents({ name: 'NSelect' })
+    const shellSelect = selects[1]
+
+    expect(shellSelect.props('options')).toContainEqual({ label: 'PowerShell 7', value: 'pwsh' })
+  })
 })

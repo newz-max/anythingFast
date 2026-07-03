@@ -63,12 +63,17 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
           issues.push({ field: 'scriptPath', message: '脚本文件不能为空' })
         } else if (!isSupportedScriptPath(action.params.scriptPath)) {
           issues.push({ field: 'scriptPath', message: '脚本文件必须是 ps1、cmd 或 bat' })
+        } else if (isPowerShellScriptPath(action.params.scriptPath) && action.params.shell === 'cmd') {
+          issues.push({ field: 'shell', message: 'ps1 脚本必须使用 PowerShell 7 或 PowerShell' })
         }
       } else if (!action.params.command.trim()) {
         issues.push({ field: 'command', message: '命令内容不能为空' })
       }
       if (!action.params.workingDir?.trim()) {
         issues.push({ field: 'workingDir', message: '工作目录不能为空' })
+      }
+      if (!isSupportedCommandShell(action.params.shell)) {
+        issues.push({ field: 'shell', message: 'Shell 必须是 PowerShell 7、PowerShell 或 cmd' })
       }
       break
     case 'delay':
@@ -87,6 +92,14 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
 
 function isSupportedScriptPath(value: string) {
   return /\.(ps1|cmd|bat)$/i.test(value.trim())
+}
+
+function isPowerShellScriptPath(value: string) {
+  return /\.ps1$/i.test(value.trim())
+}
+
+function isSupportedCommandShell(value: string) {
+  return value === 'pwsh' || value === 'powershell' || value === 'cmd'
 }
 
 function isHttpUrl(value: string) {

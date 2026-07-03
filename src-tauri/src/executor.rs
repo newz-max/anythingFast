@@ -462,7 +462,9 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
             ),
         );
         return Err(ActionRunOutput {
-            message: format!("命令执行失败，退出码：{exit_code}"),
+            message: format!(
+                "命令执行失败，退出码：{exit_code}，显示终端模式未捕获 stdout/stderr，请查看弹出的终端输出"
+            ),
             exit_code: Some(exit_code),
             ..Default::default()
         });
@@ -543,7 +545,7 @@ fn inline_command(action: &TaskAction) -> Result<Command, String> {
         cmd.args(["/C", command_text]);
         Ok(cmd)
     } else {
-        let mut ps = Command::new("powershell");
+        let mut ps = Command::new(powershell_program(shell));
         ps.args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -564,7 +566,15 @@ fn script_command(action: &TaskAction) -> Result<Command, String> {
     let extension = script_extension(script_path)
         .ok_or_else(|| "脚本文件必须是 ps1、cmd 或 bat".to_string())?;
     if extension == "ps1" {
-        let mut ps = Command::new("powershell");
+        let shell = action
+            .params
+            .get("shell")
+            .and_then(|value| value.as_str())
+            .unwrap_or("powershell");
+        if shell == "cmd" {
+            return Err("ps1 脚本必须使用 pwsh 或 powershell".to_string());
+        }
+        let mut ps = Command::new(powershell_program(shell));
         ps.args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -579,6 +589,14 @@ fn script_command(action: &TaskAction) -> Result<Command, String> {
         cmd.args(["/C", script_path]);
         cmd.args(script_args(action));
         Ok(cmd)
+    }
+}
+
+fn powershell_program(shell: &str) -> &str {
+    if shell == "pwsh" {
+        "pwsh"
+    } else {
+        "powershell"
     }
 }
 
@@ -853,6 +871,100 @@ mod tests {
         };
 
         assert!(show_terminal(&action));
+    }
+
+    #[test]
+    fn show_terminal_failure_message_mentions_uncaptured_output() {
+        let working_dir = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "exit 7",
+                "workingDir": working_dir,
+                "showTerminal": true,
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        let output = run_command(&action).unwrap_err();
+
+        assert_eq!(output.exit_code, Some(7));
+        assert!(output.message.contains("退出码：7"));
+        assert!(output.message.contains("未捕获 stdout/stderr"));
+    }
+
+    #[test]
+    fn script_command_uses_pwsh_for_ps1_when_requested() {
+        let temp_dir = std::env::temp_dir().join(format!("anything-fast-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let script_path = temp_dir.join("start.ps1");
+        std::fs::write(&script_path, "Write-Output 'ok'").expect("write script");
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("script".into()),
+            params: json!({
+                "source": "script",
+                "command": "",
+                "workingDir": temp_dir.to_string_lossy(),
+                "shell": "pwsh",
+                "scriptPath": script_path.to_string_lossy(),
+                "scriptArgs": ["dev"]
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::High,
+        };
+
+        let command = script_command(&action).expect("script command");
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(command.get_program().to_string_lossy(), "pwsh");
+        assert!(args.iter().any(|arg| arg == "-File"));
+        assert!(args.iter().any(|arg| arg == "dev"));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn script_command_rejects_cmd_shell_for_ps1() {
+        let temp_dir = std::env::temp_dir().join(format!("anything-fast-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let script_path = temp_dir.join("start.ps1");
+        std::fs::write(&script_path, "Write-Output 'ok'").expect("write script");
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("script".into()),
+            params: json!({
+                "source": "script",
+                "command": "",
+                "workingDir": temp_dir.to_string_lossy(),
+                "shell": "cmd",
+                "scriptPath": script_path.to_string_lossy()
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::High,
+        };
+
+        let err = script_command(&action).unwrap_err();
+
+        assert!(err.contains("ps1 脚本必须使用"));
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[test]

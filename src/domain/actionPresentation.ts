@@ -5,7 +5,7 @@ export const actionTypeOptions: Array<{ label: string; value: ActionType; descri
   { label: '打开 URL', value: 'openUrl', description: '在默认浏览器中打开网页地址。' },
   { label: '打开文件', value: 'openFile', description: '使用系统默认程序打开本地文件。' },
   { label: '打开文件夹', value: 'openFolder', description: '打开本地文件夹位置。' },
-  { label: '执行命令', value: 'runCommand', description: '通过 PowerShell 或 cmd 执行本地命令。' },
+  { label: '执行命令', value: 'runCommand', description: '通过 PowerShell 7、PowerShell 或 cmd 执行本地命令。' },
   { label: '延时等待', value: 'delay', description: '在动作之间等待一段时间。' }
 ]
 

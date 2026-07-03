@@ -8,6 +8,7 @@ type MutableParams = Record<string, any>
 const { pickDirectory, pickScriptFile } = usePathPicker()
 
 const commandShellOptions = [
+  { label: 'PowerShell 7', value: 'pwsh' },
   { label: 'PowerShell', value: 'powershell' },
   { label: 'cmd', value: 'cmd' }
 ]

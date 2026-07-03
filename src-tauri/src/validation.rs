@@ -133,6 +133,10 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
                     issues.push(issue("scriptPath", "脚本文件不存在"));
                 } else if !is_supported_script_path(script_path) {
                     issues.push(issue("scriptPath", "脚本文件必须是 ps1、cmd 或 bat"));
+                } else if is_powershell_script_path(script_path)
+                    && string_param(action, "shell") == "cmd"
+                {
+                    issues.push(issue("shell", "ps1 脚本必须使用 pwsh 或 powershell"));
                 }
             } else if string_param(action, "command").trim().is_empty() {
                 issues.push(issue("command", "命令内容不能为空"));
@@ -143,11 +147,9 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
             } else if !Path::new(working_dir).is_dir() {
                 issues.push(issue("workingDir", "工作目录不存在"));
             }
-            if source != "script" {
-                let shell = string_param(action, "shell");
-                if shell != "powershell" && shell != "cmd" {
-                    issues.push(issue("shell", "Shell 必须是 powershell 或 cmd"));
-                }
+            let shell = string_param(action, "shell");
+            if !is_supported_command_shell(shell) {
+                issues.push(issue("shell", "Shell 必须是 pwsh、powershell 或 cmd"));
             }
         }
         ActionType::Delay => {
@@ -232,6 +234,18 @@ fn is_supported_script_path(path: &str) -> bool {
             )
         })
         .unwrap_or(false)
+}
+
+fn is_powershell_script_path(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|extension| extension.eq_ignore_ascii_case("ps1"))
+        .unwrap_or(false)
+}
+
+fn is_supported_command_shell(shell: &str) -> bool {
+    matches!(shell, "pwsh" | "powershell" | "cmd")
 }
 
 fn issue(field: &str, message: &str) -> FieldIssue {
@@ -389,6 +403,90 @@ mod tests {
         };
 
         assert!(validate_action_model(&action).valid);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn validates_script_command_with_pwsh_shell() {
+        let temp_dir = temp_validation_dir();
+        let script_path = temp_dir.join("start.ps1");
+        fs::write(&script_path, "Write-Output 'ok'").expect("write script");
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: None,
+            params: json!({
+                "source": "script",
+                "command": "",
+                "workingDir": temp_dir.to_string_lossy(),
+                "shell": "pwsh",
+                "scriptPath": script_path.to_string_lossy()
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: RiskLevel::High,
+        };
+
+        assert!(validate_action_model(&action).valid);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn rejects_unsupported_script_command_shell() {
+        let temp_dir = temp_validation_dir();
+        let script_path = temp_dir.join("start.ps1");
+        fs::write(&script_path, "Write-Output 'ok'").expect("write script");
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: None,
+            params: json!({
+                "source": "script",
+                "command": "",
+                "workingDir": temp_dir.to_string_lossy(),
+                "shell": "bash",
+                "scriptPath": script_path.to_string_lossy()
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: RiskLevel::High,
+        };
+
+        let result = validate_action_model(&action);
+
+        assert!(!result.valid);
+        assert!(result.issues.iter().any(|issue| issue.field == "shell"));
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn rejects_cmd_shell_for_powershell_script() {
+        let temp_dir = temp_validation_dir();
+        let script_path = temp_dir.join("start.ps1");
+        fs::write(&script_path, "Write-Output 'ok'").expect("write script");
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: None,
+            params: json!({
+                "source": "script",
+                "command": "",
+                "workingDir": temp_dir.to_string_lossy(),
+                "shell": "cmd",
+                "scriptPath": script_path.to_string_lossy()
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: RiskLevel::High,
+        };
+
+        let result = validate_action_model(&action);
+
+        assert!(!result.valid);
+        assert!(result.issues.iter().any(|issue| issue.field == "shell"));
         let _ = fs::remove_dir_all(temp_dir);
     }
 

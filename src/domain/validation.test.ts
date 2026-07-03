@@ -66,6 +66,74 @@ describe('validation', () => {
     expect(result.riskLevel).toBe('high')
   })
 
+  it('allows PowerShell 7 for script command parameters locally', () => {
+    const action: TaskAction = {
+      id: 'action-1',
+      type: 'runCommand',
+      name: 'script',
+      params: {
+        source: 'script',
+        command: '',
+        workingDir: 'D:\\Project\\anythingFast',
+        shell: 'pwsh',
+        scriptPath: 'D:\\Project\\anythingFast\\start.ps1',
+        scriptArgs: []
+      },
+      enabled: true,
+      riskLevel: 'medium'
+    }
+
+    const result = validateActionLocal(action)
+
+    expect(result.valid).toBe(true)
+  })
+
+  it('rejects unsupported command shells locally', () => {
+    const action: TaskAction = {
+      id: 'action-1',
+      type: 'runCommand',
+      name: 'script',
+      params: {
+        source: 'script',
+        command: '',
+        workingDir: 'D:\\Project\\anythingFast',
+        shell: 'bash' as never,
+        scriptPath: 'D:\\Project\\anythingFast\\start.ps1',
+        scriptArgs: []
+      },
+      enabled: true,
+      riskLevel: 'medium'
+    }
+
+    const result = validateActionLocal(action)
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.field)).toContain('shell')
+  })
+
+  it('rejects cmd shell for PowerShell script files locally', () => {
+    const action: TaskAction = {
+      id: 'action-1',
+      type: 'runCommand',
+      name: 'script',
+      params: {
+        source: 'script',
+        command: '',
+        workingDir: 'D:\\Project\\anythingFast',
+        shell: 'cmd',
+        scriptPath: 'D:\\Project\\anythingFast\\start.ps1',
+        scriptArgs: []
+      },
+      enabled: true,
+      riskLevel: 'medium'
+    }
+
+    const result = validateActionLocal(action)
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.field)).toContain('shell')
+  })
+
   it('rejects unsupported script extensions locally', () => {
     const action: TaskAction = {
       id: 'action-1',
