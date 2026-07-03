@@ -148,6 +148,12 @@ export interface ActionExecutionResult {
   actionType: ActionType
   status: ExecutionStatus
   message?: string
+  startedAt?: string
+  finishedAt?: string
+  durationMs?: number
+  exitCode?: number
+  stdout?: string
+  stderr?: string
 }
 
 export interface TaskExecutionSummary {

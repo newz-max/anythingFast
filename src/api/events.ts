@@ -1,12 +1,27 @@
 import { listen } from '@tauri-apps/api/event'
-import type { ActionExecutionResult, ShortcutStatus } from '@/types/domain'
+import type { ActionExecutionResult, ActionType, ExecutionScope, ShortcutStatus } from '@/types/domain'
+
+export type ExecutionEventStatus =
+  | 'started'
+  | 'action-started'
+  | 'action-success'
+  | 'action-failed'
+  | 'action-skipped'
+  | 'finished'
 
 export interface ExecutionEventPayload {
+  runId: string
   taskId: string
   taskName: string
-  action?: ActionExecutionResult
-  status: string
+  scope: ExecutionScope
+  status: ExecutionEventStatus
+  currentIndex?: number
+  totalActions: number
+  actionId?: string
+  actionName?: string
+  actionType?: ActionType
   message?: string
+  result?: ActionExecutionResult
 }
 
 export function listenExecutionEvents(handler: (payload: ExecutionEventPayload) => void) {

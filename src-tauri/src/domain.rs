@@ -180,6 +180,12 @@ pub struct ActionExecutionResult {
     pub action_type: ActionType,
     pub status: ExecutionStatus,
     pub message: Option<String>,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub exit_code: Option<i32>,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

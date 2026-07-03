@@ -10,37 +10,134 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
+const OUTPUT_LIMIT_CHARS: usize = 8192;
+
 pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSummary, String> {
+    let run_id = Uuid::new_v4().to_string();
     let started_at = Utc::now().to_rfc3339();
-    emit_event(app, task, "started", None, None);
+    let total_actions = task.actions.len();
+    emit_event(
+        app,
+        EventContext {
+            run_id: &run_id,
+            task,
+            scope: ExecutionScope::Task,
+            status: "started",
+            current_index: None,
+            total_actions,
+            action: None,
+            result: None,
+            message: Some("事项开始执行".into()),
+        },
+    );
 
     let mut results = Vec::new();
     let mut failed = false;
 
-    for action in task.actions.iter() {
+    for (index, action) in task.actions.iter().enumerate() {
+        let current_index = index + 1;
         if !action.enabled {
-            results.push(action_result(
+            let timestamp = Utc::now().to_rfc3339();
+            let result = action_result(
                 action,
                 ExecutionStatus::Skipped,
                 Some("动作已停用".into()),
-            ));
+                Some(timestamp.clone()),
+                Some(timestamp),
+                Some(0),
+                ActionRunOutput::default(),
+            );
+            emit_event(
+                app,
+                EventContext {
+                    run_id: &run_id,
+                    task,
+                    scope: ExecutionScope::Task,
+                    status: "action-skipped",
+                    current_index: Some(current_index),
+                    total_actions,
+                    action: Some(action),
+                    result: Some(&result),
+                    message: result.message.clone(),
+                },
+            );
+            results.push(result);
             continue;
         }
 
-        emit_event(app, task, "running", None, Some(action));
+        emit_event(
+            app,
+            EventContext {
+                run_id: &run_id,
+                task,
+                scope: ExecutionScope::Task,
+                status: "action-started",
+                current_index: Some(current_index),
+                total_actions,
+                action: Some(action),
+                result: None,
+                message: Some(action_name(action)),
+            },
+        );
+        let action_started_at = Utc::now();
+        let timer = Instant::now();
         match execute_action(action) {
-            Ok(message) => {
-                let result = action_result(action, ExecutionStatus::Success, Some(message));
-                emit_event(app, task, "action-success", Some(&result), Some(action));
+            Ok(output) => {
+                let finished_at = Utc::now();
+                let result = action_result(
+                    action,
+                    ExecutionStatus::Success,
+                    Some(output.message.clone()),
+                    Some(action_started_at.to_rfc3339()),
+                    Some(finished_at.to_rfc3339()),
+                    Some(timer.elapsed().as_millis() as u64),
+                    output,
+                );
+                emit_event(
+                    app,
+                    EventContext {
+                        run_id: &run_id,
+                        task,
+                        scope: ExecutionScope::Task,
+                        status: "action-success",
+                        current_index: Some(current_index),
+                        total_actions,
+                        action: Some(action),
+                        result: Some(&result),
+                        message: result.message.clone(),
+                    },
+                );
                 results.push(result);
             }
-            Err(message) => {
-                let result = action_result(action, ExecutionStatus::Failed, Some(message));
-                emit_event(app, task, "failed", Some(&result), Some(action));
+            Err(output) => {
+                let finished_at = Utc::now();
+                let result = action_result(
+                    action,
+                    ExecutionStatus::Failed,
+                    Some(output.message.clone()),
+                    Some(action_started_at.to_rfc3339()),
+                    Some(finished_at.to_rfc3339()),
+                    Some(timer.elapsed().as_millis() as u64),
+                    output,
+                );
+                emit_event(
+                    app,
+                    EventContext {
+                        run_id: &run_id,
+                        task,
+                        scope: ExecutionScope::Task,
+                        status: "action-failed",
+                        current_index: Some(current_index),
+                        total_actions,
+                        action: Some(action),
+                        result: Some(&result),
+                        message: result.message.clone(),
+                    },
+                );
                 results.push(result);
                 if !action.continue_on_error.unwrap_or(false) {
                     failed = true;
@@ -81,7 +178,24 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
     if let Err(err) = storage::append_log(app, log) {
         dev_log_error("Append task execution log failed", &err);
     }
-    emit_event(app, task, "finished", None, None);
+    emit_event(
+        app,
+        EventContext {
+            run_id: &run_id,
+            task,
+            scope: ExecutionScope::Task,
+            status: "finished",
+            current_index: Some(summary.actions.len()),
+            total_actions,
+            action: None,
+            result: None,
+            message: Some(if summary.status == ExecutionStatus::Success {
+                "事项执行完成".into()
+            } else {
+                "事项执行失败".into()
+            }),
+        },
+    );
 
     Ok(summary)
 }
@@ -91,19 +205,92 @@ pub fn execute_task_action(
     task: &TaskItem,
     action: &TaskAction,
 ) -> Result<TaskExecutionSummary, String> {
+    let run_id = Uuid::new_v4().to_string();
     let started_at = Utc::now().to_rfc3339();
-    emit_event(app, task, "started", None, None);
-    emit_event(app, task, "running", None, Some(action));
+    emit_event(
+        app,
+        EventContext {
+            run_id: &run_id,
+            task,
+            scope: ExecutionScope::Action,
+            status: "started",
+            current_index: None,
+            total_actions: 1,
+            action: Some(action),
+            result: None,
+            message: Some("动作开始执行".into()),
+        },
+    );
+    emit_event(
+        app,
+        EventContext {
+            run_id: &run_id,
+            task,
+            scope: ExecutionScope::Action,
+            status: "action-started",
+            current_index: Some(1),
+            total_actions: 1,
+            action: Some(action),
+            result: None,
+            message: Some(action_name(action)),
+        },
+    );
 
+    let action_started_at = Utc::now();
+    let timer = Instant::now();
     let result = match execute_action(action) {
-        Ok(message) => {
-            let result = action_result(action, ExecutionStatus::Success, Some(message));
-            emit_event(app, task, "action-success", Some(&result), Some(action));
+        Ok(output) => {
+            let finished_at = Utc::now();
+            let result = action_result(
+                action,
+                ExecutionStatus::Success,
+                Some(output.message.clone()),
+                Some(action_started_at.to_rfc3339()),
+                Some(finished_at.to_rfc3339()),
+                Some(timer.elapsed().as_millis() as u64),
+                output,
+            );
+            emit_event(
+                app,
+                EventContext {
+                    run_id: &run_id,
+                    task,
+                    scope: ExecutionScope::Action,
+                    status: "action-success",
+                    current_index: Some(1),
+                    total_actions: 1,
+                    action: Some(action),
+                    result: Some(&result),
+                    message: result.message.clone(),
+                },
+            );
             result
         }
-        Err(message) => {
-            let result = action_result(action, ExecutionStatus::Failed, Some(message));
-            emit_event(app, task, "failed", Some(&result), Some(action));
+        Err(output) => {
+            let finished_at = Utc::now();
+            let result = action_result(
+                action,
+                ExecutionStatus::Failed,
+                Some(output.message.clone()),
+                Some(action_started_at.to_rfc3339()),
+                Some(finished_at.to_rfc3339()),
+                Some(timer.elapsed().as_millis() as u64),
+                output,
+            );
+            emit_event(
+                app,
+                EventContext {
+                    run_id: &run_id,
+                    task,
+                    scope: ExecutionScope::Action,
+                    status: "action-failed",
+                    current_index: Some(1),
+                    total_actions: 1,
+                    action: Some(action),
+                    result: Some(&result),
+                    message: result.message.clone(),
+                },
+            );
             result
         }
     };
@@ -135,17 +322,36 @@ pub fn execute_task_action(
     if let Err(err) = storage::append_log(app, log) {
         dev_log_error("Append action execution log failed", &err);
     }
-    emit_event(app, task, "finished", None, None);
+    emit_event(
+        app,
+        EventContext {
+            run_id: &run_id,
+            task,
+            scope: ExecutionScope::Action,
+            status: "finished",
+            current_index: Some(1),
+            total_actions: 1,
+            action: Some(action),
+            result: None,
+            message: Some(if summary.status == ExecutionStatus::Success {
+                "动作执行完成".into()
+            } else {
+                "动作执行失败".into()
+            }),
+        },
+    );
 
     Ok(summary)
 }
 
-fn execute_action(action: &TaskAction) -> Result<String, String> {
+fn execute_action(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> {
     match action.action_type {
-        ActionType::OpenProgram => open_program(action),
-        ActionType::OpenUrl | ActionType::OpenFile | ActionType::OpenFolder => open_target(action),
+        ActionType::OpenProgram => open_program(action).map(ok_output).map_err(failed_output),
+        ActionType::OpenUrl | ActionType::OpenFile | ActionType::OpenFolder => {
+            open_target(action).map(ok_output).map_err(failed_output)
+        }
         ActionType::RunCommand => run_command(action),
-        ActionType::Delay => delay(action),
+        ActionType::Delay => delay(action).map(ok_output).map_err(failed_output),
     }
 }
 
@@ -199,16 +405,16 @@ fn open_target(action: &TaskAction) -> Result<String, String> {
     Ok("已打开".into())
 }
 
-fn run_command(action: &TaskAction) -> Result<String, String> {
-    let working_dir = string_param(action, "workingDir")?;
+fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> {
+    let working_dir = string_param(action, "workingDir").map_err(failed_output)?;
     if !Path::new(working_dir).is_dir() {
-        return Err(format!("工作目录不存在：{working_dir}"));
+        return Err(failed_output(format!("工作目录不存在：{working_dir}")));
     }
 
     let mut command = if command_source(action) == "script" {
-        script_command(action)?
+        script_command(action).map_err(failed_output)?
     } else {
-        inline_command(action)?
+        inline_command(action).map_err(failed_output)?
     };
 
     command.current_dir(working_dir);
@@ -234,11 +440,16 @@ fn run_command(action: &TaskAction) -> Result<String, String> {
                     action.id, working_dir
                 ),
             );
-            err.to_string()
+            failed_output(err.to_string())
         })?;
         if status.success() {
-            return Ok("命令执行成功".into());
+            return Ok(ActionRunOutput {
+                message: "命令执行成功".into(),
+                exit_code: status.code(),
+                ..Default::default()
+            });
         }
+        let exit_code = status.code().unwrap_or(-1);
         dev_log_error(
             "Run command action failed",
             format!(
@@ -247,13 +458,14 @@ fn run_command(action: &TaskAction) -> Result<String, String> {
                 action.name.clone().unwrap_or_else(|| "未命名动作".into()),
                 action.action_type,
                 working_dir,
-                status.code().unwrap_or(-1)
+                exit_code
             ),
         );
-        return Err(format!(
-            "命令执行失败，退出码：{}",
-            status.code().unwrap_or(-1)
-        ));
+        return Err(ActionRunOutput {
+            message: format!("命令执行失败，退出码：{exit_code}"),
+            exit_code: Some(exit_code),
+            ..Default::default()
+        });
     }
 
     let output = command.output().map_err(|err| {
@@ -264,13 +476,19 @@ fn run_command(action: &TaskAction) -> Result<String, String> {
                 action.id, working_dir
             ),
         );
-        err.to_string()
+        failed_output(err.to_string())
     })?;
+    let exit_code = output.status.code().unwrap_or(-1);
+    let stdout = truncate_output(&String::from_utf8_lossy(&output.stdout));
+    let stderr = truncate_output(&String::from_utf8_lossy(&output.stderr));
     if output.status.success() {
-        Ok("命令执行成功".into())
+        Ok(ActionRunOutput {
+            message: "命令执行成功".into(),
+            exit_code: Some(exit_code),
+            stdout,
+            stderr,
+        })
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
         dev_log_error(
             "Run command action failed",
             format!(
@@ -279,16 +497,28 @@ fn run_command(action: &TaskAction) -> Result<String, String> {
                 action.name.clone().unwrap_or_else(|| "未命名动作".into()),
                 action.action_type,
                 working_dir,
-                output.status.code().unwrap_or(-1),
-                stdout.trim(),
-                stderr.trim()
+                exit_code,
+                stdout.as_deref().unwrap_or("").trim(),
+                stderr.as_deref().unwrap_or("").trim()
             ),
         );
-        Err(format!(
-            "命令执行失败，退出码：{}，{}",
-            output.status.code().unwrap_or(-1),
-            stderr.trim()
-        ))
+        let detail = stderr
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                stdout
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+            })
+            .unwrap_or("无输出");
+        Err(ActionRunOutput {
+            message: format!("命令执行失败，退出码：{exit_code}，{detail}"),
+            exit_code: Some(exit_code),
+            stdout,
+            stderr,
+        })
     }
 }
 
@@ -422,42 +652,113 @@ fn action_result(
     action: &TaskAction,
     status: ExecutionStatus,
     message: Option<String>,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+    duration_ms: Option<u64>,
+    output: ActionRunOutput,
 ) -> ActionExecutionResult {
     ActionExecutionResult {
         action_id: action.id.clone(),
-        action_name: action.name.clone().unwrap_or_else(|| "未命名动作".into()),
+        action_name: action_name(action),
         action_type: action.action_type.clone(),
         status,
         message,
+        started_at,
+        finished_at,
+        duration_ms,
+        exit_code: output.exit_code,
+        stdout: output.stdout,
+        stderr: output.stderr,
     }
+}
+
+#[derive(Debug, Default)]
+struct ActionRunOutput {
+    message: String,
+    exit_code: Option<i32>,
+    stdout: Option<String>,
+    stderr: Option<String>,
+}
+
+fn ok_output(message: String) -> ActionRunOutput {
+    ActionRunOutput {
+        message,
+        ..Default::default()
+    }
+}
+
+fn failed_output(message: String) -> ActionRunOutput {
+    ActionRunOutput {
+        message,
+        ..Default::default()
+    }
+}
+
+fn action_name(action: &TaskAction) -> String {
+    action.name.clone().unwrap_or_else(|| "未命名动作".into())
+}
+
+fn truncate_output(value: &str) -> Option<String> {
+    if value.is_empty() {
+        return None;
+    }
+
+    let mut truncated = String::new();
+    for (index, character) in value.chars().enumerate() {
+        if index >= OUTPUT_LIMIT_CHARS {
+            truncated.push_str("\n[输出已截断，完整内容超过 8192 字符]");
+            return Some(truncated);
+        }
+        truncated.push(character);
+    }
+    Some(truncated)
 }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExecutionEvent<'a> {
+    run_id: &'a str,
     task_id: &'a str,
     task_name: &'a str,
+    scope: ExecutionScope,
     status: &'a str,
+    current_index: Option<usize>,
+    total_actions: usize,
+    action_id: Option<&'a str>,
+    action_name: Option<String>,
+    action_type: Option<ActionType>,
     message: Option<String>,
-    action: Option<&'a ActionExecutionResult>,
+    result: Option<&'a ActionExecutionResult>,
 }
 
-fn emit_event(
-    app: &AppHandle,
-    task: &TaskItem,
+struct EventContext<'a> {
+    run_id: &'a str,
+    task: &'a TaskItem,
+    scope: ExecutionScope,
     status: &'static str,
-    action_result: Option<&ActionExecutionResult>,
-    action: Option<&TaskAction>,
-) {
-    let message = action.map(|item| item.name.clone().unwrap_or_else(|| "未命名动作".into()));
+    current_index: Option<usize>,
+    total_actions: usize,
+    action: Option<&'a TaskAction>,
+    result: Option<&'a ActionExecutionResult>,
+    message: Option<String>,
+}
+
+fn emit_event(app: &AppHandle, context: EventContext<'_>) {
     if let Err(err) = app.emit(
         "task-execution",
         ExecutionEvent {
-            task_id: &task.id,
-            task_name: &task.name,
-            status,
-            message,
-            action: action_result,
+            run_id: context.run_id,
+            task_id: &context.task.id,
+            task_name: &context.task.name,
+            scope: context.scope,
+            status: context.status,
+            current_index: context.current_index,
+            total_actions: context.total_actions,
+            action_id: context.action.map(|action| action.id.as_str()),
+            action_name: context.action.map(action_name),
+            action_type: context.action.map(|action| action.action_type.clone()),
+            message: context.message,
+            result: context.result,
         },
     ) {
         dev_log_error("Emit task execution event failed", &err);
@@ -482,8 +783,17 @@ mod tests {
             risk_level: crate::domain::RiskLevel::Low,
         };
 
-        let result = action_result(&action, ExecutionStatus::Skipped, None);
+        let result = action_result(
+            &action,
+            ExecutionStatus::Skipped,
+            Some("动作已停用".into()),
+            Some("2026-07-03T00:00:00Z".into()),
+            Some("2026-07-03T00:00:00Z".into()),
+            Some(0),
+            ActionRunOutput::default(),
+        );
         assert_eq!(result.status, ExecutionStatus::Skipped);
+        assert_eq!(result.duration_ms, Some(0));
     }
 
     #[test]
@@ -566,9 +876,47 @@ mod tests {
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
-        let message = run_command(&action).unwrap_err();
+        let output = run_command(&action).unwrap_err();
 
-        assert!(message.contains("退出码：7"));
-        assert!(message.contains("bad"));
+        assert_eq!(output.exit_code, Some(7));
+        assert!(output.message.contains("退出码：7"));
+        assert!(output.message.contains("bad"));
+        assert!(output.stderr.unwrap_or_default().contains("bad"));
+    }
+
+    #[test]
+    fn command_success_captures_stdout_when_hidden() {
+        let working_dir = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "Write-Output 'hello'",
+                "workingDir": working_dir,
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        let output = run_command(&action).unwrap();
+
+        assert_eq!(output.exit_code, Some(0));
+        assert!(output.stdout.unwrap_or_default().contains("hello"));
+    }
+
+    #[test]
+    fn truncate_output_limits_persisted_command_text() {
+        let text = "x".repeat(OUTPUT_LIMIT_CHARS + 3);
+        let output = truncate_output(&text).unwrap();
+
+        assert!(output.len() > OUTPUT_LIMIT_CHARS);
+        assert!(output.contains("输出已截断"));
     }
 }

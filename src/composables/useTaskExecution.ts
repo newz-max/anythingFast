@@ -24,13 +24,14 @@ export function useTaskExecution() {
       const risk = await tauriApi.analyzeRisk(task.id)
       if (risk.requiresConfirmation) {
         await confirmRisk(task, risk.reasons, risk.highRiskActions.map((action) => `${action.name}: ${action.detail}`))
-        const summary = await executionStore.runTask(task.id, 'confirmed')
-        taskStore.markTaskLastRun(task.id, summary.finishedAt)
-      } else {
-        const summary = await executionStore.runTask(task.id)
-        taskStore.markTaskLastRun(task.id, summary.finishedAt)
       }
-      message.success('事项执行完成')
+      const summary = await executionStore.runTask(task.id, risk.requiresConfirmation ? 'confirmed' : undefined)
+      taskStore.markTaskLastRun(task.id, summary.finishedAt)
+      if (summary.status === 'success') {
+        message.success('事项执行完成')
+      } else {
+        message.error(summary.actions.find((action) => action.status === 'failed')?.message || '事项执行失败')
+      }
     } catch (err) {
       if (err instanceof Error && err.message === 'cancelled') {
         message.info('已取消执行')
@@ -55,13 +56,14 @@ export function useTaskExecution() {
       const risk = await tauriApi.analyzeActionRisk(task.id, action.id)
       if (risk.requiresConfirmation) {
         await confirmRisk(task, risk.reasons, risk.highRiskActions.map((item) => `${item.name}: ${item.detail}`), action)
-        const summary = await executionStore.runTaskAction(task.id, action.id, 'confirmed')
-        taskStore.markTaskLastRun(task.id, summary.finishedAt)
-      } else {
-        const summary = await executionStore.runTaskAction(task.id, action.id)
-        taskStore.markTaskLastRun(task.id, summary.finishedAt)
       }
-      message.success('动作执行完成')
+      const summary = await executionStore.runTaskAction(task.id, action.id, risk.requiresConfirmation ? 'confirmed' : undefined)
+      taskStore.markTaskLastRun(task.id, summary.finishedAt)
+      if (summary.status === 'success') {
+        message.success('动作执行完成')
+      } else {
+        message.error(summary.actions.find((item) => item.status === 'failed')?.message || '动作执行失败')
+      }
     } catch (err) {
       if (err instanceof Error && err.message === 'cancelled') {
         message.info('已取消执行')

@@ -4,13 +4,16 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { useTaskSearch } from '@/composables/useTaskSearch'
 import { useTaskExecution } from '@/composables/useTaskExecution'
+import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
+import { logDevError } from '@/utils/errors'
 import logoUrl from '@/assets/logo.png'
 import type { RiskLevel, TaskAction, TaskItem } from '@/types/domain'
 
 type RiskTagType = 'success' | 'warning' | 'error'
 
 const taskStore = useTaskStore()
+const executionStore = useExecutionStore()
 const enabledTasks = computed(() => taskStore.tasks.filter((task) => task.enabled))
 const { query, results } = useTaskSearch(enabledTasks, { ranking: 'quickRecent' })
 const { execute, running } = useTaskExecution()
@@ -31,6 +34,21 @@ const resultRows = computed(() =>
 )
 const selectedTask = computed(() => resultRows.value[selectedIndex.value]?.task || null)
 const resultCountLabel = computed(() => (taskStore.loading ? '加载中' : `${results.value.length} 个可执行事项`))
+const quickExecutionLabel = computed(() => {
+  const run = executionStore.currentRun
+  if (!run) return ''
+  if (running.value) {
+    const action = run.currentActionName ? ` · ${run.currentActionName}` : ''
+    return `执行中 ${run.progressPercent}%${action}`
+  }
+  if (run.status === 'success') return run.message || '执行完成'
+  if (run.status === 'failed') return run.message || '执行失败'
+  return run.message
+})
+const quickExecutionClass = computed(() => ({
+  success: executionStore.currentRun?.status === 'success',
+  failed: executionStore.currentRun?.status === 'failed'
+}))
 
 watch(
   () => resultRows.value.length,
@@ -41,6 +59,11 @@ watch(
 )
 
 onMounted(async () => {
+  try {
+    await executionStore.setupListeners()
+  } catch (err) {
+    logDevError('Setup quick execution listener failed', err)
+  }
   await nextTick()
   inputRef.value?.focus()
   window.addEventListener('keydown', onKeydown)
@@ -219,6 +242,9 @@ function formatTaskTime(value: string) {
 
       <footer class="status">
         <span>Alt+Space 唤起 · ↑↓ 选择 · Enter 执行 · Esc 关闭</span>
+        <span v-if="quickExecutionLabel" class="quick-execution" :class="quickExecutionClass">
+          {{ quickExecutionLabel }}
+        </span>
         <NSpin v-if="running" size="small" />
       </footer>
     </div>
@@ -540,6 +566,23 @@ function formatTaskTime(value: string) {
   gap: 8px;
   border-top: 1px solid rgba(61, 76, 109, 0.66);
   padding-top: 9px;
+}
+
+.quick-execution {
+  min-width: 0;
+  overflow: hidden;
+  color: #aab8d8;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-execution.success {
+  color: #29d6ad;
+}
+
+.quick-execution.failed {
+  color: #ff8a8a;
 }
 
 @media (max-width: 520px) {

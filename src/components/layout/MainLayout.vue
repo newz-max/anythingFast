@@ -36,6 +36,7 @@ const { execute, executeAction, running } = useTaskExecution()
 const message = useMessage()
 const dialog = useDialog()
 const showLogs = shallowRef(false)
+const autoShowExecution = shallowRef(false)
 const shortcutDraft = shallowRef('')
 const settingsShortcutDraft = shallowRef('')
 const themeDraft = shallowRef<AppTheme>('dark')
@@ -92,6 +93,7 @@ const themeOptions = [
   { label: '深色', value: 'dark' }
 ]
 const tagItems = computed(() => taskStore.tags.map((tag, index) => ({ ...tag, tone: tagTone(index) })))
+const showExecutionPanel = computed(() => showLogs.value || autoShowExecution.value)
 const shortcutWarning = computed(() => {
   const status = shortcutStatus.value
   if (!status || status.registered) return ''
@@ -131,6 +133,13 @@ watch(
     taskShortcutDraft.value = shortcutTrigger?.shortcut || ''
   },
   { immediate: true }
+)
+
+watch(
+  () => executionStore.currentRun,
+  (run) => {
+    if (run) autoShowExecution.value = true
+  }
 )
 
 function createTask() {
@@ -375,6 +384,12 @@ function runSelectedTask() {
 function runSelectedAction(action: TaskAction) {
   if (!selectedTask.value) return
   void executeAction(selectedTask.value, action)
+}
+
+function toggleExecutionPanel() {
+  const nextVisible = !showExecutionPanel.value
+  showLogs.value = nextVisible
+  autoShowExecution.value = nextVisible
 }
 
 function createFromTemplate(template: TaskTemplate) {
@@ -763,13 +778,19 @@ async function resetLayoutScroll() {
             </NInputGroup>
             <p v-if="shortcutWarning" class="shortcut-warning">{{ shortcutWarning }}</p>
           </div>
-          <button class="logs-button" type="button" @click="showLogs = !showLogs">
-            {{ showLogs ? '隐藏执行日志' : '执行日志' }}
+          <button class="logs-button" type="button" @click="toggleExecutionPanel">
+            {{ showExecutionPanel ? '隐藏执行日志' : '执行日志' }}
           </button>
           <NSwitch :value="selectedTask.enabled" @update:value="toggleSelectedTaskEnabled" />
         </section>
 
-        <ExecutionProgress v-if="showLogs" class="logs" :logs="executionStore.logs" :events="executionStore.events" />
+        <ExecutionProgress
+          v-if="showExecutionPanel"
+          class="logs"
+          :current-run="executionStore.currentRun"
+          :logs="executionStore.logs"
+          :events="executionStore.events"
+        />
       </section>
 
       <NEmpty v-else class="empty-state" description="还没有事项">
