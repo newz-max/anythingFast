@@ -3,6 +3,7 @@ import { computed, shallowRef } from 'vue'
 import { tauriApi } from '@/api/tauri'
 import { createDefaultConfig, normalizeConfig } from '@/domain/taskFactory'
 import { deriveTaskRisk } from '@/domain/risk'
+import { getErrorMessage, logDevError } from '@/utils/errors'
 import type { AppConfig, AppSettings, TaskItem, TaskTag } from '@/types/domain'
 
 const isTauri = () => Boolean('__TAURI_INTERNALS__' in window)
@@ -30,7 +31,8 @@ export const useTaskStore = defineStore('tasks', () => {
       config.value = normalizeConfig(isTauri() ? await tauriApi.loadConfig() : loadBrowserConfig())
       selectedTaskId.value = config.value.tasks[0]?.id || null
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
+      logDevError('Load task config failed', err)
+      error.value = getErrorMessage(err)
       config.value = createDefaultConfig()
     } finally {
       loading.value = false
@@ -53,7 +55,8 @@ export const useTaskStore = defineStore('tasks', () => {
       }
       config.value = normalizeConfig(isTauri() ? await tauriApi.saveConfig(nextConfig) : saveBrowserConfig(nextConfig))
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
+      logDevError('Persist task config failed', err)
+      error.value = getErrorMessage(err)
       throw err
     } finally {
       saving.value = false
@@ -160,9 +163,15 @@ export const useTaskStore = defineStore('tasks', () => {
 
   async function updateSettings(settingsPatch: AppSettings) {
     const nextSettings = { ...settings.value, ...settingsPatch }
-    config.value = isTauri()
-      ? await tauriApi.updateSettings(nextSettings)
-      : saveBrowserConfig({ ...config.value, settings: nextSettings })
+    try {
+      config.value = isTauri()
+        ? await tauriApi.updateSettings(nextSettings)
+        : saveBrowserConfig({ ...config.value, settings: nextSettings })
+    } catch (err) {
+      logDevError('Update settings failed', err, { settingsPatch })
+      error.value = getErrorMessage(err)
+      throw err
+    }
   }
 
   function selectTask(taskId: string | null) {

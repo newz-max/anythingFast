@@ -1,3 +1,4 @@
+use crate::diagnostics::dev_log_error;
 use crate::domain::{AppConfig, ExecutionLogSummary};
 use std::fs;
 use std::path::PathBuf;
@@ -62,7 +63,13 @@ pub fn load_logs(app: &AppHandle, limit: usize) -> StorageResult<Vec<ExecutionLo
 pub fn append_log(app: &AppHandle, log: ExecutionLogSummary) -> StorageResult<()> {
     let path = logs_path(app)?;
     ensure_parent(&path)?;
-    let mut logs = load_logs(app, 200).unwrap_or_default();
+    let mut logs = match load_logs(app, 200) {
+        Ok(logs) => logs,
+        Err(err) => {
+            dev_log_error("Read existing execution logs failed", &err);
+            Vec::new()
+        }
+    };
     logs.insert(0, log);
     logs.truncate(200);
     fs::write(path, serde_json::to_string_pretty(&logs)?)?;
@@ -70,12 +77,18 @@ pub fn append_log(app: &AppHandle, log: ExecutionLogSummary) -> StorageResult<()
 }
 
 pub fn config_path(app: &AppHandle) -> StorageResult<PathBuf> {
-    let dir = app.path().app_data_dir().map_err(|_| StorageError::AppDir)?;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| StorageError::AppDir)?;
     Ok(dir.join("config.json"))
 }
 
 fn logs_path(app: &AppHandle) -> StorageResult<PathBuf> {
-    let dir = app.path().app_data_dir().map_err(|_| StorageError::AppDir)?;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| StorageError::AppDir)?;
     Ok(dir.join("execution-logs.json"))
 }
 
@@ -124,13 +137,19 @@ mod tests {
         assert!(!restored.tasks[0].favorite);
         assert!(restored.tasks[0].tag_ids.is_empty());
         assert_eq!(restored.tasks[0].triggers.len(), 1);
-        assert!(matches!(restored.settings.theme, crate::domain::AppTheme::Dark));
+        assert!(matches!(
+            restored.settings.theme,
+            crate::domain::AppTheme::Dark
+        ));
     }
 
     #[test]
     fn temp_extension_is_predictable() {
         let path = PathBuf::from("config.json");
-        assert_eq!(path.with_extension("json.tmp"), PathBuf::from("config.json.tmp"));
+        assert_eq!(
+            path.with_extension("json.tmp"),
+            PathBuf::from("config.json.tmp")
+        );
         let _ = fs::remove_file("config.json.tmp");
     }
 }

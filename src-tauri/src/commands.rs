@@ -1,17 +1,20 @@
+use crate::diagnostics::dev_log_error;
 use crate::domain::{
-    AppConfig, AppSettings, ExecutionLogSummary, PreviewAction, RiskAnalysis, RiskLevel, ShortcutStatus, TaskAction,
-    TaskExecutionSummary, TaskItem, ValidationResult,
+    AppConfig, AppSettings, ExecutionLogSummary, PreviewAction, RiskAnalysis, RiskLevel,
+    ShortcutStatus, TaskAction, TaskExecutionSummary, TaskItem, ValidationResult,
 };
 use crate::executor;
 use crate::risk::{action_detail, analyze_task_risk, derive_action_risk};
 use crate::storage;
-use crate::validation::{normalize_task, validate_action_model, validate_config_model, validate_task_model};
+use crate::validation::{
+    normalize_task, validate_action_model, validate_config_model, validate_task_model,
+};
 use chrono::Utc;
 use tauri::AppHandle;
 
 #[tauri::command]
 pub fn load_config(app: AppHandle) -> Result<AppConfig, String> {
-    storage::load_config(&app).map_err(|err| err.to_string())
+    storage::load_config(&app).map_err(|err| log_command_error("load_config failed", err))
 }
 
 #[tauri::command]
@@ -37,16 +40,20 @@ pub fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig, Strin
         }
     }
     if !issues.is_empty() {
-        return Err(issues
+        let message = issues
             .into_iter()
             .map(|issue| format!("{}: {}", issue.field, issue.message))
             .collect::<Vec<_>>()
-            .join("; "));
+            .join("; ");
+        dev_log_error("save_config validation failed", &message);
+        return Err(message);
     }
 
-    crate::refresh_task_shortcuts(&app, &normalized)?;
-    storage::save_config(&app, &normalized).map_err(|err| err.to_string())?;
-    storage::load_config(&app).map_err(|err| err.to_string())
+    crate::refresh_task_shortcuts(&app, &normalized)
+        .map_err(|err| log_command_error("save_config refresh shortcuts failed", err))?;
+    storage::save_config(&app, &normalized)
+        .map_err(|err| log_command_error("save_config storage write failed", err))?;
+    storage::load_config(&app).map_err(|err| log_command_error("save_config reload failed", err))
 }
 
 #[tauri::command]
@@ -61,28 +68,34 @@ pub fn validate_action(action: TaskAction) -> ValidationResult {
 
 #[tauri::command]
 pub fn analyze_risk(app: AppHandle, task_id: String) -> Result<RiskAnalysis, String> {
-    let config = storage::load_config(&app).map_err(|err| err.to_string())?;
+    let config = storage::load_config(&app)
+        .map_err(|err| log_command_error("analyze_risk load config failed", err))?;
     let task = config
         .tasks
         .iter()
         .find(|item| item.id == task_id)
-        .ok_or_else(|| "事项不存在".to_string())?;
+        .ok_or_else(|| log_command_error("analyze_risk find task failed", "事项不存在"))?;
     Ok(analyze_task_risk(task))
 }
 
 #[tauri::command]
-pub fn analyze_action_risk(app: AppHandle, task_id: String, action_id: String) -> Result<RiskAnalysis, String> {
-    let config = storage::load_config(&app).map_err(|err| err.to_string())?;
+pub fn analyze_action_risk(
+    app: AppHandle,
+    task_id: String,
+    action_id: String,
+) -> Result<RiskAnalysis, String> {
+    let config = storage::load_config(&app)
+        .map_err(|err| log_command_error("analyze_action_risk load config failed", err))?;
     let task = config
         .tasks
         .iter()
         .find(|item| item.id == task_id)
-        .ok_or_else(|| "事项不存在".to_string())?;
+        .ok_or_else(|| log_command_error("analyze_action_risk find task failed", "事项不存在"))?;
     let action = task
         .actions
         .iter()
         .find(|item| item.id == action_id)
-        .ok_or_else(|| "动作不存在".to_string())?;
+        .ok_or_else(|| log_command_error("analyze_action_risk find action failed", "动作不存在"))?;
 
     let action_risk = derive_action_risk(action);
     let mut reasons = Vec::new();
@@ -110,13 +123,18 @@ pub fn analyze_action_risk(app: AppHandle, task_id: String, action_id: String) -
 }
 
 #[tauri::command]
-pub fn run_task(app: AppHandle, task_id: String, confirmation_token: Option<String>) -> Result<TaskExecutionSummary, String> {
-    let mut config = storage::load_config(&app).map_err(|err| err.to_string())?;
+pub fn run_task(
+    app: AppHandle,
+    task_id: String,
+    confirmation_token: Option<String>,
+) -> Result<TaskExecutionSummary, String> {
+    let mut config = storage::load_config(&app)
+        .map_err(|err| log_command_error("run_task load config failed", err))?;
     let task_index = config
         .tasks
         .iter()
         .position(|item| item.id == task_id)
-        .ok_or_else(|| "事项不存在".to_string())?;
+        .ok_or_else(|| log_command_error("run_task find task failed", "事项不存在"))?;
     let task = config.tasks[task_index].clone();
 
     if !task.enabled {
@@ -128,12 +146,14 @@ pub fn run_task(app: AppHandle, task_id: String, confirmation_token: Option<Stri
 
     let validation = validate_task_model(&task, &config.tasks);
     if !validation.valid {
-        return Err(validation
+        let message = validation
             .issues
             .into_iter()
             .map(|issue| issue.message)
             .collect::<Vec<_>>()
-            .join("; "));
+            .join("; ");
+        dev_log_error("run_task validation failed", &message);
+        return Err(message);
     }
 
     let risk = analyze_task_risk(&task);
@@ -141,10 +161,12 @@ pub fn run_task(app: AppHandle, task_id: String, confirmation_token: Option<Stri
         return Err("该事项需要二次确认".into());
     }
 
-    let summary = executor::execute_task(&app, &task)?;
+    let summary = executor::execute_task(&app, &task)
+        .map_err(|err| log_command_error("run_task execute failed", err))?;
     config.tasks[task_index].last_run_at = Some(Utc::now().to_rfc3339());
     config.tasks[task_index].updated_at = Utc::now().to_rfc3339();
-    storage::save_config(&app, &config).map_err(|err| err.to_string())?;
+    storage::save_config(&app, &config)
+        .map_err(|err| log_command_error("run_task save config failed", err))?;
     Ok(summary)
 }
 
@@ -155,12 +177,13 @@ pub fn run_task_action(
     action_id: String,
     confirmation_token: Option<String>,
 ) -> Result<TaskExecutionSummary, String> {
-    let mut config = storage::load_config(&app).map_err(|err| err.to_string())?;
+    let mut config = storage::load_config(&app)
+        .map_err(|err| log_command_error("run_task_action load config failed", err))?;
     let task_index = config
         .tasks
         .iter()
         .position(|item| item.id == task_id)
-        .ok_or_else(|| "事项不存在".to_string())?;
+        .ok_or_else(|| log_command_error("run_task_action find task failed", "事项不存在"))?;
     let task = config.tasks[task_index].clone();
 
     if !task.enabled {
@@ -172,7 +195,7 @@ pub fn run_task_action(
         .iter()
         .find(|item| item.id == action_id)
         .cloned()
-        .ok_or_else(|| "动作不存在".to_string())?;
+        .ok_or_else(|| log_command_error("run_task_action find action failed", "动作不存在"))?;
 
     if !action.enabled {
         return Err("动作已停用".into());
@@ -180,12 +203,14 @@ pub fn run_task_action(
 
     let validation = validate_action_model(&action);
     if !validation.valid {
-        return Err(validation
+        let message = validation
             .issues
             .into_iter()
             .map(|issue| issue.message)
             .collect::<Vec<_>>()
-            .join("; "));
+            .join("; ");
+        dev_log_error("run_task_action validation failed", &message);
+        return Err(message);
     }
 
     let risk = analyze_action_risk(app.clone(), task_id.clone(), action_id.clone())?;
@@ -193,11 +218,13 @@ pub fn run_task_action(
         return Err("该动作需要二次确认".into());
     }
 
-    let summary = executor::execute_task_action(&app, &task, &action)?;
+    let summary = executor::execute_task_action(&app, &task, &action)
+        .map_err(|err| log_command_error("run_task_action execute failed", err))?;
     let finished_at = summary.finished_at.clone();
     config.tasks[task_index].last_run_at = Some(finished_at.clone());
     config.tasks[task_index].updated_at = finished_at;
-    storage::save_config(&app, &config).map_err(|err| err.to_string())?;
+    storage::save_config(&app, &config)
+        .map_err(|err| log_command_error("run_task_action save config failed", err))?;
     Ok(summary)
 }
 
@@ -212,8 +239,12 @@ pub fn preview_action(action: TaskAction) -> PreviewAction {
 }
 
 #[tauri::command]
-pub fn load_execution_logs(app: AppHandle, limit: usize) -> Result<Vec<ExecutionLogSummary>, String> {
-    storage::load_logs(&app, limit).map_err(|err| err.to_string())
+pub fn load_execution_logs(
+    app: AppHandle,
+    limit: usize,
+) -> Result<Vec<ExecutionLogSummary>, String> {
+    storage::load_logs(&app, limit)
+        .map_err(|err| log_command_error("load_execution_logs failed", err))
 }
 
 #[tauri::command]
@@ -223,7 +254,8 @@ pub fn load_shortcut_status(app: AppHandle) -> ShortcutStatus {
 
 #[tauri::command]
 pub fn update_settings(app: AppHandle, settings: AppSettings) -> Result<AppConfig, String> {
-    let mut config = storage::load_config(&app).map_err(|err| err.to_string())?;
+    let mut config = storage::load_config(&app)
+        .map_err(|err| log_command_error("update_settings load config failed", err))?;
     let shortcut = settings.global_shortcut.trim().to_string();
     if shortcut.is_empty() {
         return Err("全局快捷键不能为空".to_string());
@@ -231,16 +263,27 @@ pub fn update_settings(app: AppHandle, settings: AppSettings) -> Result<AppConfi
     config.settings = settings;
     let issues = validate_config_model(&config);
     if !issues.is_empty() {
-        return Err(issues
+        let message = issues
             .into_iter()
             .map(|issue| format!("{}: {}", issue.field, issue.message))
             .collect::<Vec<_>>()
-            .join("; "));
+            .join("; ");
+        dev_log_error("update_settings validation failed", &message);
+        return Err(message);
     }
-    crate::register_global_shortcut(&app, &shortcut)?;
-    storage::save_config(&app, &config).map_err(|err| err.to_string())?;
-    storage::load_config(&app).map_err(|err| err.to_string())
+    crate::register_global_shortcut(&app, &shortcut)
+        .map_err(|err| log_command_error("update_settings register shortcut failed", err))?;
+    storage::save_config(&app, &config)
+        .map_err(|err| log_command_error("update_settings save config failed", err))?;
+    storage::load_config(&app)
+        .map_err(|err| log_command_error("update_settings reload failed", err))
 }
 
 #[allow(dead_code)]
 fn _risk_level_used(_: RiskLevel) {}
+
+fn log_command_error(context: &str, error: impl ToString) -> String {
+    let message = error.to_string();
+    dev_log_error(context, &message);
+    message
+}

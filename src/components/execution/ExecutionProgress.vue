@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import type { ExecutionEventPayload } from '@/api/events'
-import type { ExecutionLogSummary } from '@/types/domain'
+import type { ActionExecutionResult, ExecutionLogSummary } from '@/types/domain'
 
 defineProps<{
   events: ExecutionEventPayload[]
   logs: ExecutionLogSummary[]
 }>()
+
+function failedActionMessages(log: ExecutionLogSummary): ActionExecutionResult[] {
+  return log.actions.filter((action) => action.status === 'failed' && Boolean(action.message))
+}
 </script>
 
 <template>
@@ -38,6 +42,12 @@ defineProps<{
               :title="log.scope === 'action' ? `${log.taskName} · 单动作` : log.taskName"
               :description="`${log.startedAt} · ${log.actions.length} 个动作`"
             />
+            <ul v-if="failedActionMessages(log).length > 0" class="error-list">
+              <li v-for="action in failedActionMessages(log)" :key="action.actionId" class="error-item">
+                <span class="error-action">{{ action.actionName }}</span>
+                <span class="error-message">{{ action.message }}</span>
+              </li>
+            </ul>
           </NListItem>
         </NList>
       </NGi>
@@ -53,5 +63,35 @@ defineProps<{
 .subhead {
   margin: 0 0 8px;
   font-size: 15px;
+}
+
+.error-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.error-item {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.error-action {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ff8a8a;
+}
+
+.error-message {
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+  color: inherit;
 }
 </style>

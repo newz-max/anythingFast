@@ -1,19 +1,21 @@
 mod commands;
+mod diagnostics;
 mod domain;
 mod executor;
 mod risk;
 mod storage;
 mod validation;
 
-use commands::*;
 use chrono::Utc;
+use commands::*;
+use diagnostics::dev_log_error;
 use domain::{ShortcutStatus, TaskTrigger};
 use std::sync::Mutex;
 use tauri::{
+    Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
@@ -59,17 +61,17 @@ pub fn run() {
                         toggle_quick_panel(app);
                         return;
                     }
-                    let task_id = app
-                        .state::<TaskShortcutRegistry>()
-                        .0
-                        .lock()
-                        .ok()
-                        .and_then(|registry| {
-                            registry
-                                .iter()
-                                .find(|(registered, _)| shortcut == registered)
-                                .map(|(_, task_id)| task_id.clone())
-                        });
+                    let task_id =
+                        app.state::<TaskShortcutRegistry>()
+                            .0
+                            .lock()
+                            .ok()
+                            .and_then(|registry| {
+                                registry
+                                    .iter()
+                                    .find(|(registered, _)| shortcut == registered)
+                                    .map(|(_, task_id)| task_id.clone())
+                            });
                     if let Some(task_id) = task_id {
                         trigger_task_shortcut(app, task_id);
                     }
@@ -88,12 +90,22 @@ pub fn run() {
         .setup(|app| {
             ensure_quick_panel(app.handle())?;
             setup_tray(app)?;
-            let config = storage::load_config(app.handle()).unwrap_or_default();
+            let config = match storage::load_config(app.handle()) {
+                Ok(config) => config,
+                Err(err) => {
+                    dev_log_error("Load config during setup failed", &err);
+                    domain::AppConfig::default()
+                }
+            };
             let global_shortcut = config.settings.global_shortcut.trim();
             if let Err(message) = register_global_shortcut(app.handle(), global_shortcut) {
+                dev_log_error("Register global shortcut during setup failed", &message);
                 set_global_shortcut_status(app.handle(), None, global_shortcut, Some(message));
             }
-            refresh_task_shortcuts(app.handle(), &config).map_err(|err| tauri::Error::Anyhow(anyhow::anyhow!(err)))?;
+            refresh_task_shortcuts(app.handle(), &config).map_err(|err| {
+                dev_log_error("Refresh task shortcuts during setup failed", &err);
+                tauri::Error::Anyhow(anyhow::anyhow!(err))
+            })?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -171,7 +183,10 @@ fn app_tray_icon() -> Image<'static> {
     tauri::include_image!("icons/32x32.png").clone()
 }
 
-pub fn refresh_task_shortcuts(app: &tauri::AppHandle, config: &domain::AppConfig) -> Result<(), String> {
+pub fn refresh_task_shortcuts(
+    app: &tauri::AppHandle,
+    config: &domain::AppConfig,
+) -> Result<(), String> {
     let registry_state = app.state::<TaskShortcutRegistry>();
     let mut registry = registry_state
         .0
@@ -185,8 +200,14 @@ pub fn refresh_task_shortcuts(app: &tauri::AppHandle, config: &domain::AppConfig
 
     for task in config.tasks.iter().filter(|task| task.enabled) {
         for trigger in &task.triggers {
-            if let TaskTrigger::Shortcut { enabled: true, shortcut } = trigger {
-                let parsed: Shortcut = shortcut.parse().map_err(|_| format!("快捷键格式无效：{shortcut}"))?;
+            if let TaskTrigger::Shortcut {
+                enabled: true,
+                shortcut,
+            } = trigger
+            {
+                let parsed: Shortcut = shortcut
+                    .parse()
+                    .map_err(|_| format!("快捷键格式无效：{shortcut}"))?;
                 app.global_shortcut()
                     .register(parsed)
                     .map_err(|err| format!("无法注册事项快捷键 {shortcut}：{err}"))?;
@@ -198,9 +219,14 @@ pub fn refresh_task_shortcuts(app: &tauri::AppHandle, config: &domain::AppConfig
     Ok(())
 }
 
-pub fn register_global_shortcut(app: &tauri::AppHandle, shortcut_label: &str) -> Result<(), String> {
+pub fn register_global_shortcut(
+    app: &tauri::AppHandle,
+    shortcut_label: &str,
+) -> Result<(), String> {
     let trimmed = shortcut_label.trim();
-    let parsed: Shortcut = trimmed.parse().map_err(|_| format!("全局快捷键格式无效：{trimmed}"))?;
+    let parsed: Shortcut = trimmed
+        .parse()
+        .map_err(|_| format!("全局快捷键格式无效：{trimmed}"))?;
 
     let state = app.state::<GlobalShortcutState>();
     let mut registration = state
@@ -258,7 +284,12 @@ pub fn shortcut_status(app: &tauri::AppHandle) -> ShortcutStatus {
         })
 }
 
-fn set_global_shortcut_status(app: &tauri::AppHandle, shortcut: Option<Shortcut>, label: &str, message: Option<String>) {
+fn set_global_shortcut_status(
+    app: &tauri::AppHandle,
+    shortcut: Option<Shortcut>,
+    label: &str,
+    message: Option<String>,
+) {
     if let Ok(mut registration) = app.state::<GlobalShortcutState>().0.lock() {
         registration.shortcut = shortcut;
         registration.label = label.trim().to_string();
@@ -280,7 +311,9 @@ fn is_global_shortcut(app: &tauri::AppHandle, shortcut: &Shortcut) -> bool {
 }
 
 fn emit_shortcut_status(app: &tauri::AppHandle, status: ShortcutStatus) {
-    let _ = app.emit("shortcut-status", status);
+    if let Err(err) = app.emit("shortcut-status", status) {
+        dev_log_error("Emit shortcut status failed", &err);
+    }
 }
 
 fn format_shortcut_registration_error(shortcut: &str, raw_error: &str) -> String {
@@ -323,23 +356,45 @@ fn trigger_task_shortcut(app: &tauri::AppHandle, task_id: String) {
     std::thread::spawn(move || {
         let mut config = match storage::load_config(&app) {
             Ok(config) => config,
-            Err(_) => return,
+            Err(err) => {
+                dev_log_error("Load config for task shortcut failed", &err);
+                return;
+            }
         };
         let task_index = match config.tasks.iter().position(|task| task.id == task_id) {
             Some(index) => index,
-            None => return,
+            None => {
+                dev_log_error(
+                    "Find task for shortcut failed",
+                    format!("task id not found: {task_id}"),
+                );
+                return;
+            }
         };
         let task = config.tasks[task_index].clone();
         if !task.enabled {
+            dev_log_error(
+                "Run task shortcut skipped",
+                format!("task disabled: {}", task.id),
+            );
             return;
         }
         let validation = validation::validate_task_model(&task, &config.tasks);
         if !validation.valid {
+            dev_log_error(
+                "Validate task for shortcut failed",
+                validation
+                    .issues
+                    .iter()
+                    .map(|issue| format!("{}: {}", issue.field, issue.message))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            );
             return;
         }
         let risk = risk::analyze_task_risk(&task);
         if risk.requires_confirmation {
-            let _ = app.emit(
+            if let Err(err) = app.emit(
                 "task-execution",
                 serde_json::json!({
                     "taskId": task.id,
@@ -347,17 +402,28 @@ fn trigger_task_shortcut(app: &tauri::AppHandle, task_id: String) {
                     "status": "failed",
                     "message": "该事项需要二次确认，请在主窗口中手动运行"
                 }),
-            );
+            ) {
+                dev_log_error("Emit shortcut confirmation failure event failed", &err);
+            }
             return;
         }
-        if let Ok(summary) = executor::execute_task(&app, &task) {
-            let finished_at = summary.finished_at.clone();
-            config.tasks[task_index].last_run_at = Some(finished_at.clone());
-            config.tasks[task_index].updated_at = finished_at;
-        } else {
-            let now = Utc::now().to_rfc3339();
-            config.tasks[task_index].updated_at = now;
+        match executor::execute_task(&app, &task) {
+            Ok(summary) => {
+                let finished_at = summary.finished_at.clone();
+                config.tasks[task_index].last_run_at = Some(finished_at.clone());
+                config.tasks[task_index].updated_at = finished_at;
+            }
+            Err(err) => {
+                dev_log_error(
+                    "Execute task from shortcut failed",
+                    format!("task id: {}, error: {err}", task.id),
+                );
+                let now = Utc::now().to_rfc3339();
+                config.tasks[task_index].updated_at = now;
+            }
         }
-        let _ = storage::save_config(&app, &config);
+        if let Err(err) = storage::save_config(&app, &config) {
+            dev_log_error("Save config after task shortcut failed", &err);
+        }
     });
 }

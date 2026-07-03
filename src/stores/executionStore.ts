@@ -3,6 +3,7 @@ import { shallowRef } from 'vue'
 import type { ExecutionEventPayload } from '@/api/events'
 import { listenExecutionEvents } from '@/api/events'
 import { tauriApi } from '@/api/tauri'
+import { getErrorMessage, logDevError } from '@/utils/errors'
 import type { ExecutionLogSummary, TaskExecutionSummary } from '@/types/domain'
 
 export const useExecutionStore = defineStore('execution', () => {
@@ -15,15 +16,21 @@ export const useExecutionStore = defineStore('execution', () => {
 
   async function setupListeners() {
     if (!('__TAURI_INTERNALS__' in window)) return
-    await listenExecutionEvents((payload) => {
-      events.value = [...events.value, payload]
-      if (payload.status === 'finished' || payload.status === 'failed') {
-        runningTaskId.value = null
-        runningActionId.value = null
-      } else {
-        runningTaskId.value = payload.taskId
-      }
-    })
+    try {
+      await listenExecutionEvents((payload) => {
+        events.value = [...events.value, payload]
+        if (payload.status === 'finished' || payload.status === 'failed') {
+          runningTaskId.value = null
+          runningActionId.value = null
+        } else {
+          runningTaskId.value = payload.taskId
+        }
+      })
+    } catch (err) {
+      logDevError('Setup execution listener failed', err)
+      error.value = getErrorMessage(err)
+      throw err
+    }
   }
 
   async function runTask(taskId: string, confirmationToken?: string) {
@@ -38,7 +45,8 @@ export const useExecutionStore = defineStore('execution', () => {
       await loadLogs(20)
       return lastSummary.value
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
+      logDevError('Run task failed', err, { taskId })
+      error.value = getErrorMessage(err)
       runningTaskId.value = null
       throw err
     }
@@ -57,7 +65,8 @@ export const useExecutionStore = defineStore('execution', () => {
       await loadLogs(20)
       return lastSummary.value
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
+      logDevError('Run task action failed', err, { taskId, actionId })
+      error.value = getErrorMessage(err)
       runningTaskId.value = null
       runningActionId.value = null
       throw err
@@ -69,7 +78,13 @@ export const useExecutionStore = defineStore('execution', () => {
       logs.value = []
       return
     }
-    logs.value = await tauriApi.loadExecutionLogs(limit)
+    try {
+      logs.value = await tauriApi.loadExecutionLogs(limit)
+    } catch (err) {
+      logDevError('Load execution logs failed', err, { limit })
+      error.value = getErrorMessage(err)
+      throw err
+    }
   }
 
   return {

@@ -3,6 +3,7 @@ import { useDialog, useMessage } from 'naive-ui'
 import { tauriApi } from '@/api/tauri'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
+import { getErrorMessage, logDevError } from '@/utils/errors'
 import type { TaskAction, TaskItem } from '@/types/domain'
 
 export function useTaskExecution() {
@@ -35,7 +36,8 @@ export function useTaskExecution() {
         message.info('已取消执行')
         return
       }
-      message.error(err instanceof Error ? err.message : String(err))
+      logDevError('Execute task failed', err, { taskId: task.id })
+      message.error(getErrorMessage(err))
     }
   }
 
@@ -65,7 +67,8 @@ export function useTaskExecution() {
         message.info('已取消执行')
         return
       }
-      message.error(err instanceof Error ? err.message : String(err))
+      logDevError('Execute task action failed', err, { taskId: task.id, actionId: action.id })
+      message.error(getErrorMessage(err))
     }
   }
 

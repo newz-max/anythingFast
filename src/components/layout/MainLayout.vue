@@ -16,6 +16,7 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskExecution } from '@/composables/useTaskExecution'
 import { tauriApi } from '@/api/tauri'
 import { listenShortcutStatusEvents } from '@/api/events'
+import { getErrorMessage, logDevError } from '@/utils/errors'
 import type {
   ActionType,
   AppTheme,
@@ -102,9 +103,21 @@ onMounted(async () => {
   shortcutDraft.value = taskStore.settings.globalShortcut
   settingsShortcutDraft.value = taskStore.settings.globalShortcut
   themeDraft.value = taskStore.settings.theme
-  await executionStore.setupListeners()
-  await setupShortcutStatus()
-  await executionStore.loadLogs()
+  try {
+    await executionStore.setupListeners()
+  } catch (err) {
+    reportUiError('Setup execution listener failed', err)
+  }
+  try {
+    await setupShortcutStatus()
+  } catch (err) {
+    reportUiError('Setup shortcut status failed', err)
+  }
+  try {
+    await executionStore.loadLogs()
+  } catch (err) {
+    reportUiError('Load execution logs failed', err)
+  }
 })
 
 onUnmounted(() => {
@@ -133,7 +146,7 @@ async function saveTask(task: TaskItem) {
     message.success('已保存')
     wizardVisible.value = false
   } catch (err) {
-    message.error(err instanceof Error ? err.message : String(err))
+    reportUiError('Save task failed', err, { taskId: task.id })
   }
 }
 
@@ -143,7 +156,7 @@ async function duplicateTask(task: TaskItem) {
     message.success('已复制事项')
     wizardVisible.value = false
   } catch (err) {
-    message.error(err instanceof Error ? err.message : String(err))
+    reportUiError('Duplicate task failed', err, { taskId: task.id })
   }
 }
 
@@ -235,7 +248,7 @@ async function saveTag() {
     }
     tagModalVisible.value = false
   } catch (err) {
-    message.error(err instanceof Error ? err.message : String(err))
+    reportUiError('Save tag failed', err, { tagId: editingTag.value?.id })
   }
 }
 
@@ -288,8 +301,8 @@ async function saveShortcut() {
     message.success('快捷键设置已保存')
   } catch (err) {
     shortcutDraft.value = taskStore.settings.globalShortcut
-    await refreshShortcutStatus()
-    message.error(err instanceof Error ? err.message : String(err))
+    await refreshShortcutStatusQuiet('Refresh shortcut status after failed global shortcut save')
+    reportUiError('Save global shortcut failed', err, { shortcut: shortcutDraft.value })
   }
 }
 
@@ -312,8 +325,8 @@ async function saveSettings() {
     message.success('设置已保存')
   } catch (err) {
     settingsShortcutDraft.value = taskStore.settings.globalShortcut
-    await refreshShortcutStatus()
-    message.error(err instanceof Error ? err.message : String(err))
+    await refreshShortcutStatusQuiet('Refresh shortcut status after failed settings save')
+    reportUiError('Save settings failed', err, { shortcut: settingsShortcutDraft.value, theme: themeDraft.value })
   }
 }
 
@@ -336,7 +349,7 @@ async function saveTaskShortcutTrigger() {
     await taskStore.upsertTask({ ...selectedTask.value, triggers })
     message.success('触发设置已保存')
   } catch (err) {
-    message.error(err instanceof Error ? err.message : String(err))
+    reportUiError('Save task shortcut trigger failed', err, { taskId: selectedTask.value.id, shortcut })
   }
 }
 
@@ -422,6 +435,11 @@ function themeLabel(theme: AppTheme) {
   return '跟随系统'
 }
 
+function reportUiError(context: string, err: unknown, extra?: Record<string, unknown>) {
+  logDevError(context, err, extra)
+  message.error(getErrorMessage(err))
+}
+
 function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window
 }
@@ -455,6 +473,14 @@ async function setupShortcutStatus() {
 async function refreshShortcutStatus() {
   if (!isTauriRuntime()) return
   shortcutStatus.value = await tauriApi.loadShortcutStatus()
+}
+
+async function refreshShortcutStatusQuiet(context: string) {
+  try {
+    await refreshShortcutStatus()
+  } catch (err) {
+    logDevError(context, err)
+  }
 }
 
 function setupResponsiveScrollReset() {

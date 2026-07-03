@@ -1,3 +1,4 @@
+use crate::diagnostics::dev_log_error;
 use crate::domain::{
     ActionExecutionResult, ActionType, ExecutionLogSummary, ExecutionScope, ExecutionStatus,
     TaskAction, TaskExecutionSummary, TaskItem,
@@ -77,7 +78,9 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
         status,
         actions: summary.actions.clone(),
     };
-    let _ = storage::append_log(app, log);
+    if let Err(err) = storage::append_log(app, log) {
+        dev_log_error("Append task execution log failed", &err);
+    }
     emit_event(app, task, "finished", None, None);
 
     Ok(summary)
@@ -129,7 +132,9 @@ pub fn execute_task_action(
         status,
         actions: summary.actions.clone(),
     };
-    let _ = storage::append_log(app, log);
+    if let Err(err) = storage::append_log(app, log) {
+        dev_log_error("Append action execution log failed", &err);
+    }
     emit_event(app, task, "finished", None, None);
 
     Ok(summary)
@@ -163,7 +168,13 @@ fn open_program(action: &TaskAction) -> Result<String, String> {
             command.current_dir(working_dir);
         }
     }
-    command.spawn().map_err(|err| err.to_string())?;
+    command.spawn().map_err(|err| {
+        dev_log_error(
+            "Open program action failed",
+            format!("actionId={}, path={}, error={err}", action.id, path),
+        );
+        err.to_string()
+    })?;
     Ok("程序已启动".into())
 }
 
@@ -178,7 +189,13 @@ fn open_target(action: &TaskAction) -> Result<String, String> {
     if matches!(action.action_type, ActionType::OpenFolder) && !Path::new(target).is_dir() {
         return Err(format!("文件夹不存在：{target}"));
     }
-    open::that(target).map_err(|err| err.to_string())?;
+    open::that(target).map_err(|err| {
+        dev_log_error(
+            "Open target action failed",
+            format!("actionId={}, target={}, error={err}", action.id, target),
+        );
+        err.to_string()
+    })?;
     Ok("已打开".into())
 }
 
@@ -209,21 +226,64 @@ fn run_command(action: &TaskAction) -> Result<String, String> {
     }
 
     if show_terminal {
-        let status = command.status().map_err(|err| err.to_string())?;
+        let status = command.status().map_err(|err| {
+            dev_log_error(
+                "Run command action failed to start",
+                format!(
+                    "actionId={}, workingDir={}, error={err}",
+                    action.id, working_dir
+                ),
+            );
+            err.to_string()
+        })?;
         if status.success() {
             return Ok("命令执行成功".into());
         }
+        dev_log_error(
+            "Run command action failed",
+            format!(
+                "actionId={}, actionName={}, type={:?}, workingDir={}, showTerminal=true, exitCode={}",
+                action.id,
+                action.name.clone().unwrap_or_else(|| "未命名动作".into()),
+                action.action_type,
+                working_dir,
+                status.code().unwrap_or(-1)
+            ),
+        );
         return Err(format!(
             "命令执行失败，退出码：{}",
             status.code().unwrap_or(-1)
         ));
     }
 
-    let output = command.output().map_err(|err| err.to_string())?;
+    let output = command.output().map_err(|err| {
+        dev_log_error(
+            "Run command action failed to capture output",
+            format!(
+                "actionId={}, workingDir={}, error={err}",
+                action.id, working_dir
+            ),
+        );
+        err.to_string()
+    })?;
     if output.status.success() {
         Ok("命令执行成功".into())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        dev_log_error(
+            "Run command action failed",
+            format!(
+                "actionId={}, actionName={}, type={:?}, workingDir={}, showTerminal=false, exitCode={}, stdout={}, stderr={}",
+                action.id,
+                action.name.clone().unwrap_or_else(|| "未命名动作".into()),
+                action.action_type,
+                working_dir,
+                output.status.code().unwrap_or(-1),
+                stdout.trim(),
+                stderr.trim()
+            ),
+        );
         Err(format!(
             "命令执行失败，退出码：{}，{}",
             output.status.code().unwrap_or(-1),
@@ -390,7 +450,7 @@ fn emit_event(
     action: Option<&TaskAction>,
 ) {
     let message = action.map(|item| item.name.clone().unwrap_or_else(|| "未命名动作".into()));
-    let _ = app.emit(
+    if let Err(err) = app.emit(
         "task-execution",
         ExecutionEvent {
             task_id: &task.id,
@@ -399,7 +459,9 @@ fn emit_event(
             message,
             action: action_result,
         },
-    );
+    ) {
+        dev_log_error("Emit task execution event failed", &err);
+    }
 }
 
 #[cfg(test)]
@@ -481,5 +543,32 @@ mod tests {
         };
 
         assert!(show_terminal(&action));
+    }
+
+    #[test]
+    fn command_failure_message_keeps_exit_code_and_stderr() {
+        let working_dir = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "Write-Error 'bad'; exit 7",
+                "workingDir": working_dir,
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        let message = run_command(&action).unwrap_err();
+
+        assert!(message.contains("退出码：7"));
+        assert!(message.contains("bad"));
     }
 }
