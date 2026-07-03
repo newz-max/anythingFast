@@ -122,7 +122,7 @@ describe('ActionParamForm', () => {
       }
     })
 
-    expect(wrapper.text()).not.toContain('命令完成后自动关闭')
+    expect(wrapper.text()).not.toContain('成功后自动关闭')
 
     await wrapper.setProps({
       modelValue: {
@@ -134,7 +134,7 @@ describe('ActionParamForm', () => {
       }
     })
 
-    expect(wrapper.text()).toContain('命令完成后自动关闭')
+    expect(wrapper.text()).toContain('成功后自动关闭')
 
     const switches = wrapper.findAllComponents({ name: 'NSwitch' })
     expect(switches.length).toBeGreaterThanOrEqual(3)

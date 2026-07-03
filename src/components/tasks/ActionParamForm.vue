@@ -200,7 +200,7 @@ function updateScriptArgs(value: string) {
           </NFormItem>
         </NGi>
         <NGi v-if="Boolean(params.showTerminal)">
-          <NFormItem label="命令完成后自动关闭">
+          <NFormItem label="成功后自动关闭">
             <NSwitch
               :value="params.closeTerminalOnFinish !== false"
               @update:value="(value: boolean) => patchParams({ closeTerminalOnFinish: value })"

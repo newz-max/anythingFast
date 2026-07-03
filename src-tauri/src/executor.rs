@@ -7,7 +7,8 @@ use crate::storage;
 use chrono::Utc;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -412,28 +413,15 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
     }
 
     let show_terminal = show_terminal(action);
-    let should_close_terminal = should_close_terminal_on_finish(action);
-    let mut command = if command_source(action) == "script" {
-        script_command(action, should_close_terminal).map_err(failed_output)?
-    } else {
-        inline_command(action, should_close_terminal).map_err(failed_output)?
-    };
-
-    command.current_dir(working_dir);
-    if !show_terminal {
-        hide_command_window(&mut command);
-    }
-
-    if let Some(env_map) = action.params.get("env").and_then(|value| value.as_object()) {
-        let envs: HashMap<String, String> = env_map
-            .iter()
-            .filter_map(|(key, value)| value.as_str().map(|text| (key.clone(), text.to_string())))
-            .collect();
-        command.envs(envs);
-    }
-
+    let command_envs = command_envs(action);
     if show_terminal {
-        let status = command.status().map_err(|err| {
+        let mut terminal_command =
+            terminal_command(action, close_terminal_on_finish(action)).map_err(failed_output)?;
+        terminal_command.command.current_dir(working_dir);
+        terminal_command.command.envs(command_envs);
+
+        let status = terminal_command.command.status().map_err(|err| {
+            cleanup_temp_paths(&terminal_command.temp_paths);
             dev_log_error(
                 "Run command action failed to start",
                 format!(
@@ -443,6 +431,7 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
             );
             failed_output(err.to_string())
         })?;
+        cleanup_temp_paths(&terminal_command.temp_paths);
         if status.success() {
             return Ok(ActionRunOutput {
                 message: "命令执行成功".into(),
@@ -464,12 +453,23 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
         );
         return Err(ActionRunOutput {
             message: format!(
-                "命令执行失败，退出码：{exit_code}，显示终端模式未捕获 stdout/stderr，请查看弹出的终端输出"
+                "命令执行失败，退出码：{exit_code}，显示终端模式不记录 stdout/stderr，失败输出已在终端中停留供查看"
             ),
             exit_code: Some(exit_code),
             ..Default::default()
         });
     }
+
+    let should_close_terminal = should_close_terminal_on_finish(action);
+    let mut command = if command_source(action) == "script" {
+        script_command(action, should_close_terminal).map_err(failed_output)?
+    } else {
+        inline_command(action, should_close_terminal).map_err(failed_output)?
+    };
+
+    command.current_dir(working_dir);
+    hide_command_window(&mut command);
+    command.envs(command_envs);
 
     let output = command.output().map_err(|err| {
         dev_log_error(
@@ -543,6 +543,236 @@ fn close_terminal_on_finish(action: &TaskAction) -> bool {
 
 fn should_close_terminal_on_finish(action: &TaskAction) -> bool {
     !show_terminal(action) || close_terminal_on_finish(action)
+}
+
+fn command_envs(action: &TaskAction) -> HashMap<String, String> {
+    action
+        .params
+        .get("env")
+        .and_then(|value| value.as_object())
+        .map(|env_map| {
+            env_map
+                .iter()
+                .filter_map(|(key, value)| {
+                    value.as_str().map(|text| (key.clone(), text.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+struct TerminalCommand {
+    command: Command,
+    temp_paths: Vec<PathBuf>,
+}
+
+fn terminal_command(
+    action: &TaskAction,
+    close_on_success: bool,
+) -> Result<TerminalCommand, String> {
+    if command_source(action) == "script" {
+        let script_path = string_param(action, "scriptPath")?;
+        if !Path::new(script_path).is_file() {
+            return Err(format!("脚本文件不存在：{script_path}"));
+        }
+
+        let extension = script_extension(script_path)
+            .ok_or_else(|| "脚本文件必须是 ps1、cmd 或 bat".to_string())?;
+        if extension == "ps1" {
+            let shell = action
+                .params
+                .get("shell")
+                .and_then(|value| value.as_str())
+                .unwrap_or("powershell");
+            if shell == "cmd" {
+                return Err("ps1 脚本必须使用 pwsh 或 powershell".to_string());
+            }
+            powershell_terminal_command(
+                powershell_program(shell),
+                script_path,
+                &script_args(action),
+                close_on_success,
+                Vec::new(),
+            )
+        } else {
+            cmd_terminal_command(
+                script_path,
+                &script_args(action),
+                close_on_success,
+                Vec::new(),
+            )
+        }
+    } else {
+        let command_text = string_param(action, "command")?;
+        let shell = action
+            .params
+            .get("shell")
+            .and_then(|value| value.as_str())
+            .unwrap_or("powershell");
+
+        if shell == "cmd" {
+            let user_script_path = temp_runner_path("cmd");
+            write_cmd_script(
+                &user_script_path,
+                &format!("@echo off\r\n{command_text}\r\nexit /b %ERRORLEVEL%\r\n"),
+            )?;
+            let user_script_path_text = user_script_path.to_string_lossy().to_string();
+            cmd_terminal_command(
+                &user_script_path_text,
+                &[],
+                close_on_success,
+                vec![user_script_path],
+            )
+        } else {
+            let user_script_path = temp_runner_path("ps1");
+            write_powershell_script(&user_script_path, command_text)?;
+            let user_script_path_text = user_script_path.to_string_lossy().to_string();
+            powershell_terminal_command(
+                powershell_program(shell),
+                &user_script_path_text,
+                &[],
+                close_on_success,
+                vec![user_script_path],
+            )
+        }
+    }
+}
+
+fn powershell_terminal_command(
+    shell_program: &str,
+    script_path: &str,
+    script_args: &[String],
+    close_on_success: bool,
+    mut temp_paths: Vec<PathBuf>,
+) -> Result<TerminalCommand, String> {
+    let runner_path = temp_runner_path("ps1");
+    let arg_list = script_args
+        .iter()
+        .map(|arg| powershell_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let invocation = if arg_list.is_empty() {
+        format!(
+            "& {} -NoProfile -ExecutionPolicy Bypass -File {}",
+            powershell_quote(shell_program),
+            powershell_quote(script_path)
+        )
+    } else {
+        format!(
+            "& {} -NoProfile -ExecutionPolicy Bypass -File {} {}",
+            powershell_quote(shell_program),
+            powershell_quote(script_path),
+            arg_list
+        )
+    };
+    let pause_on_success = if close_on_success { "$false" } else { "$true" };
+    let runner_script = format!(
+        r#"$ErrorActionPreference = 'Continue'
+{invocation}
+if ($null -ne $LASTEXITCODE) {{
+  $exitCode = [int]$LASTEXITCODE
+}} elseif ($?) {{
+  $exitCode = 0
+}} else {{
+  $exitCode = 1
+}}
+if ($exitCode -ne 0) {{
+  Write-Host ''
+  Write-Host "命令执行失败，退出码：$exitCode"
+  Read-Host '按 Enter 关闭终端' | Out-Null
+}} elseif ({pause_on_success}) {{
+  Write-Host ''
+  Write-Host "命令执行成功，退出码：$exitCode"
+  Read-Host '按 Enter 关闭终端' | Out-Null
+}}
+exit $exitCode
+"#
+    );
+    write_powershell_script(&runner_path, &runner_script)?;
+
+    let mut command = Command::new(shell_program);
+    command.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        &runner_path.to_string_lossy(),
+    ]);
+    temp_paths.push(runner_path);
+    Ok(TerminalCommand {
+        command,
+        temp_paths,
+    })
+}
+
+fn cmd_terminal_command(
+    script_path: &str,
+    script_args: &[String],
+    close_on_success: bool,
+    mut temp_paths: Vec<PathBuf>,
+) -> Result<TerminalCommand, String> {
+    let runner_path = temp_runner_path("cmd");
+    let invocation = cmd_invocation(script_path, script_args);
+    let pause_success_block = if close_on_success {
+        String::new()
+    } else {
+        "\r\n) else (\r\n  echo.\r\n  echo 命令执行成功，退出码：%exitCode%\r\n  set /p \"=按 Enter 关闭终端\"\r\n".to_string()
+    };
+    let runner_script = format!(
+        "@echo off\r\ncmd /C \"{invocation}\"\r\nset \"exitCode=%ERRORLEVEL%\"\r\nif not \"%exitCode%\"==\"0\" (\r\n  echo.\r\n  echo 命令执行失败，退出码：%exitCode%\r\n  set /p \"=按 Enter 关闭终端\"{pause_success_block})\r\nexit /b %exitCode%\r\n"
+    );
+    write_cmd_script(&runner_path, &runner_script)?;
+
+    let mut command = Command::new("cmd");
+    command.args(["/C", &runner_path.to_string_lossy()]);
+    temp_paths.push(runner_path);
+    Ok(TerminalCommand {
+        command,
+        temp_paths,
+    })
+}
+
+fn temp_runner_path(extension: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "anything-fast-runner-{}.{}",
+        Uuid::new_v4(),
+        extension
+    ))
+}
+
+fn write_powershell_script(path: &Path, content: &str) -> Result<(), String> {
+    let mut bytes = vec![0xEF, 0xBB, 0xBF];
+    bytes.extend_from_slice(content.as_bytes());
+    fs::write(path, bytes).map_err(|err| err.to_string())
+}
+
+fn write_cmd_script(path: &Path, content: &str) -> Result<(), String> {
+    fs::write(path, content).map_err(|err| err.to_string())
+}
+
+fn cleanup_temp_paths(paths: &[PathBuf]) {
+    for path in paths {
+        if let Err(err) = fs::remove_file(path) {
+            dev_log_error(
+                "Clean command runner temp file failed",
+                format!("path={}, error={err}", path.display()),
+            );
+        }
+    }
+}
+
+fn powershell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn cmd_invocation(script_path: &str, script_args: &[String]) -> String {
+    let mut parts = vec![cmd_quote(script_path)];
+    parts.extend(script_args.iter().map(|arg| cmd_quote(arg)));
+    parts.join(" ")
+}
+
+fn cmd_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
 }
 
 fn inline_command(action: &TaskAction, close_terminal_on_finish: bool) -> Result<Command, String> {
@@ -1016,7 +1246,7 @@ mod tests {
     }
 
     #[test]
-    fn show_terminal_failure_message_mentions_uncaptured_output() {
+    fn show_terminal_failure_message_mentions_retained_terminal_output() {
         let working_dir = std::env::current_dir()
             .unwrap()
             .to_string_lossy()
@@ -1041,7 +1271,112 @@ mod tests {
 
         assert_eq!(output.exit_code, Some(7));
         assert!(output.message.contains("退出码：7"));
-        assert!(output.message.contains("未捕获 stdout/stderr"));
+        assert!(output.message.contains("不记录 stdout/stderr"));
+        assert!(output.message.contains("失败输出已在终端中停留"));
+    }
+
+    #[test]
+    fn show_terminal_auto_close_runner_pauses_only_on_failure() {
+        let working_dir = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "exit 7",
+                "workingDir": working_dir,
+                "showTerminal": true,
+                "closeTerminalOnFinish": true,
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        let terminal = terminal_command(&action, true).expect("terminal command");
+        let runner_path = terminal.temp_paths.last().expect("runner path");
+        let runner =
+            String::from_utf8_lossy(&std::fs::read(runner_path).expect("read runner")).to_string();
+
+        assert!(runner.contains("if ($exitCode -ne 0)"));
+        assert!(runner.contains("Read-Host '按 Enter 关闭终端'"));
+        assert!(runner.contains("elseif ($false)"));
+        assert!(runner.contains("exit $exitCode"));
+        cleanup_temp_paths(&terminal.temp_paths);
+    }
+
+    #[test]
+    fn show_terminal_keep_open_runner_pauses_on_success_and_failure() {
+        let working_dir = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "echo ok",
+                "workingDir": working_dir,
+                "showTerminal": true,
+                "closeTerminalOnFinish": false,
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        let terminal = terminal_command(&action, false).expect("terminal command");
+        let runner_path = terminal.temp_paths.last().expect("runner path");
+        let runner =
+            String::from_utf8_lossy(&std::fs::read(runner_path).expect("read runner")).to_string();
+
+        assert!(runner.contains("if ($exitCode -ne 0)"));
+        assert!(runner.contains("elseif ($true)"));
+        assert!(runner.contains("命令执行成功，退出码"));
+        assert!(runner.contains("exit $exitCode"));
+        cleanup_temp_paths(&terminal.temp_paths);
+    }
+
+    #[test]
+    fn show_terminal_cmd_runner_preserves_exit_code() {
+        let working_dir = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "exit 7",
+                "workingDir": working_dir,
+                "showTerminal": true,
+                "closeTerminalOnFinish": true,
+                "shell": "cmd"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        let terminal = terminal_command(&action, true).expect("terminal command");
+        let runner_path = terminal.temp_paths.last().expect("runner path");
+        let runner = std::fs::read_to_string(runner_path).expect("read runner");
+
+        assert!(runner.contains("set \"exitCode=%ERRORLEVEL%\""));
+        assert!(runner.contains("if not \"%exitCode%\"==\"0\""));
+        assert!(runner.contains("set /p \"=按 Enter 关闭终端\""));
+        assert!(runner.contains("exit /b %exitCode%"));
+        cleanup_temp_paths(&terminal.temp_paths);
     }
 
     #[test]
