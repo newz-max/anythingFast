@@ -123,7 +123,19 @@ pub fn analyze_action_risk(
 }
 
 #[tauri::command]
-pub fn run_task(
+pub async fn run_task(
+    app: AppHandle,
+    task_id: String,
+    confirmation_token: Option<String>,
+) -> Result<TaskExecutionSummary, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_task_blocking(app, task_id, confirmation_token)
+    })
+    .await
+    .map_err(|err| log_command_error("run_task blocking task failed", err))?
+}
+
+fn run_task_blocking(
     app: AppHandle,
     task_id: String,
     confirmation_token: Option<String>,
@@ -171,7 +183,20 @@ pub fn run_task(
 }
 
 #[tauri::command]
-pub fn run_task_action(
+pub async fn run_task_action(
+    app: AppHandle,
+    task_id: String,
+    action_id: String,
+    confirmation_token: Option<String>,
+) -> Result<TaskExecutionSummary, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_task_action_blocking(app, task_id, action_id, confirmation_token)
+    })
+    .await
+    .map_err(|err| log_command_error("run_task_action blocking task failed", err))?
+}
+
+fn run_task_action_blocking(
     app: AppHandle,
     task_id: String,
     action_id: String,
