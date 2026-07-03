@@ -60,19 +60,21 @@ export function useTaskWizardDraft(options: {
   const containsCommand = computed(() => draft.value?.actions.some((action) => action.enabled && action.type === 'runCommand') ?? false)
 
   function addAction(action: TaskAction) {
-    if (!draft.value) return
+    if (!draft.value) return false
     draft.value.actions.push(action)
     normalizeRisks()
+    return true
   }
 
   function replaceAction(action: TaskAction) {
-    if (!draft.value) return
+    if (!draft.value) return false
     const index = draft.value.actions.findIndex((item) => item.id === action.id)
-    if (index < 0) return
+    if (index < 0) return false
     const nextActions = [...draft.value.actions]
     nextActions[index] = action
     draft.value.actions = nextActions
     normalizeRisks()
+    return true
   }
 
   function removeAction(actionId: string) {

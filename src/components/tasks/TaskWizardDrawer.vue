@@ -112,11 +112,19 @@ function editAction(action: TaskAction) {
 }
 
 function saveAction(action: TaskAction) {
-  if (actionWizardMode.value === 'create') {
-    addAction(action)
+  const saved = actionWizardMode.value === 'create' ? addAction(action) : replaceAction(action)
+  if (!saved) {
+    message.error('动作保存失败：事项草稿不存在或动作已被移除')
     return
   }
-  replaceAction(action)
+
+  actionWizardVisible.value = false
+  editingAction.value = null
+  if (actionWizardMode.value === 'create') {
+    message.success('已新增动作')
+    return
+  }
+  message.success('已保存动作')
 }
 </script>
 

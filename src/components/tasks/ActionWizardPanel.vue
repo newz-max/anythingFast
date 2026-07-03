@@ -78,7 +78,6 @@ function save() {
     return
   }
   emit('save', clonePlainDto(draft.value))
-  close()
 }
 
 function normalizeRisk() {
