@@ -15,11 +15,11 @@ defineEmits<{
 <template>
   <section class="action-step">
     <header class="action-step-header">
-      <div>
+      <div class="action-step-copy">
         <h3 class="section-title">动作编排</h3>
         <p class="section-subtitle">动作会按照列表顺序执行，使用“延时等待”控制动作之间的间隔。</p>
       </div>
-      <NButton type="primary" @click="$emit('create')">新增动作</NButton>
+      <NButton class="create-action-button" type="primary" @click="$emit('create')">新增动作</NButton>
     </header>
 
     <NEmpty v-if="actions.length === 0" description="还没有动作">
@@ -74,15 +74,26 @@ defineEmits<{
   min-width: 0;
 }
 
+.action-step-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .section-title {
   margin: 0;
   font-size: 18px;
+  line-height: 1.3;
 }
 
 .section-subtitle {
   margin: 3px 0 0;
   color: #667085;
   font-size: 13px;
+  line-height: 1.45;
+}
+
+.create-action-button {
+  flex: 0 0 auto;
 }
 
 .action-list {

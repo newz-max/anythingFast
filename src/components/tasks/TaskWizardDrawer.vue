@@ -199,8 +199,10 @@ function saveAction(action: TaskAction) {
 
 <style scoped>
 .wizard {
-  display: grid;
-  gap: 0;
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
 }
 
 .wizard-steps {
@@ -213,74 +215,60 @@ function saveAction(action: TaskAction) {
 }
 
 .step-body {
-  min-height: min(640px, calc(100vh - 214px));
-  max-height: calc(100vh - 214px);
+  min-height: 0;
+  flex: 1 1 auto;
   overflow-y: auto;
   padding-right: 4px;
 }
 
 .footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px 16px;
+  display: grid;
+  gap: 10px;
   width: 100%;
 }
 
 .footer-secondary,
 .footer-primary {
-  display: flex;
-  flex: 1 1 0;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
   align-items: center;
   gap: 10px;
   min-width: 0;
 }
 
 .footer-primary {
-  flex: 1 1 244px;
-  justify-content: flex-end;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.close-footer-button {
-  flex: 1 1 112px;
-  min-width: 112px !important;
-  max-width: 148px;
+.footer :deep(.n-button) {
+  width: 100%;
+  min-width: 0 !important;
+  height: 44px !important;
+  font-size: 14px !important;
 }
 
-.compact-footer-button {
-  flex: 0 1 76px;
-  min-width: 76px !important;
-  height: 44px;
-  font-size: 14px;
+:global(.task-wizard-drawer) {
+  height: 100%;
 }
 
-.nav-footer-button {
-  flex: 1 1 116px;
-  min-width: 116px !important;
-  max-width: 148px;
+:global(.task-wizard-drawer .n-drawer-body) {
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
-@media (max-width: 640px) {
-  .step-body {
-    min-height: 0;
-    max-height: calc(100vh - 196px);
-  }
-
-  .footer {
-    align-items: stretch;
-  }
-
-  .footer-secondary,
-  .footer-primary {
-    flex-basis: 100%;
-    justify-content: stretch;
-  }
-
-  .footer :deep(.n-button) {
-    flex: 1 1 0;
-    min-width: 0;
-  }
+:global(.task-wizard-drawer .n-drawer-body-content-wrapper) {
+  height: 100%;
+  min-height: 0;
 }
+
+:global(.task-wizard-drawer .n-drawer-footer) {
+  min-height: 0;
+}
+
+:global(.task-wizard-drawer .n-drawer-footer .n-button) {
+  min-width: 0 !important;
+  height: 44px !important;
+  font-size: 14px !important;
+}
+
 </style>

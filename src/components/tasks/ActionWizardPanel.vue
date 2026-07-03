@@ -96,7 +96,7 @@ function normalizeRisk() {
     :mask-closable="false"
     @update:show="(value: boolean) => (value ? emit('update:show', true) : close())"
   >
-    <NDrawerContent :title="title" closable>
+    <NDrawerContent :title="title" closable class="action-wizard-drawer">
       <div class="action-wizard">
         <NSteps v-model:current="currentStep" :status="stepStatus" size="small">
           <NStep title="选择类型" />
@@ -146,11 +146,11 @@ function normalizeRisk() {
       <template #footer>
         <div class="footer">
           <NButton @click="close">取消</NButton>
-          <NSpace>
+          <div class="action-footer-primary">
             <NButton :disabled="currentStep === 1" @click="previousStep">上一步</NButton>
             <NButton v-if="currentStep < 3" type="primary" @click="nextStep">下一步</NButton>
             <NButton v-else type="primary" @click="save">保存动作</NButton>
-          </NSpace>
+          </div>
         </div>
       </template>
     </NDrawerContent>
@@ -159,13 +159,16 @@ function normalizeRisk() {
 
 <style scoped>
 .action-wizard {
-  display: grid;
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
   gap: 18px;
 }
 
 .step-body {
-  min-height: min(420px, calc(100vh - 220px));
-  max-height: calc(100vh - 190px);
+  min-height: 0;
+  flex: 1 1 auto;
   overflow-y: auto;
   padding-right: 2px;
 }
@@ -237,30 +240,58 @@ function normalizeRisk() {
 }
 
 .footer {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(96px, 0.6fr) minmax(0, 1.4fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
   width: 100%;
 }
 
-.footer :deep(.n-space) {
-  flex-wrap: wrap;
+.footer :deep(.n-button) {
+  width: 100%;
+  min-width: 0 !important;
+  height: 44px !important;
+  font-size: 14px !important;
+}
+
+.action-footer-primary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+:global(.action-wizard-drawer) {
+  height: 100%;
+}
+
+:global(.action-wizard-drawer .n-drawer-body) {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+:global(.action-wizard-drawer .n-drawer-body-content-wrapper) {
+  height: 100%;
+  min-height: 0;
+}
+
+:global(.action-wizard-drawer .n-drawer-footer) {
+  min-height: 0;
+}
+
+:global(.action-wizard-drawer .n-drawer-footer .n-button) {
+  min-width: 0 !important;
+  height: 44px !important;
+  font-size: 14px !important;
 }
 
 @media (max-width: 640px) {
-  .step-body {
-    min-height: 0;
-    max-height: calc(100vh - 180px);
-  }
-
   .type-grid {
     grid-template-columns: 1fr;
   }
 
   .footer {
-    justify-content: flex-end;
+    grid-template-columns: 1fr;
   }
 }
 </style>
