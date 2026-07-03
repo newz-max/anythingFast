@@ -69,7 +69,7 @@ function defaultParams(type: ActionType): ActionParams {
     case 'openFolder':
       return { path: '' }
     case 'runCommand':
-      return { source: 'inline', command: '', workingDir: '', env: {}, showTerminal: false, shell: 'powershell', scriptPath: '', scriptArgs: [] }
+      return { source: 'inline', command: '', workingDir: '', env: {}, showTerminal: false, closeTerminalOnFinish: true, shell: 'powershell', scriptPath: '', scriptArgs: [] }
     case 'delay':
       return { durationMs: 1000 }
   }
@@ -197,6 +197,14 @@ function updateScriptArgs(value: string) {
         <NGi>
           <NFormItem label="显示终端窗口">
             <NSwitch :value="Boolean(params.showTerminal)" @update:value="(value: boolean) => patchParams({ showTerminal: value })" />
+          </NFormItem>
+        </NGi>
+        <NGi v-if="Boolean(params.showTerminal)">
+          <NFormItem label="命令完成后自动关闭">
+            <NSwitch
+              :value="params.closeTerminalOnFinish !== false"
+              @update:value="(value: boolean) => patchParams({ closeTerminalOnFinish: value })"
+            />
           </NFormItem>
         </NGi>
       </NGrid>

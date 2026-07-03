@@ -180,6 +180,7 @@ function makeInvalidCommandAction(): TaskAction {
       workingDir: '',
       env: {},
       showTerminal: true,
+      closeTerminalOnFinish: true,
       shell: 'powershell',
       scriptPath: '',
       scriptArgs: []
@@ -201,6 +202,7 @@ function makeCommandAction(showTerminal = false): TaskAction {
       workingDir: 'D:\\Project\\anythingFast',
       env: {},
       showTerminal,
+      closeTerminalOnFinish: true,
       shell: 'powershell',
       scriptPath: '',
       scriptArgs: []
@@ -310,7 +312,7 @@ describe('wizard save feedback', () => {
     expect(wrapper.find('.confirm-step').text()).toContain('可保存事项')
   })
 
-  it('saves an edited command action with showTerminal enabled into the task draft', async () => {
+  it('saves an edited command action with terminal auto close disabled into the task draft', async () => {
     const wrapper = mount(TaskWizardDrawer, {
       props: {
         show: true,
@@ -339,6 +341,11 @@ describe('wizard save feedback', () => {
     await switches[1].vm.$emit('update:value', true)
     await nextTick()
 
+    const terminalSwitches = actionWizard.findAllComponents({ name: 'NSwitch' })
+    expect(terminalSwitches.length).toBeGreaterThanOrEqual(3)
+    await terminalSwitches[2].vm.$emit('update:value', false)
+    await nextTick()
+
     await findButton(actionWizard, '下一步').trigger('click')
     await nextTick()
     await findButton(actionWizard, '保存动作').trigger('click')
@@ -354,6 +361,7 @@ describe('wizard save feedback', () => {
     const savedTask = wrapper.emitted('save')?.[0]?.[0] as TaskItem
     const savedAction = savedTask.actions[0]
     expect((savedAction.params as CommandParams).showTerminal).toBe(true)
+    expect((savedAction.params as CommandParams).closeTerminalOnFinish).toBe(false)
   })
 
   it('keeps the action drawer open and shows an error when the edited action no longer exists', async () => {

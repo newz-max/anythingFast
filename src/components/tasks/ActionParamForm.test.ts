@@ -19,7 +19,11 @@ const formStubs = {
   NForm: passThroughStub('NForm'),
   NGrid: passThroughStub('NGrid'),
   NGi: passThroughStub('NGi'),
-  NFormItem: passThroughStub('NFormItem'),
+  NFormItem: defineComponent({
+    name: 'NFormItem',
+    props: ['label'],
+    template: '<div><span v-if="label">{{ label }}</span><slot /></div>'
+  }),
   NInputGroup: passThroughStub('NInputGroup'),
   NRadioButton: passThroughStub('NRadioButton'),
   NButton: defineComponent({
@@ -71,6 +75,7 @@ function makeCommandAction(): TaskAction {
       workingDir: 'D:\\Project\\anythingFast',
       env: {},
       showTerminal: false,
+      closeTerminalOnFinish: true,
       shell: 'powershell',
       scriptPath: '',
       scriptArgs: []
@@ -104,6 +109,40 @@ describe('ActionParamForm', () => {
     expect(updatedAction).not.toBe(sourceAction)
     expect(updatedAction.params).not.toBe(sourceAction.params)
     expect((updatedAction.params as CommandParams).showTerminal).toBe(true)
+  })
+
+  it('shows and updates closeTerminalOnFinish only when terminal is shown', async () => {
+    const hiddenTerminalAction = makeCommandAction()
+    const wrapper = mount(ActionParamForm, {
+      props: {
+        modelValue: hiddenTerminalAction
+      },
+      global: {
+        stubs: formStubs
+      }
+    })
+
+    expect(wrapper.text()).not.toContain('命令完成后自动关闭')
+
+    await wrapper.setProps({
+      modelValue: {
+        ...hiddenTerminalAction,
+        params: {
+          ...hiddenTerminalAction.params,
+          showTerminal: true
+        }
+      }
+    })
+
+    expect(wrapper.text()).toContain('命令完成后自动关闭')
+
+    const switches = wrapper.findAllComponents({ name: 'NSwitch' })
+    expect(switches.length).toBeGreaterThanOrEqual(3)
+    await switches[2].vm.$emit('update:value', false)
+
+    const updates = wrapper.emitted('update:modelValue')
+    const updatedAction = updates?.at(-1)?.[0] as TaskAction
+    expect((updatedAction.params as CommandParams).closeTerminalOnFinish).toBe(false)
   })
 
   it('offers PowerShell 7 as a command shell option', () => {

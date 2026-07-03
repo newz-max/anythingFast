@@ -411,14 +411,15 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
         return Err(failed_output(format!("工作目录不存在：{working_dir}")));
     }
 
+    let show_terminal = show_terminal(action);
+    let should_close_terminal = should_close_terminal_on_finish(action);
     let mut command = if command_source(action) == "script" {
-        script_command(action).map_err(failed_output)?
+        script_command(action, should_close_terminal).map_err(failed_output)?
     } else {
-        inline_command(action).map_err(failed_output)?
+        inline_command(action, should_close_terminal).map_err(failed_output)?
     };
 
     command.current_dir(working_dir);
-    let show_terminal = show_terminal(action);
     if !show_terminal {
         hide_command_window(&mut command);
     }
@@ -532,7 +533,19 @@ fn show_terminal(action: &TaskAction) -> bool {
         .unwrap_or(false)
 }
 
-fn inline_command(action: &TaskAction) -> Result<Command, String> {
+fn close_terminal_on_finish(action: &TaskAction) -> bool {
+    action
+        .params
+        .get("closeTerminalOnFinish")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true)
+}
+
+fn should_close_terminal_on_finish(action: &TaskAction) -> bool {
+    !show_terminal(action) || close_terminal_on_finish(action)
+}
+
+fn inline_command(action: &TaskAction, close_terminal_on_finish: bool) -> Result<Command, String> {
     let command_text = string_param(action, "command")?;
     let shell = action
         .params
@@ -542,10 +555,13 @@ fn inline_command(action: &TaskAction) -> Result<Command, String> {
 
     if shell == "cmd" {
         let mut cmd = Command::new("cmd");
-        cmd.args(["/C", command_text]);
+        cmd.args([cmd_keep_open_flag(close_terminal_on_finish), command_text]);
         Ok(cmd)
     } else {
         let mut ps = Command::new(powershell_program(shell));
+        if !close_terminal_on_finish {
+            ps.arg("-NoExit");
+        }
         ps.args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -557,7 +573,7 @@ fn inline_command(action: &TaskAction) -> Result<Command, String> {
     }
 }
 
-fn script_command(action: &TaskAction) -> Result<Command, String> {
+fn script_command(action: &TaskAction, close_terminal_on_finish: bool) -> Result<Command, String> {
     let script_path = string_param(action, "scriptPath")?;
     if !Path::new(script_path).is_file() {
         return Err(format!("脚本文件不存在：{script_path}"));
@@ -575,6 +591,9 @@ fn script_command(action: &TaskAction) -> Result<Command, String> {
             return Err("ps1 脚本必须使用 pwsh 或 powershell".to_string());
         }
         let mut ps = Command::new(powershell_program(shell));
+        if !close_terminal_on_finish {
+            ps.arg("-NoExit");
+        }
         ps.args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -586,10 +605,14 @@ fn script_command(action: &TaskAction) -> Result<Command, String> {
         Ok(ps)
     } else {
         let mut cmd = Command::new("cmd");
-        cmd.args(["/C", script_path]);
+        cmd.args([cmd_keep_open_flag(close_terminal_on_finish), script_path]);
         cmd.args(script_args(action));
         Ok(cmd)
     }
+}
+
+fn cmd_keep_open_flag(close_terminal_on_finish: bool) -> &'static str {
+    if close_terminal_on_finish { "/C" } else { "/K" }
 }
 
 fn powershell_program(shell: &str) -> &str {
@@ -874,6 +897,125 @@ mod tests {
     }
 
     #[test]
+    fn close_terminal_on_finish_defaults_to_true() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "echo ok",
+                "workingDir": "D:\\Project\\anythingFast",
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        assert!(close_terminal_on_finish(&action));
+    }
+
+    #[test]
+    fn close_terminal_on_finish_reads_explicit_false() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "echo ok",
+                "workingDir": "D:\\Project\\anythingFast",
+                "showTerminal": true,
+                "closeTerminalOnFinish": false,
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        assert!(!close_terminal_on_finish(&action));
+    }
+
+    #[test]
+    fn hidden_terminal_always_closes_on_finish() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "echo ok",
+                "workingDir": "D:\\Project\\anythingFast",
+                "showTerminal": false,
+                "closeTerminalOnFinish": false,
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        assert!(should_close_terminal_on_finish(&action));
+    }
+
+    #[test]
+    fn inline_powershell_keeps_terminal_open_with_no_exit() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "echo ok",
+                "workingDir": "D:\\Project\\anythingFast",
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        let command = inline_command(&action, false).expect("inline command");
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(command.get_program().to_string_lossy(), "powershell");
+        assert!(args.iter().any(|arg| arg == "-NoExit"));
+        assert!(args.iter().any(|arg| arg == "-Command"));
+    }
+
+    #[test]
+    fn inline_cmd_keeps_terminal_open_with_k_flag() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "echo ok",
+                "workingDir": "D:\\Project\\anythingFast",
+                "shell": "cmd"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        let command = inline_command(&action, false).expect("inline command");
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(command.get_program().to_string_lossy(), "cmd");
+        assert_eq!(args.first().map(String::as_str), Some("/K"));
+    }
+
+    #[test]
     fn show_terminal_failure_message_mentions_uncaptured_output() {
         let working_dir = std::env::current_dir()
             .unwrap()
@@ -926,7 +1068,7 @@ mod tests {
             risk_level: crate::domain::RiskLevel::High,
         };
 
-        let command = script_command(&action).expect("script command");
+        let command = script_command(&action, true).expect("script command");
         let args: Vec<String> = command
             .get_args()
             .map(|arg| arg.to_string_lossy().to_string())
@@ -934,6 +1076,42 @@ mod tests {
 
         assert_eq!(command.get_program().to_string_lossy(), "pwsh");
         assert!(args.iter().any(|arg| arg == "-File"));
+        assert!(args.iter().any(|arg| arg == "dev"));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn script_cmd_keeps_terminal_open_with_k_flag() {
+        let temp_dir = std::env::temp_dir().join(format!("anything-fast-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let script_path = temp_dir.join("start.cmd");
+        std::fs::write(&script_path, "echo ok").expect("write script");
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("script".into()),
+            params: json!({
+                "source": "script",
+                "command": "",
+                "workingDir": temp_dir.to_string_lossy(),
+                "shell": "cmd",
+                "scriptPath": script_path.to_string_lossy(),
+                "scriptArgs": ["dev"]
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::High,
+        };
+
+        let command = script_command(&action, false).expect("script command");
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(command.get_program().to_string_lossy(), "cmd");
+        assert_eq!(args.first().map(String::as_str), Some("/K"));
         assert!(args.iter().any(|arg| arg == "dev"));
         let _ = std::fs::remove_dir_all(temp_dir);
     }
@@ -961,7 +1139,7 @@ mod tests {
             risk_level: crate::domain::RiskLevel::High,
         };
 
-        let err = script_command(&action).unwrap_err();
+        let err = script_command(&action, true).unwrap_err();
 
         assert!(err.contains("ps1 脚本必须使用"));
         let _ = std::fs::remove_dir_all(temp_dir);

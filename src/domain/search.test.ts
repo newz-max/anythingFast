@@ -40,8 +40,8 @@ describe('searchTasks', () => {
 
   it('matches command text script path and action names', () => {
     const tasks: TaskItem[] = [
-      makeTask('1', '运行构建', true, [], [makeAction('runCommand', { source: 'inline', command: 'yarn build', workingDir: '', env: {}, showTerminal: false, shell: 'powershell', scriptPath: '', scriptArgs: [] }, '前端构建')]),
-      makeTask('2', '同步数据', true, [], [makeAction('runCommand', { source: 'script', command: '', workingDir: '', env: {}, showTerminal: false, shell: 'powershell', scriptPath: 'D:\\Scripts\\sync-data.ps1', scriptArgs: [] })])
+      makeTask('1', '运行构建', true, [], [makeAction('runCommand', { source: 'inline', command: 'yarn build', workingDir: '', env: {}, showTerminal: false, closeTerminalOnFinish: true, shell: 'powershell', scriptPath: '', scriptArgs: [] }, '前端构建')]),
+      makeTask('2', '同步数据', true, [], [makeAction('runCommand', { source: 'script', command: '', workingDir: '', env: {}, showTerminal: false, closeTerminalOnFinish: true, shell: 'powershell', scriptPath: 'D:\\Scripts\\sync-data.ps1', scriptArgs: [] })])
     ]
 
     expect(searchTasks(tasks, 'yarn build', '全部').map((task) => task.id)).toEqual(['1'])
@@ -79,13 +79,13 @@ describe('searchTasks', () => {
       makeTask('1', '发布服务', true, [], [
         makeAction(
           'runCommand',
-          { source: 'inline', command: 'yarn release', workingDir: '', env: {}, showTerminal: false, shell: 'powershell', scriptPath: '', scriptArgs: [] },
+          { source: 'inline', command: 'yarn release', workingDir: '', env: {}, showTerminal: false, closeTerminalOnFinish: true, shell: 'powershell', scriptPath: '', scriptArgs: [] },
           'deploy backend'
         )
       ]),
       {
         ...makeTask('2', '最近脚本', true, [], [
-          makeAction('runCommand', { source: 'inline', command: 'deploy --dry-run', workingDir: '', env: {}, showTerminal: false, shell: 'powershell', scriptPath: '', scriptArgs: [] })
+          makeAction('runCommand', { source: 'inline', command: 'deploy --dry-run', workingDir: '', env: {}, showTerminal: false, closeTerminalOnFinish: true, shell: 'powershell', scriptPath: '', scriptArgs: [] })
         ]),
         lastRunAt: '2026-07-03T09:00:00.000Z'
       }

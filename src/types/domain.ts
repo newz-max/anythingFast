@@ -26,6 +26,7 @@ export interface CommandParams {
   workingDir: string
   env?: Record<string, string>
   showTerminal?: boolean
+  closeTerminalOnFinish?: boolean
   shell: CommandShell
   scriptPath?: string
   scriptArgs?: string[]

@@ -25,7 +25,11 @@ export function describeAction(action: TaskAction) {
       return textParam((action.params as PathParams).path) || '未设置文件夹路径'
     case 'runCommand': {
       const params = action.params as CommandParams
-      const terminalMode = params.showTerminal ? '显示终端' : '后台运行'
+      const terminalMode = params.showTerminal
+        ? params.closeTerminalOnFinish === false
+          ? '显示终端，完成后保留'
+          : '显示终端'
+        : '后台运行'
       if (params.source === 'script') {
         return `${textParam(params.scriptPath) || '未设置脚本文件'} · ${terminalMode}`
       }

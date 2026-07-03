@@ -23,6 +23,7 @@ describe('clonePlainDto', () => {
               NODE_ENV: 'development'
             },
             showTerminal: false,
+            closeTerminalOnFinish: true,
             shell: 'powershell'
           },
           enabled: true,

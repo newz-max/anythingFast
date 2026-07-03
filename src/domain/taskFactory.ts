@@ -104,6 +104,7 @@ function normalizeActionParams(action: TaskAction): TaskAction['params'] {
     workingDir: action.params.workingDir || '',
     env: action.params.env || {},
     showTerminal: action.params.showTerminal ?? false,
+    closeTerminalOnFinish: action.params.closeTerminalOnFinish ?? true,
     shell: action.params.shell || 'powershell',
     scriptPath: action.params.scriptPath || '',
     scriptArgs: action.params.scriptArgs || []
@@ -197,7 +198,7 @@ function defaultParams(type: ActionType) {
     case 'openFolder':
       return { path: '' }
     case 'runCommand':
-      return { source: 'inline' as const, command: '', workingDir: '', env: {}, showTerminal: false, shell: 'powershell' as const, scriptPath: '', scriptArgs: [] }
+      return { source: 'inline' as const, command: '', workingDir: '', env: {}, showTerminal: false, closeTerminalOnFinish: true, shell: 'powershell' as const, scriptPath: '', scriptArgs: [] }
     case 'delay':
       return { durationMs: 1000 }
   }
