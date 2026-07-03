@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { usePathPicker } from '@/composables/usePathPicker'
-import type { TaskAction } from '@/types/domain'
+import type { ActionParams, ActionType, TaskAction } from '@/types/domain'
 
 const action = defineModel<TaskAction>({ required: true })
 type MutableParams = Record<string, any>
@@ -18,12 +18,12 @@ const commandSourceOptions = [
 ]
 
 const actionTypeOptions = [
-  { label: '打开程序', value: 'openProgram' },
-  { label: '打开 URL', value: 'openUrl' },
-  { label: '打开文件', value: 'openFile' },
-  { label: '打开文件夹', value: 'openFolder' },
-  { label: '执行命令', value: 'runCommand' },
-  { label: '延时等待', value: 'delay' }
+  { label: '打开程序', value: 'openProgram' as const },
+  { label: '打开 URL', value: 'openUrl' as const },
+  { label: '打开文件', value: 'openFile' as const },
+  { label: '打开文件夹', value: 'openFolder' as const },
+  { label: '执行命令', value: 'runCommand' as const },
+  { label: '延时等待', value: 'delay' as const }
 ]
 
 const pathLabel = computed(() => (action.value.type === 'openProgram' ? '程序路径' : action.value.type === 'openFolder' ? '文件夹路径' : '文件路径'))
@@ -31,47 +31,84 @@ const params = computed(() => action.value.params as MutableParams)
 const commandSource = computed({
   get: () => params.value.source || 'inline',
   set: (value: string) => {
-    params.value.source = value
+    patchParams({ source: value })
   }
 })
 
-function resetParams() {
-  switch (action.value.type) {
+function patchAction(patch: Partial<TaskAction>) {
+  action.value = {
+    ...action.value,
+    ...patch
+  }
+}
+
+function patchParams(patch: MutableParams) {
+  patchAction({
+    params: {
+      ...params.value,
+      ...patch
+    } as ActionParams
+  })
+}
+
+function setActionType(type: ActionType) {
+  patchAction({
+    type,
+    params: defaultParams(type)
+  })
+}
+
+function defaultParams(type: ActionType): ActionParams {
+  switch (type) {
     case 'openProgram':
-      action.value.params = { path: '', args: [], workingDir: '' }
-      break
+      return { path: '', args: [], workingDir: '' }
     case 'openUrl':
-      action.value.params = { url: 'https://' }
-      break
+      return { url: 'https://' }
     case 'openFile':
     case 'openFolder':
-      action.value.params = { path: '' }
-      break
+      return { path: '' }
     case 'runCommand':
-      action.value.params = { source: 'inline', command: '', workingDir: '', env: {}, showTerminal: false, shell: 'powershell', scriptPath: '', scriptArgs: [] }
-      break
+      return { source: 'inline', command: '', workingDir: '', env: {}, showTerminal: false, shell: 'powershell', scriptPath: '', scriptArgs: [] }
     case 'delay':
-      action.value.params = { durationMs: 1000 }
-      break
+      return { durationMs: 1000 }
   }
 }
 
 async function chooseWorkingDir() {
-  const selected = await pickDirectory(params.value.workingDir)
+  const selected = await pickDirectory(textParam('workingDir'))
   if (selected) {
-    params.value.workingDir = selected
+    patchParams({ workingDir: selected })
   }
 }
 
 async function chooseScriptFile() {
-  const selected = await pickScriptFile(params.value.scriptPath)
+  const selected = await pickScriptFile(textParam('scriptPath'))
   if (selected) {
-    params.value.scriptPath = selected
+    patchParams({ scriptPath: selected })
   }
 }
 
+function textParam(key: string) {
+  const value = params.value[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function numberParam(key: string) {
+  const value = params.value[key]
+  return typeof value === 'number' ? value : null
+}
+
+function stringListParam(key: string) {
+  const value = params.value[key]
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function updateStringListParam(key: string, value: string) {
+  patchParams({ [key]: value.split(' ').filter(Boolean) })
+}
+
 function updateScriptArgs(value: string) {
-  params.value.scriptArgs = value.split(' ').filter(Boolean)
+  updateStringListParam('scriptArgs', value)
 }
 </script>
 
@@ -80,17 +117,26 @@ function updateScriptArgs(value: string) {
     <NGrid :cols="3" :x-gap="12" :y-gap="8" responsive="screen">
       <NGi>
         <NFormItem label="动作类型">
-          <NSelect v-model:value="action.type" :options="actionTypeOptions" @update:value="resetParams" />
+          <NSelect :value="action.type" :options="actionTypeOptions" @update:value="setActionType" />
         </NFormItem>
       </NGi>
       <NGi>
         <NFormItem label="超时时间 ms">
-          <NInputNumber v-model:value="action.timeoutMs" clearable :min="1" placeholder="可选" />
+          <NInputNumber
+            :value="action.timeoutMs ?? null"
+            clearable
+            :min="1"
+            placeholder="可选"
+            @update:value="(value: number | null) => patchAction({ timeoutMs: value })"
+          />
         </NFormItem>
       </NGi>
       <NGi>
         <NFormItem label="失败后继续">
-          <NSwitch v-model:value="action.continueOnError" />
+          <NSwitch
+            :value="Boolean(action.continueOnError)"
+            @update:value="(value: boolean) => patchAction({ continueOnError: value })"
+          />
         </NFormItem>
       </NGi>
     </NGrid>
@@ -99,21 +145,21 @@ function updateScriptArgs(value: string) {
       <NGrid :cols="3" :x-gap="12" responsive="screen">
         <NGi>
           <NFormItem :label="pathLabel" required>
-            <NInput v-model:value="params.path" placeholder="C:\\Program Files\\..." />
+            <NInput :value="textParam('path')" placeholder="C:\\Program Files\\..." @update:value="(value: string) => patchParams({ path: value })" />
           </NFormItem>
         </NGi>
         <NGi>
           <NFormItem label="启动参数">
             <NInput
-              :value="params.args?.join(' ')"
+              :value="stringListParam('args').join(' ')"
               placeholder="按空格分隔"
-              @update:value="(value: string) => params.args = value.split(' ').filter(Boolean)"
+              @update:value="(value: string) => updateStringListParam('args', value)"
             />
           </NFormItem>
         </NGi>
         <NGi>
           <NFormItem label="工作目录">
-            <NInput v-model:value="params.workingDir" placeholder="可选" />
+            <NInput :value="textParam('workingDir')" placeholder="可选" @update:value="(value: string) => patchParams({ workingDir: value })" />
           </NFormItem>
         </NGi>
       </NGrid>
@@ -121,13 +167,13 @@ function updateScriptArgs(value: string) {
 
     <template v-else-if="action.type === 'openUrl' && 'url' in action.params">
       <NFormItem label="URL" required>
-        <NInput v-model:value="params.url" placeholder="https://example.com" />
+        <NInput :value="textParam('url')" placeholder="https://example.com" @update:value="(value: string) => patchParams({ url: value })" />
       </NFormItem>
     </template>
 
     <template v-else-if="(action.type === 'openFile' || action.type === 'openFolder') && 'path' in action.params">
       <NFormItem :label="pathLabel" required>
-        <NInput v-model:value="params.path" placeholder="C:\\Users\\..." />
+        <NInput :value="textParam('path')" placeholder="C:\\Users\\..." @update:value="(value: string) => patchParams({ path: value })" />
       </NFormItem>
     </template>
 
@@ -144,19 +190,24 @@ function updateScriptArgs(value: string) {
         </NGi>
         <NGi v-if="commandSource === 'inline'">
           <NFormItem label="Shell">
-            <NSelect v-model:value="params.shell" :options="commandShellOptions" />
+            <NSelect :value="textParam('shell')" :options="commandShellOptions" @update:value="(value: string) => patchParams({ shell: value })" />
           </NFormItem>
         </NGi>
         <NGi>
           <NFormItem label="显示终端窗口">
-            <NSwitch v-model:value="params.showTerminal" />
+            <NSwitch :value="Boolean(params.showTerminal)" @update:value="(value: boolean) => patchParams({ showTerminal: value })" />
           </NFormItem>
         </NGi>
       </NGrid>
       <NGrid v-if="commandSource === 'inline'" :cols="3" :x-gap="12" responsive="screen">
         <NGi :span="3">
           <NFormItem label="命令内容" required>
-            <NInput v-model:value="params.command" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" />
+            <NInput
+              :value="textParam('command')"
+              type="textarea"
+              :autosize="{ minRows: 2, maxRows: 4 }"
+              @update:value="(value: string) => patchParams({ command: value })"
+            />
           </NFormItem>
         </NGi>
       </NGrid>
@@ -164,7 +215,7 @@ function updateScriptArgs(value: string) {
         <NGi :span="2">
           <NFormItem label="脚本文件" required>
             <NInputGroup>
-              <NInput v-model:value="params.scriptPath" placeholder="选择 .ps1、.cmd 或 .bat 文件" />
+              <NInput :value="textParam('scriptPath')" placeholder="选择 .ps1、.cmd 或 .bat 文件" @update:value="(value: string) => patchParams({ scriptPath: value })" />
               <NButton secondary @click="chooseScriptFile">选择</NButton>
             </NInputGroup>
           </NFormItem>
@@ -172,7 +223,7 @@ function updateScriptArgs(value: string) {
         <NGi>
           <NFormItem label="脚本参数">
             <NInput
-              :value="params.scriptArgs?.join(' ')"
+              :value="stringListParam('scriptArgs').join(' ')"
               placeholder="按空格分隔"
               @update:value="updateScriptArgs"
             />
@@ -181,7 +232,7 @@ function updateScriptArgs(value: string) {
       </NGrid>
       <NFormItem label="工作目录" required>
         <NInputGroup>
-          <NInput v-model:value="params.workingDir" placeholder="C:\\Project\\anythingFast" />
+          <NInput :value="textParam('workingDir')" placeholder="C:\\Project\\anythingFast" @update:value="(value: string) => patchParams({ workingDir: value })" />
           <NButton secondary @click="chooseWorkingDir">选择</NButton>
         </NInputGroup>
       </NFormItem>
@@ -189,7 +240,13 @@ function updateScriptArgs(value: string) {
 
     <template v-else-if="action.type === 'delay'">
       <NFormItem label="等待时长 ms">
-        <NInputNumber v-model:value="params.durationMs" clearable :min="1" placeholder="可选，留空为 0ms" />
+        <NInputNumber
+          :value="numberParam('durationMs')"
+          clearable
+          :min="1"
+          placeholder="可选，留空为 0ms"
+          @update:value="(value: number | null) => patchParams({ durationMs: value })"
+        />
       </NFormItem>
     </template>
   </NForm>

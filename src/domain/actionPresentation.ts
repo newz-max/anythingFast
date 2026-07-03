@@ -25,10 +25,11 @@ export function describeAction(action: TaskAction) {
       return textParam((action.params as PathParams).path) || '未设置文件夹路径'
     case 'runCommand': {
       const params = action.params as CommandParams
+      const terminalMode = params.showTerminal ? '显示终端' : '后台运行'
       if (params.source === 'script') {
-        return textParam(params.scriptPath) || '未设置脚本文件'
+        return `${textParam(params.scriptPath) || '未设置脚本文件'} · ${terminalMode}`
       }
-      return textParam(params.command) || '未设置命令'
+      return `${textParam(params.command) || '未设置命令'} · ${terminalMode}`
     }
     case 'delay':
       return `等待 ${numberParam((action.params as DelayParams).durationMs, 0)} ms`

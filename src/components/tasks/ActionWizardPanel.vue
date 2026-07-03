@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from 'vue'
+import { useMessage } from 'naive-ui'
 import ActionParamForm from '@/components/tasks/ActionParamForm.vue'
 import { actionTypeOptions, describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { createActionDraft } from '@/domain/taskFactory'
@@ -23,11 +24,11 @@ const emit = defineEmits<{
 
 const currentStep = shallowRef(1)
 const draft = ref<TaskAction>(createActionDraft('openUrl'))
+const message = useMessage()
 
 const title = computed(() => (props.mode === 'create' ? '新增动作' : '编辑动作'))
 const validation = computed(() => validateActionLocal(draft.value))
 const stepStatus = computed(() => (currentStep.value === 3 && !validation.value.valid ? 'error' : 'process'))
-const canSave = computed(() => validation.value.valid)
 
 watch(
   () => props.show,
@@ -73,6 +74,7 @@ function close() {
 function save() {
   if (!validation.value.valid) {
     currentStep.value = 3
+    message.warning(validation.value.issues[0]?.message || '保存前需要修正动作配置')
     return
   }
   emit('save', clonePlainDto(draft.value))
@@ -148,7 +150,7 @@ function normalizeRisk() {
           <NSpace>
             <NButton :disabled="currentStep === 1" @click="previousStep">上一步</NButton>
             <NButton v-if="currentStep < 3" type="primary" @click="nextStep">下一步</NButton>
-            <NButton v-else type="primary" :disabled="!canSave" @click="save">保存动作</NButton>
+            <NButton v-else type="primary" @click="save">保存动作</NButton>
           </NSpace>
         </div>
       </template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef, toRef, watch } from 'vue'
+import { useMessage } from 'naive-ui'
 import ActionWizardPanel, { type ActionWizardMode } from '@/components/tasks/ActionWizardPanel.vue'
 import TaskWizardActionStep from '@/components/tasks/TaskWizardActionStep.vue'
 import TaskWizardBasicStep from '@/components/tasks/TaskWizardBasicStep.vue'
@@ -31,6 +32,7 @@ const currentStep = shallowRef(1)
 const actionWizardVisible = shallowRef(false)
 const actionWizardMode = shallowRef<ActionWizardMode>('create')
 const editingAction = shallowRef<TaskAction | null>(null)
+const message = useMessage()
 const modeRef = toRef(props, 'mode')
 const taskRef = toRef(props, 'task')
 const allTasksRef = toRef(props, 'allTasks')
@@ -43,12 +45,16 @@ const { draft, validation, actionCount, containsCommand, addAction, replaceActio
 const title = computed(() => (props.mode === 'create' ? '新增事项' : '编辑事项'))
 const stepStatus = computed(() => (currentStep.value === 3 && validation.value?.valid === false ? 'error' : 'process'))
 const canGoNext = computed(() => Boolean(draft.value) && currentStep.value < 3)
-const canSave = computed(() => Boolean(draft.value && validation.value?.valid !== false))
+const canSave = computed(() => Boolean(draft.value))
 
 watch(
   () => props.show,
   (show) => {
-    if (show) currentStep.value = props.initialStep ?? 1
+    if (show) {
+      currentStep.value = props.initialStep ?? 1
+      return
+    }
+    clearDraft()
   }
 )
 
@@ -76,10 +82,10 @@ function previousStep() {
 function save() {
   if (!draft.value || validation.value?.valid === false) {
     currentStep.value = 3
+    message.warning(validation.value?.issues[0]?.message || '保存前需要修正事项配置')
     return
   }
   const savedTask = clonePlainDto(draft.value)
-  clearDraft()
   emit('save', savedTask)
 }
 

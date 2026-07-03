@@ -195,7 +195,10 @@ fn run_command(action: &TaskAction) -> Result<String, String> {
     };
 
     command.current_dir(working_dir);
-    hide_command_window(&mut command);
+    let show_terminal = show_terminal(action);
+    if !show_terminal {
+        hide_command_window(&mut command);
+    }
 
     if let Some(env_map) = action.params.get("env").and_then(|value| value.as_object()) {
         let envs: HashMap<String, String> = env_map
@@ -203,6 +206,17 @@ fn run_command(action: &TaskAction) -> Result<String, String> {
             .filter_map(|(key, value)| value.as_str().map(|text| (key.clone(), text.to_string())))
             .collect();
         command.envs(envs);
+    }
+
+    if show_terminal {
+        let status = command.status().map_err(|err| err.to_string())?;
+        if status.success() {
+            return Ok("命令执行成功".into());
+        }
+        return Err(format!(
+            "命令执行失败，退出码：{}",
+            status.code().unwrap_or(-1)
+        ));
     }
 
     let output = command.output().map_err(|err| err.to_string())?;
@@ -216,6 +230,14 @@ fn run_command(action: &TaskAction) -> Result<String, String> {
             stderr.trim()
         ))
     }
+}
+
+fn show_terminal(action: &TaskAction) -> bool {
+    action
+        .params
+        .get("showTerminal")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
 }
 
 fn inline_command(action: &TaskAction) -> Result<Command, String> {
@@ -418,5 +440,46 @@ mod tests {
         let result = delay(&action);
 
         assert_eq!(result, Ok("已等待 0 ms".into()));
+    }
+
+    #[test]
+    fn show_terminal_defaults_to_false() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "echo ok",
+                "workingDir": "D:\\Project\\anythingFast",
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        assert!(!show_terminal(&action));
+    }
+
+    #[test]
+    fn show_terminal_reads_explicit_true() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "echo ok",
+                "workingDir": "D:\\Project\\anythingFast",
+                "showTerminal": true,
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        assert!(show_terminal(&action));
     }
 }
