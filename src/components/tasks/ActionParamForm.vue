@@ -205,7 +205,7 @@ function updateScriptArgs(value: string) {
         </NGi>
       </NGrid>
       <NAlert class="command-log-note" type="info" :show-icon="false">
-        执行日志仅在隐藏终端执行时记录 stdout/stderr；显示终端窗口时输出只显示在终端里，日志只保留退出码和执行结果。
+        显示终端窗口时会同步记录输出到执行日志；交互式命令仍以终端窗口中的提示和输入为准。
       </NAlert>
       <NGrid v-if="commandSource === 'inline'" :cols="3" :x-gap="12" responsive="screen">
         <NGi :span="3">

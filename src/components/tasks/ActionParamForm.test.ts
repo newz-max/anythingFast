@@ -174,8 +174,8 @@ describe('ActionParamForm', () => {
       }
     })
 
-    expect(wrapper.text()).toContain('执行日志仅在隐藏终端执行时记录 stdout/stderr')
-    expect(wrapper.text()).toContain('显示终端窗口时输出只显示在终端里')
+    expect(wrapper.text()).toContain('显示终端窗口时会同步记录输出到执行日志')
+    expect(wrapper.text()).toContain('交互式命令仍以终端窗口中的提示和输入为准')
   })
 
   it('updates command output bindings', async () => {
