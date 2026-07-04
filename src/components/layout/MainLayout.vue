@@ -7,11 +7,13 @@ import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
 import TaskImportPreviewModal from '@/components/tasks/TaskImportPreviewModal.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
 import ExecutionProgress from '@/components/execution/ExecutionProgress.vue'
+import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vue'
 import logoUrl from '@/assets/logo.png'
 import { createTaskDraft, cloneTask } from '@/domain/taskFactory'
 import { createTaskFromTemplate, deriveTemplateRisk } from '@/domain/taskTemplates'
 import { getTasksForView, type TaskView } from '@/domain/taskViews'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
+import { deriveActionExecutionStates, isRunActive, statusLabel } from '@/domain/executionPresentation'
 import { useTaskStore } from '@/stores/taskStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskExecution } from '@/composables/useTaskExecution'
@@ -107,6 +109,19 @@ const themeOptions = [
 ]
 const tagItems = computed(() => taskStore.tags.map((tag, index) => ({ ...tag, tone: tagTone(index) })))
 const showExecutionPanel = computed(() => showLogs.value || autoShowExecution.value)
+const actionExecutionStates = computed(() => deriveActionExecutionStates(executionStore.events, executionStore.currentRun))
+const runningSelectedTask = computed(() => Boolean(selectedTask.value && executionStore.runningTaskId === selectedTask.value.id))
+const runButtonLabel = computed(() => {
+  const run = executionStore.currentRun
+  if (!running.value) return '运行'
+  if (runningSelectedTask.value) return run?.status ? statusLabel(run.status) : '执行中'
+  return '等待中'
+})
+const logsButtonLabel = computed(() => {
+  if (showExecutionPanel.value) return '隐藏执行日志'
+  if (running.value) return '查看执行进度'
+  return '执行日志'
+})
 const shortcutWarning = computed(() => {
   const status = shortcutStatus.value
   if (!status || status.registered) return ''
@@ -505,6 +520,25 @@ function runSelectedAction(action: TaskAction) {
   void executeAction(selectedTask.value, action)
 }
 
+function actionExecutionClass(action: TaskAction) {
+  const status = actionExecutionStates.value[action.id]?.status
+  return {
+    disabled: !action.enabled,
+    'action-running': status === 'running',
+    'action-success': status === 'success',
+    'action-failed': status === 'failed',
+    'action-skipped': status === 'skipped'
+  }
+}
+
+function actionExecutionState(action: TaskAction) {
+  return actionExecutionStates.value[action.id] || null
+}
+
+function isActionRunning(action: TaskAction) {
+  return actionExecutionStates.value[action.id]?.status === 'running' && isRunActive(executionStore.currentRun)
+}
+
 function toggleExecutionPanel() {
   const nextVisible = !showExecutionPanel.value
   showLogs.value = nextVisible
@@ -815,8 +849,9 @@ async function resetLayoutScroll() {
 
           <div class="detail-actions">
             <button class="run-button" type="button" :disabled="running" @click="runSelectedTask">
-              <span aria-hidden="true">▶</span>
-              运行
+              <NSpin v-if="runningSelectedTask" size="small" />
+              <span v-else aria-hidden="true">▶</span>
+              {{ runButtonLabel }}
             </button>
             <NDropdown trigger="click" :options="shareOptions" @select="handleShareSelect">
               <button class="icon-button" type="button" aria-label="分享">⌘</button>
@@ -836,6 +871,12 @@ async function resetLayoutScroll() {
           </div>
         </header>
 
+        <ExecutionStatusStrip
+          v-if="executionStore.currentRun"
+          class="detail-status-strip"
+          :current-run="executionStore.currentRun"
+        />
+
         <section class="actions-section">
           <header class="section-title-row">
             <div class="section-title">
@@ -853,13 +894,21 @@ async function resetLayoutScroll() {
               v-for="(action, index) in selectedTask.actions"
               :key="action.id"
               class="action-row"
-              :class="{ disabled: !action.enabled }"
+              :class="actionExecutionClass(action)"
             >
               <span class="drag-dots" aria-hidden="true">⠿</span>
               <span class="action-index">{{ index + 1 }}</span>
               <span class="action-icon" :class="actionTypeClass(action)">{{ actionIcon(action.type) }}</span>
               <span class="action-name">{{ action.name || getActionTypeLabel(action.type) }}</span>
               <span class="action-detail">{{ describeAction(action) }}</span>
+              <NTag
+                v-if="actionExecutionState(action)"
+                class="action-state-tag"
+                size="small"
+                :type="actionExecutionState(action)?.type"
+              >
+                {{ actionExecutionState(action)?.label }}
+              </NTag>
               <button
                 class="action-play"
                 type="button"
@@ -867,7 +916,8 @@ async function resetLayoutScroll() {
                 aria-label="单动作运行"
                 @click="runSelectedAction(action)"
               >
-                ▶
+                <NSpin v-if="isActionRunning(action)" size="small" />
+                <span v-else>▶</span>
               </button>
               <span class="row-more" aria-hidden="true">•••</span>
             </article>
@@ -914,7 +964,7 @@ async function resetLayoutScroll() {
             <p v-if="shortcutWarning" class="shortcut-warning">{{ shortcutWarning }}</p>
           </div>
           <button class="logs-button" type="button" @click="toggleExecutionPanel">
-            {{ showExecutionPanel ? '隐藏执行日志' : '执行日志' }}
+            {{ logsButtonLabel }}
           </button>
           <NSwitch :value="selectedTask.enabled" @update:value="toggleSelectedTaskEnabled" />
         </section>
@@ -1879,6 +1929,10 @@ async function resetLayoutScroll() {
   gap: 18px;
 }
 
+.detail-status-strip {
+  width: 100%;
+}
+
 .section-title-row {
   display: flex;
   align-items: center;
@@ -1922,7 +1976,7 @@ async function resetLayoutScroll() {
 
 .action-row {
   display: grid;
-  grid-template-columns: 20px 24px 46px minmax(110px, 145px) minmax(0, 1fr) 42px 34px;
+  grid-template-columns: 20px 24px 46px minmax(110px, 145px) minmax(0, 1fr) auto 42px 34px;
   align-items: center;
   gap: 14px;
   min-height: 70px;
@@ -1934,6 +1988,25 @@ async function resetLayoutScroll() {
 
 .action-row.disabled {
   opacity: 0.5;
+}
+
+.action-row.action-running {
+  border-color: rgba(77, 135, 255, 0.48);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(77, 135, 255, 0.18), transparent 42%),
+    rgba(27, 35, 55, 0.78);
+}
+
+.action-row.action-success {
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+.action-row.action-failed {
+  border-color: rgba(239, 68, 68, 0.38);
+}
+
+.action-row.action-skipped {
+  border-color: rgba(245, 158, 11, 0.3);
 }
 
 .drag-dots,
@@ -1986,6 +2059,11 @@ async function resetLayoutScroll() {
   font-size: 14px;
 }
 
+.action-state-tag {
+  justify-self: end;
+  white-space: nowrap;
+}
+
 .action-play {
   display: grid;
   width: 31px;
@@ -1996,6 +2074,12 @@ async function resetLayoutScroll() {
   background: rgba(63, 82, 159, 0.58);
   color: #dce9ff;
   font-size: 11px;
+  cursor: pointer;
+}
+
+.action-play:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .trigger-section {
@@ -2232,7 +2316,7 @@ async function resetLayoutScroll() {
   }
 
   .action-row {
-    grid-template-columns: 18px 22px 38px minmax(0, 1fr) 34px 24px;
+    grid-template-columns: 18px 22px 38px minmax(90px, 130px) minmax(0, 1fr) auto 34px 24px;
     gap: 10px;
     min-height: 76px;
     padding: 12px 14px;
@@ -2372,6 +2456,18 @@ async function resetLayoutScroll() {
 
   .action-detail {
     grid-column: 3 / -1;
+    grid-row: 2;
+  }
+
+  .action-state-tag {
+    grid-column: 3 / -1;
+    grid-row: 3;
+    justify-self: start;
+  }
+
+  .action-play {
+    grid-column: 4;
+    grid-row: 1;
   }
 
   .run-button,

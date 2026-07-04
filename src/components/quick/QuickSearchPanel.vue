@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vue'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { useTaskSearch } from '@/composables/useTaskSearch'
 import { useTaskExecution } from '@/composables/useTaskExecution'
@@ -28,27 +29,13 @@ const resultRows = computed(() =>
       task,
       actionDetail: action ? `${getActionTypeLabel(action.type)} · ${describeAction(action)}` : `${task.actions.length} 个动作`,
       categoryTone: categoryTone(task.category),
-      meta: formatTaskMeta(task)
+      meta: formatTaskMeta(task),
+      running: running.value && executionStore.runningTaskId === task.id
     }
   })
 )
 const selectedTask = computed(() => resultRows.value[selectedIndex.value]?.task || null)
 const resultCountLabel = computed(() => (taskStore.loading ? '加载中' : `${results.value.length} 个可执行事项`))
-const quickExecutionLabel = computed(() => {
-  const run = executionStore.currentRun
-  if (!run) return ''
-  if (running.value) {
-    const action = run.currentActionName ? ` · ${run.currentActionName}` : ''
-    return `执行中 ${run.progressPercent}%${action}`
-  }
-  if (run.status === 'success') return run.message || '执行完成'
-  if (run.status === 'failed') return run.message || '执行失败'
-  return run.message
-})
-const quickExecutionClass = computed(() => ({
-  success: executionStore.currentRun?.status === 'success',
-  failed: executionStore.currentRun?.status === 'failed'
-}))
 
 watch(
   () => resultRows.value.length,
@@ -213,7 +200,7 @@ function formatTaskTime(value: string) {
             :key="row.task.id"
             type="button"
             class="result-item"
-            :class="{ active: index === selectedIndex }"
+            :class="{ active: index === selectedIndex, running: row.running }"
             @mouseenter="selectedIndex = index"
             @click="runTask(row.task)"
           >
@@ -228,9 +215,17 @@ function formatTaskTime(value: string) {
               <span class="result-detail">{{ row.actionDetail }}</span>
               <span class="category-badge" :class="row.categoryTone">{{ row.task.category || '未分类' }}</span>
             </span>
-            <NTag size="small" :type="riskTagType(row.task.riskLevel)">
-              {{ riskLabel(row.task.riskLevel) }}
-            </NTag>
+            <span class="result-tags">
+              <NTag v-if="row.running" size="small" type="info">
+                <span class="running-tag">
+                  <NSpin size="small" />
+                  执行中
+                </span>
+              </NTag>
+              <NTag size="small" :type="riskTagType(row.task.riskLevel)">
+                {{ riskLabel(row.task.riskLevel) }}
+              </NTag>
+            </span>
           </button>
 
           <div v-if="resultRows.length === 0" class="state-panel empty">
@@ -242,10 +237,12 @@ function formatTaskTime(value: string) {
 
       <footer class="status">
         <span>Alt+Space 唤起 · ↑↓ 选择 · Enter 执行 · Esc 关闭</span>
-        <span v-if="quickExecutionLabel" class="quick-execution" :class="quickExecutionClass">
-          {{ quickExecutionLabel }}
-        </span>
-        <NSpin v-if="running" size="small" />
+        <ExecutionStatusStrip
+          v-if="executionStore.currentRun"
+          class="quick-status-strip"
+          compact
+          :current-run="executionStore.currentRun"
+        />
       </footer>
     </div>
   </main>
@@ -425,6 +422,13 @@ function formatTaskTime(value: string) {
   box-shadow: 0 0 0 1px rgba(60, 94, 161, 0.2), 0 12px 30px rgba(19, 42, 119, 0.22);
 }
 
+.result-item.running {
+  border-color: rgba(77, 135, 255, 0.66);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(82, 90, 255, 0.22), transparent 48%),
+    rgba(28, 38, 68, 0.82);
+}
+
 .task-icon {
   width: 44px;
   height: 44px;
@@ -524,6 +528,19 @@ function formatTaskTime(value: string) {
   color: #8b96b8;
 }
 
+.result-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.running-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .state-panel {
   display: grid;
   align-content: center;
@@ -568,21 +585,10 @@ function formatTaskTime(value: string) {
   padding-top: 9px;
 }
 
-.quick-execution {
-  min-width: 0;
-  overflow: hidden;
-  color: #aab8d8;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.quick-execution.success {
-  color: #29d6ad;
-}
-
-.quick-execution.failed {
-  color: #ff8a8a;
+.quick-status-strip {
+  flex: 1 1 320px;
+  min-width: min(100%, 280px);
+  max-width: 520px;
 }
 
 @media (max-width: 520px) {
@@ -608,9 +614,10 @@ function formatTaskTime(value: string) {
     grid-template-columns: 40px minmax(0, 1fr);
   }
 
-  .result-item :deep(.n-tag) {
+  .result-tags {
     grid-column: 2;
     justify-self: start;
+    justify-content: flex-start;
   }
 
   .result-title-row,

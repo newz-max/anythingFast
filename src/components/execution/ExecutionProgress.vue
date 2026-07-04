@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ExecutionEventPayload } from '@/api/events'
+import {
+  eventStatusLabel,
+  eventStatusType,
+  runStatusType as getRunStatusType,
+  runTitle as getRunTitle,
+  statusLabel
+} from '@/domain/executionPresentation'
 import type { ExecutionRunSnapshot } from '@/stores/executionStore'
-import type { ActionExecutionResult, ExecutionLogSummary, ExecutionStatus } from '@/types/domain'
+import type { ActionExecutionResult, ExecutionLogSummary } from '@/types/domain'
 
 const props = defineProps<{
   currentRun: ExecutionRunSnapshot | null
@@ -13,15 +20,12 @@ const props = defineProps<{
 const visibleEvents = computed(() => props.events.slice(-12))
 const latestSummary = computed(() => props.logs[0] ?? null)
 const runStatusType = computed(() => {
-  if (!props.currentRun) return 'default'
-  if (props.currentRun.status === 'failed') return 'error'
-  if (props.currentRun.status === 'success') return 'success'
-  return 'info'
+  return getRunStatusType(props.currentRun?.status)
 })
 const runTitle = computed(() => {
   const run = props.currentRun
   if (!run) return '暂无执行'
-  return run.scope === 'action' ? `${run.taskName || '当前事项'} · 单动作` : run.taskName || '当前事项'
+  return getRunTitle(run)
 })
 
 function failedActionMessages(log: ExecutionLogSummary): ActionExecutionResult[] {
@@ -37,10 +41,7 @@ function hasCommandOutput(action: ActionExecutionResult) {
 }
 
 function eventType(event: ExecutionEventPayload) {
-  if (event.status === 'action-failed' || event.result?.status === 'failed') return 'error'
-  if (event.status === 'action-skipped' || event.result?.status === 'skipped') return 'warning'
-  if (event.status === 'action-success' || event.status === 'finished') return 'success'
-  return 'info'
+  return eventStatusType(event)
 }
 
 function eventTitle(event: ExecutionEventPayload) {
@@ -54,31 +55,6 @@ function eventContent(event: ExecutionEventPayload) {
 
 function eventKey(event: ExecutionEventPayload, index: number) {
   return `${event.runId}-${event.status}-${event.actionId || 'task'}-${event.currentIndex || index}`
-}
-
-function statusLabel(status: ExecutionStatus | 'started') {
-  const labels: Record<ExecutionStatus | 'started', string> = {
-    pending: '等待中',
-    running: '执行中',
-    success: '成功',
-    failed: '失败',
-    skipped: '已跳过',
-    cancelled: '已取消',
-    started: '准备执行'
-  }
-  return labels[status]
-}
-
-function eventStatusLabel(status: ExecutionEventPayload['status']) {
-  const labels: Record<ExecutionEventPayload['status'], string> = {
-    started: '开始执行',
-    'action-started': '动作开始',
-    'action-success': '动作成功',
-    'action-failed': '动作失败',
-    'action-skipped': '动作跳过',
-    finished: '执行结束'
-  }
-  return labels[status]
 }
 
 function formatDuration(durationMs?: number) {
