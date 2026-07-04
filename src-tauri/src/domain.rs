@@ -106,6 +106,8 @@ pub struct AppSettings {
     pub global_shortcut: String,
     #[serde(default = "default_app_theme")]
     pub theme: AppTheme,
+    #[serde(default)]
+    pub launch_on_startup: bool,
     pub config_path: Option<String>,
 }
 
@@ -350,6 +352,7 @@ impl Default for AppConfig {
             settings: AppSettings {
                 global_shortcut: "Alt+Space".to_string(),
                 theme: AppTheme::Dark,
+                launch_on_startup: false,
                 config_path: None,
             },
         }

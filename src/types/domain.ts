@@ -166,6 +166,7 @@ export interface ImportTemplatePreview {
 export interface AppSettings {
   globalShortcut: string
   theme: AppTheme
+  launchOnStartup: boolean
   configPath?: string
 }
 

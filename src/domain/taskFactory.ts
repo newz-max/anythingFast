@@ -1,6 +1,10 @@
 import { clonePlainDto } from '@/utils/clonePlainDto'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
-import type { ActionType, AppConfig, RiskLevel, TaskAction, TaskItem, TaskTemplate } from '@/types/domain'
+import type { ActionType, AppConfig, AppSettings, RiskLevel, TaskAction, TaskItem, TaskTemplate } from '@/types/domain'
+
+type AppConfigInput = Partial<Omit<AppConfig, 'settings'>> & {
+  settings?: Partial<AppSettings>
+}
 
 const now = () => new Date().toISOString()
 
@@ -14,12 +18,13 @@ export function createDefaultConfig(): AppConfig {
     templates: [],
     settings: {
       globalShortcut: 'Alt+Space',
-      theme: 'dark'
+      theme: 'dark',
+      launchOnStartup: false
     }
   }
 }
 
-export function normalizeConfig(config: Partial<AppConfig>): AppConfig {
+export function normalizeConfig(config: AppConfigInput): AppConfig {
   const defaultConfig = createDefaultConfig()
   const settings = {
     ...defaultConfig.settings,

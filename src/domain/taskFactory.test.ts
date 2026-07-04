@@ -4,6 +4,7 @@ import { createDefaultConfig, normalizeConfig } from '@/domain/taskFactory'
 describe('taskFactory config defaults', () => {
   it('uses dark theme by default', () => {
     expect(createDefaultConfig().settings.theme).toBe('dark')
+    expect(createDefaultConfig().settings.launchOnStartup).toBe(false)
   })
 
   it('migrates the old system theme default to dark', () => {
@@ -19,5 +20,6 @@ describe('taskFactory config defaults', () => {
 
     expect(config.version).toBe(2)
     expect(config.settings.theme).toBe('dark')
+    expect(config.settings.launchOnStartup).toBe(false)
   })
 })

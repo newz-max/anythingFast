@@ -18,6 +18,7 @@ import { useTaskStore } from '@/stores/taskStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskExecution } from '@/composables/useTaskExecution'
 import { tauriApi } from '@/api/tauri'
+import { autostartApi } from '@/api/autostart'
 import { listenShortcutStatusEvents } from '@/api/events'
 import { getErrorMessage, logDevError } from '@/utils/errors'
 import { open, save } from '@tauri-apps/plugin-dialog'
@@ -46,6 +47,7 @@ const autoShowExecution = shallowRef(false)
 const shortcutDraft = shallowRef('')
 const settingsShortcutDraft = shallowRef('')
 const themeDraft = shallowRef<AppTheme>('dark')
+const launchOnStartupDraft = shallowRef(false)
 const wizardVisible = shallowRef(false)
 const wizardMode = shallowRef<TaskWizardMode>('create')
 const wizardTask = shallowRef<TaskItem | null>(null)
@@ -144,6 +146,7 @@ onMounted(async () => {
   shortcutDraft.value = taskStore.settings.globalShortcut
   settingsShortcutDraft.value = taskStore.settings.globalShortcut
   themeDraft.value = taskStore.settings.theme
+  launchOnStartupDraft.value = taskStore.settings.launchOnStartup
   try {
     await executionStore.setupListeners()
   } catch (err) {
@@ -467,18 +470,29 @@ async function saveShortcut() {
   }
 }
 
-function openSettings() {
+async function openSettings() {
   settingsShortcutDraft.value = taskStore.settings.globalShortcut
   themeDraft.value = taskStore.settings.theme
+  launchOnStartupDraft.value = taskStore.settings.launchOnStartup
   settingsModalVisible.value = true
+  try {
+    launchOnStartupDraft.value = await autostartApi.isEnabled()
+  } catch (err) {
+    launchOnStartupDraft.value = taskStore.settings.launchOnStartup
+    reportUiError('Load autostart status failed', err)
+  }
 }
 
 async function saveSettings() {
+  const previousLaunchOnStartup = taskStore.settings.launchOnStartup
+  const nextLaunchOnStartup = launchOnStartupDraft.value
   try {
+    await autostartApi.setEnabled(nextLaunchOnStartup)
     await taskStore.updateSettings({
       ...taskStore.settings,
       globalShortcut: settingsShortcutDraft.value.trim() || 'Alt+Space',
-      theme: themeDraft.value
+      theme: themeDraft.value,
+      launchOnStartup: nextLaunchOnStartup
     })
     shortcutDraft.value = taskStore.settings.globalShortcut
     await refreshShortcutStatus()
@@ -486,8 +500,21 @@ async function saveSettings() {
     message.success('设置已保存')
   } catch (err) {
     settingsShortcutDraft.value = taskStore.settings.globalShortcut
+    themeDraft.value = taskStore.settings.theme
+    launchOnStartupDraft.value = taskStore.settings.launchOnStartup
+    if (nextLaunchOnStartup !== previousLaunchOnStartup) {
+      try {
+        await autostartApi.setEnabled(previousLaunchOnStartup)
+      } catch (rollbackErr) {
+        logDevError('Rollback autostart status failed', rollbackErr, { previousLaunchOnStartup })
+      }
+    }
     await refreshShortcutStatusQuiet('Refresh shortcut status after failed settings save')
-    reportUiError('Save settings failed', err, { shortcut: settingsShortcutDraft.value, theme: themeDraft.value })
+    reportUiError('Save settings failed', err, {
+      shortcut: settingsShortcutDraft.value,
+      theme: themeDraft.value,
+      launchOnStartup: nextLaunchOnStartup
+    })
   }
 }
 
@@ -1085,6 +1112,9 @@ async function resetLayoutScroll() {
         </NFormItem>
         <NFormItem label="主题">
           <NSelect v-model:value="themeDraft" :options="themeOptions" />
+        </NFormItem>
+        <NFormItem label="开机自启动">
+          <NSwitch v-model:value="launchOnStartupDraft" />
         </NFormItem>
       </NForm>
       <template #footer>

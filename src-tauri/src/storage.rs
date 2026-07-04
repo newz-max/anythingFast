@@ -111,6 +111,7 @@ mod tests {
         let restored: AppConfig = serde_json::from_str(&content).unwrap();
         assert_eq!(restored.version, 2);
         assert_eq!(restored.settings.global_shortcut, "Alt+Space");
+        assert!(!restored.settings.launch_on_startup);
         assert!(restored.templates.is_empty());
     }
 
@@ -143,6 +144,7 @@ mod tests {
             restored.settings.theme,
             crate::domain::AppTheme::Dark
         ));
+        assert!(!restored.settings.launch_on_startup);
     }
 
     #[test]
