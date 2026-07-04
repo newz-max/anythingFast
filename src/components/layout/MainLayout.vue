@@ -682,9 +682,9 @@ async function refreshShortcutStatusQuiet(context: string) {
 }
 
 function setupResponsiveScrollReset() {
-  desktopMediaQuery = window.matchMedia('(min-width: 960px)')
+  desktopMediaQuery = window.matchMedia('(min-width: 961px)')
   desktopMediaQuery.addEventListener('change', handleDesktopBreakpointChange)
-  stackedLayoutMediaQuery = window.matchMedia('(max-width: 959px)')
+  stackedLayoutMediaQuery = window.matchMedia('(max-width: 960px)')
   syncStackedLayout(stackedLayoutMediaQuery.matches)
   stackedLayoutMediaQuery.addEventListener('change', handleStackedLayoutBreakpointChange)
 }
@@ -839,6 +839,7 @@ async function resetLayoutScroll() {
         :tasks="visibleTasks"
         :categories="taskStore.categories"
         :selected-task-id="taskStore.selectedTaskId"
+        :disable-list-scrollbar="isStackedLayout"
         @select="selectTask"
         @create="createTask"
         @run="runTask"
@@ -2491,21 +2492,23 @@ async function resetLayoutScroll() {
   }
 }
 
-@media (max-width: 959px) {
+@media (max-width: 960px) {
   .main-layout {
     --sidebar-width: 100%;
     --middle-width: 100%;
   }
 
   .app-content {
-    grid-template-columns: 1fr;
-    grid-auto-rows: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
     overflow-x: hidden;
     overflow-y: auto;
   }
 
   .sidebar {
     display: flex;
+    flex: 0 0 auto;
     align-items: center;
     justify-content: space-between;
     padding: 14px 16px;
@@ -2530,8 +2533,24 @@ async function resetLayoutScroll() {
     padding: 16px;
   }
 
+  .workspace {
+    align-self: start;
+    width: 100%;
+    flex: 0 0 auto;
+    height: auto;
+    min-height: auto;
+  }
+
   .middle-panel {
+    display: flex;
+    width: 100%;
+    flex: 0 0 auto;
+    flex-direction: column;
     gap: 12px;
+    align-self: start;
+    height: auto;
+    min-height: auto;
+    overflow: visible;
     border-radius: 0;
   }
 

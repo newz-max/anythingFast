@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
+import { NScrollbar } from 'naive-ui'
 import { useTaskSearch } from '@/composables/useTaskSearch'
 import type { TaskItem } from '@/types/domain'
 
@@ -7,6 +8,7 @@ const props = defineProps<{
   tasks: TaskItem[]
   categories: string[]
   selectedTaskId: string | null
+  disableListScrollbar?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -98,7 +100,7 @@ function formatTaskTime(task: TaskItem) {
       </button>
     </div>
 
-    <NScrollbar class="scroll">
+    <component :is="props.disableListScrollbar ? 'div' : NScrollbar" class="scroll">
       <div class="items">
         <button
           v-for="task in results"
@@ -142,7 +144,7 @@ function formatTaskTime(task: TaskItem) {
 
         <NEmpty v-if="results.length === 0" class="empty-state" description="没有匹配事项" />
       </div>
-    </NScrollbar>
+    </component>
 
     <footer class="list-footer">{{ resultCount }}</footer>
   </section>
@@ -529,14 +531,18 @@ function formatTaskTime(task: TaskItem) {
   }
 }
 
-@media (max-width: 959px) {
+@media (max-width: 960px) {
   .task-list {
+    grid-template-rows: auto auto auto auto auto;
     max-height: none;
+    min-height: auto;
     overflow: visible;
   }
 
   .scroll {
-    max-height: 420px;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 }
 
