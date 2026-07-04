@@ -6,6 +6,7 @@ import type { DropdownOption } from 'naive-ui'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
 import TaskImportPreviewModal from '@/components/tasks/TaskImportPreviewModal.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
+import FlowPreviewGraph from '@/components/tasks/FlowPreviewGraph.vue'
 import ExecutionProgress from '@/components/execution/ExecutionProgress.vue'
 import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vue'
 import logoUrl from '@/assets/logo.png'
@@ -14,6 +15,7 @@ import { createTaskFromTemplate, deriveTemplateRisk } from '@/domain/taskTemplat
 import { getTasksForView, type TaskView } from '@/domain/taskViews'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { deriveActionExecutionStates, isRunActive, statusLabel } from '@/domain/executionPresentation'
+import { deriveFlowExecutionStates, deriveFlowPreviewModel } from '@/domain/flowPreview'
 import { useTaskStore } from '@/stores/taskStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskExecution } from '@/composables/useTaskExecution'
@@ -53,6 +55,7 @@ const wizardMode = shallowRef<TaskWizardMode>('create')
 const wizardTask = shallowRef<TaskItem | null>(null)
 const wizardInitialStep = shallowRef(1)
 const activeTaskView = shallowRef<TaskView>('all')
+const activeActionView = shallowRef<'list' | 'flow'>('list')
 const selectedTagId = shallowRef<string | null>(null)
 const tagModalVisible = shallowRef(false)
 const tagDraftName = shallowRef('')
@@ -123,6 +126,19 @@ const themeOptions = [
 const tagItems = computed(() => taskStore.tags.map((tag, index) => ({ ...tag, tone: tagTone(index) })))
 const showExecutionPanel = computed(() => showLogs.value || autoShowExecution.value)
 const actionExecutionStates = computed(() => deriveActionExecutionStates(executionStore.events, executionStore.currentRun))
+const flowExecutionStates = computed(() => {
+  if (!selectedTask.value) return {}
+  return deriveFlowExecutionStates({
+    taskId: selectedTask.value.id,
+    events: executionStore.events,
+    currentRun: executionStore.currentRun,
+    latestSummary: executionStore.lastSummary
+  })
+})
+const selectedFlowPreview = computed(() => {
+  if (!selectedTask.value) return { nodes: [], edges: [] }
+  return deriveFlowPreviewModel(selectedTask.value, flowExecutionStates.value)
+})
 const runningSelectedTask = computed(() => Boolean(selectedTask.value && executionStore.runningTaskId === selectedTask.value.id))
 const runButtonLabel = computed(() => {
   const run = executionStore.currentRun
@@ -960,16 +976,42 @@ async function resetLayoutScroll() {
         <section class="actions-section">
           <header class="section-title-row">
             <div class="section-title">
-              <h3>动作列表</h3>
+              <h3>{{ activeActionView === 'list' ? '动作列表' : '流程预览' }}</h3>
               <span>{{ selectedActionCount }}</span>
             </div>
-            <button class="add-action-button" type="button" @click="editSelectedTask(2)">
-              <span aria-hidden="true">＋</span>
-              添加动作
-            </button>
+            <div class="action-view-controls">
+              <div class="view-switch" role="tablist" aria-label="动作视图">
+                <button
+                  class="view-switch-button"
+                  :class="{ active: activeActionView === 'list' }"
+                  type="button"
+                  role="tab"
+                  :aria-selected="activeActionView === 'list'"
+                  @click="activeActionView = 'list'"
+                >
+                  列表
+                </button>
+                <button
+                  class="view-switch-button"
+                  :class="{ active: activeActionView === 'flow' }"
+                  type="button"
+                  role="tab"
+                  :aria-selected="activeActionView === 'flow'"
+                  @click="activeActionView = 'flow'"
+                >
+                  流程
+                </button>
+              </div>
+              <button v-if="activeActionView === 'list'" class="add-action-button" type="button" @click="editSelectedTask(2)">
+                <span aria-hidden="true">＋</span>
+                添加动作
+              </button>
+            </div>
           </header>
 
-          <div v-if="selectedTask.actions.length > 0" class="action-list">
+          <FlowPreviewGraph v-if="activeActionView === 'flow'" :model="selectedFlowPreview" />
+
+          <div v-else-if="selectedTask.actions.length > 0" class="action-list">
             <article
               v-for="(action, index) in selectedTask.actions"
               :key="action.id"
@@ -2089,6 +2131,37 @@ async function resetLayoutScroll() {
   font-weight: 700;
 }
 
+.action-view-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.view-switch {
+  display: inline-flex;
+  gap: 4px;
+  border: 1px solid rgba(82, 106, 171, 0.18);
+  border-radius: 10px;
+  background: rgba(27, 35, 55, 0.72);
+  padding: 4px;
+}
+
+.view-switch-button {
+  min-width: 56px;
+  height: 32px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #9aa7c9;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.view-switch-button.active {
+  background: rgba(65, 89, 175, 0.6);
+  color: #f4f7ff;
+}
+
 .add-action-button {
   height: 40px;
   padding: 0 18px;
@@ -2460,6 +2533,10 @@ async function resetLayoutScroll() {
 
   .add-action-button {
     flex: 0 0 auto;
+  }
+
+  .action-view-controls {
+    flex-wrap: wrap;
   }
 
   .action-row {
