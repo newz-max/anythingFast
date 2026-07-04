@@ -1,6 +1,7 @@
 import type { ActionCondition, FieldIssue, TaskAction, TaskItem, ValidationResult } from '@/types/domain'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
-import { collectActionStringValues, collectConditionStringValues, extractVariableReferences, hasInvalidVariableSyntax, hasVariableSyntax, isValidVariableKey } from '@/domain/variables'
+import { validateActionParamsByDefinition } from '@/domain/actionTypes'
+import { collectActionStringValues, collectConditionStringValues, extractVariableReferences, hasInvalidVariableSyntax, isValidVariableKey } from '@/domain/variables'
 
 export function validateTaskLocal(task: TaskItem, allTasks: TaskItem[] = []): ValidationResult {
   const issues: FieldIssue[] = []
@@ -89,53 +90,7 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
   }
   validateCondition(action.condition, issues)
 
-  switch (action.type) {
-    case 'openProgram':
-      if (!('path' in action.params) || !action.params.path.trim()) {
-        issues.push({ field: 'path', message: '程序路径不能为空' })
-      }
-      break
-    case 'openUrl':
-      if (!('url' in action.params) || (!hasVariableSyntax(action.params.url) && !isHttpUrl(action.params.url))) {
-        issues.push({ field: 'url', message: 'URL 必须是 http 或 https 地址' })
-      }
-      break
-    case 'openFile':
-    case 'openFolder':
-      if (!('path' in action.params) || !action.params.path.trim()) {
-        issues.push({ field: 'path', message: '路径不能为空' })
-      }
-      break
-    case 'runCommand':
-      if (!('command' in action.params)) {
-        issues.push({ field: 'command', message: '命令内容不能为空' })
-        break
-      }
-      if ((action.params.source || 'inline') === 'script') {
-        if (!action.params.scriptPath?.trim()) {
-          issues.push({ field: 'scriptPath', message: '脚本文件不能为空' })
-        } else if (!hasVariableSyntax(action.params.scriptPath) && !isSupportedScriptPath(action.params.scriptPath)) {
-          issues.push({ field: 'scriptPath', message: '脚本文件必须是 ps1、cmd 或 bat' })
-        } else if (!hasVariableSyntax(action.params.scriptPath) && isPowerShellScriptPath(action.params.scriptPath) && action.params.shell === 'cmd') {
-          issues.push({ field: 'shell', message: 'ps1 脚本必须使用 PowerShell 7 或 PowerShell' })
-        }
-      } else if (!action.params.command.trim()) {
-        issues.push({ field: 'command', message: '命令内容不能为空' })
-      }
-      if (!action.params.workingDir?.trim()) {
-        issues.push({ field: 'workingDir', message: '工作目录不能为空' })
-      }
-      if (!isSupportedCommandShell(action.params.shell)) {
-        issues.push({ field: 'shell', message: 'Shell 必须是 PowerShell 7、PowerShell 或 cmd' })
-      }
-      validateOutputBinding(action, issues)
-      break
-    case 'delay':
-      if ('durationMs' in action.params && action.params.durationMs !== undefined && action.params.durationMs !== null && action.params.durationMs <= 0) {
-        issues.push({ field: 'durationMs', message: '等待时长必须大于 0' })
-      }
-      break
-  }
+  validateActionParamsByDefinition(action, issues)
 
   return {
     valid: issues.length === 0,
@@ -183,39 +138,4 @@ function conditionVariableKey(condition: ActionCondition | null | undefined) {
     return condition.variable.trim()
   }
   return ''
-}
-
-function validateOutputBinding(action: TaskAction, issues: FieldIssue[]) {
-  if (!action.outputBinding) return
-  const bindings = [
-    ['outputBinding.stdoutVariable', action.outputBinding.stdoutVariable],
-    ['outputBinding.stderrVariable', action.outputBinding.stderrVariable],
-    ['outputBinding.exitCodeVariable', action.outputBinding.exitCodeVariable]
-  ] as const
-  bindings.forEach(([field, key]) => {
-    if (key && !isValidVariableKey(key)) {
-      issues.push({ field, message: '输出绑定变量 key 无效' })
-    }
-  })
-}
-
-function isSupportedScriptPath(value: string) {
-  return /\.(ps1|cmd|bat)$/i.test(value.trim())
-}
-
-function isPowerShellScriptPath(value: string) {
-  return /\.ps1$/i.test(value.trim())
-}
-
-function isSupportedCommandShell(value: string) {
-  return value === 'pwsh' || value === 'powershell' || value === 'cmd'
-}
-
-function isHttpUrl(value: string) {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'http:' || url.protocol === 'https:'
-  } catch {
-    return false
-  }
 }

@@ -541,9 +541,9 @@ pub fn execute_task_action(
 fn execute_action(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> {
     match action.action_type {
         ActionType::OpenProgram => open_program(action).map(ok_output).map_err(failed_output),
-        ActionType::OpenUrl | ActionType::OpenFile | ActionType::OpenFolder => {
-            open_target(action).map(ok_output).map_err(failed_output)
-        }
+        ActionType::OpenUrl => open_url(action).map(ok_output).map_err(failed_output),
+        ActionType::OpenFile => open_file(action).map(ok_output).map_err(failed_output),
+        ActionType::OpenFolder => open_folder(action).map(ok_output).map_err(failed_output),
         ActionType::RunCommand => run_command(action),
         ActionType::Delay => delay(action).map(ok_output).map_err(failed_output),
     }
@@ -725,17 +725,28 @@ fn open_program(action: &TaskAction) -> Result<String, String> {
     Ok("程序已启动".into())
 }
 
-fn open_target(action: &TaskAction) -> Result<String, String> {
-    let target = match action.action_type {
-        ActionType::OpenUrl => string_param(action, "url")?,
-        _ => string_param(action, "path")?,
-    };
-    if matches!(action.action_type, ActionType::OpenFile) && !Path::new(target).is_file() {
+fn open_url(action: &TaskAction) -> Result<String, String> {
+    let target = string_param(action, "url")?;
+    open_target(action, target)
+}
+
+fn open_file(action: &TaskAction) -> Result<String, String> {
+    let target = string_param(action, "path")?;
+    if !Path::new(target).is_file() {
         return Err(format!("文件不存在：{target}"));
     }
-    if matches!(action.action_type, ActionType::OpenFolder) && !Path::new(target).is_dir() {
+    open_target(action, target)
+}
+
+fn open_folder(action: &TaskAction) -> Result<String, String> {
+    let target = string_param(action, "path")?;
+    if !Path::new(target).is_dir() {
         return Err(format!("文件夹不存在：{target}"));
     }
+    open_target(action, target)
+}
+
+fn open_target(action: &TaskAction, target: &str) -> Result<String, String> {
     open::that(target).map_err(|err| {
         dev_log_error(
             "Open target action failed",
@@ -1503,6 +1514,63 @@ mod tests {
         );
         assert_eq!(result.status, ExecutionStatus::Skipped);
         assert_eq!(result.duration_ms, Some(0));
+    }
+
+    #[test]
+    fn execute_action_dispatch_preserves_representative_action_behavior() {
+        let delay_action = TaskAction {
+            id: "delay".into(),
+            action_type: ActionType::Delay,
+            name: Some("wait".into()),
+            params: json!({ "durationMs": 1 }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: crate::domain::RiskLevel::Low,
+        };
+        let missing_file_action = TaskAction {
+            id: "file".into(),
+            action_type: ActionType::OpenFile,
+            name: Some("file".into()),
+            params: json!({ "path": "Z:\\anything-fast-missing-file.txt" }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: crate::domain::RiskLevel::Low,
+        };
+        let missing_folder_action = TaskAction {
+            id: "folder".into(),
+            action_type: ActionType::OpenFolder,
+            name: Some("folder".into()),
+            params: json!({ "path": "Z:\\anything-fast-missing-folder" }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: crate::domain::RiskLevel::Low,
+        };
+
+        assert_eq!(
+            execute_action(&delay_action).unwrap().message,
+            "已等待 1 ms"
+        );
+        assert!(
+            execute_action(&missing_file_action)
+                .unwrap_err()
+                .message
+                .contains("文件不存在")
+        );
+        assert!(
+            execute_action(&missing_folder_action)
+                .unwrap_err()
+                .message
+                .contains("文件夹不存在")
+        );
     }
 
     #[test]

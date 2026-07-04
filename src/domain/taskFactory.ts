@@ -1,5 +1,6 @@
 import { clonePlainDto } from '@/utils/clonePlainDto'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
+import { createDefaultActionParams, getActionTypeLabel } from '@/domain/actionTypes'
 import type { ActionCondition, ActionType, AppConfig, AppSettings, RiskLevel, TaskAction, TaskItem, TaskTemplate, TaskVariable } from '@/types/domain'
 
 type AppConfigInput = Partial<Omit<AppConfig, 'settings'>> & {
@@ -159,7 +160,7 @@ export function createActionDraft(type: ActionType): TaskAction {
     id: uid('action'),
     type,
     name: defaultActionName(type),
-    params: defaultParams(type),
+    params: createDefaultActionParams(type),
     enabled: true,
     continueOnError: false,
     outputBinding: null,
@@ -228,33 +229,9 @@ export function cloneTask(task: TaskItem): TaskItem {
 }
 
 export function defaultActionName(type: ActionType) {
-  const names: Record<ActionType, string> = {
-    openProgram: '打开程序',
-    openUrl: '打开 URL',
-    openFile: '打开文件',
-    openFolder: '打开文件夹',
-    runCommand: '执行命令',
-    delay: '延时等待'
-  }
-  return names[type]
+  return getActionTypeLabel(type)
 }
 
 function defaultRisk(type: ActionType): RiskLevel {
   return type === 'runCommand' ? 'medium' : 'low'
-}
-
-function defaultParams(type: ActionType) {
-  switch (type) {
-    case 'openProgram':
-      return { path: '', args: [], workingDir: '' }
-    case 'openUrl':
-      return { url: 'https://' }
-    case 'openFile':
-    case 'openFolder':
-      return { path: '' }
-    case 'runCommand':
-      return { source: 'inline' as const, command: '', workingDir: '', env: {}, showTerminal: false, closeTerminalOnFinish: true, shell: 'powershell' as const, scriptPath: '', scriptArgs: [] }
-    case 'delay':
-      return { durationMs: 1000 }
-  }
 }

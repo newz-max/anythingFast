@@ -120,77 +120,96 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
     issues.extend(validate_action_output_binding(action));
     issues.extend(validate_action_condition(&action.condition));
 
-    match action.action_type {
-        ActionType::OpenProgram => {
-            let path = string_param(action, "path");
-            if path.trim().is_empty() {
-                issues.push(issue("path", "程序路径不能为空"));
-            }
-        }
-        ActionType::OpenUrl => {
-            let url = string_param(action, "url");
-            if !has_variable_reference(url)
-                && !(url.starts_with("http://") || url.starts_with("https://"))
-            {
-                issues.push(issue("url", "URL 必须是 http 或 https 地址"));
-            }
-        }
-        ActionType::OpenFile => {
-            let path = string_param(action, "path");
-            if path.trim().is_empty() {
-                issues.push(issue("path", "文件路径不能为空"));
-            }
-        }
-        ActionType::OpenFolder => {
-            let path = string_param(action, "path");
-            if path.trim().is_empty() {
-                issues.push(issue("path", "文件夹路径不能为空"));
-            }
-        }
-        ActionType::RunCommand => {
-            let source = command_source(action);
-            if source == "script" {
-                let script_path = string_param(action, "scriptPath");
-                if script_path.trim().is_empty() {
-                    issues.push(issue("scriptPath", "脚本文件不能为空"));
-                } else if !has_variable_reference(script_path)
-                    && !is_supported_script_path(script_path)
-                {
-                    issues.push(issue("scriptPath", "脚本文件必须是 ps1、cmd 或 bat"));
-                } else if !has_variable_reference(script_path)
-                    && is_powershell_script_path(script_path)
-                    && string_param(action, "shell") == "cmd"
-                {
-                    issues.push(issue("shell", "ps1 脚本必须使用 pwsh 或 powershell"));
-                }
-            } else if string_param(action, "command").trim().is_empty() {
-                issues.push(issue("command", "命令内容不能为空"));
-            }
-            let working_dir = string_param(action, "workingDir");
-            if working_dir.trim().is_empty() {
-                issues.push(issue("workingDir", "工作目录不能为空"));
-            }
-            let shell = string_param(action, "shell");
-            if !is_supported_command_shell(shell) {
-                issues.push(issue("shell", "Shell 必须是 pwsh、powershell 或 cmd"));
-            }
-        }
-        ActionType::Delay => {
-            if let Some(duration) = action.params.get("durationMs") {
-                if !duration.is_null() {
-                    match duration.as_u64() {
-                        Some(0) | None => issues.push(issue("durationMs", "等待时长必须大于 0")),
-                        Some(_) => {}
-                    }
-                }
-            }
-        }
-    }
+    validate_action_params(action, &mut issues);
 
     ValidationResult {
         valid: issues.is_empty(),
         issues,
         risk_level: Some(derive_action_risk(action)),
+    }
+}
+
+fn validate_action_params(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    match action.action_type {
+        ActionType::OpenProgram => validate_open_program_action(action, issues),
+        ActionType::OpenUrl => validate_open_url_action(action, issues),
+        ActionType::OpenFile => validate_open_file_action(action, issues),
+        ActionType::OpenFolder => validate_open_folder_action(action, issues),
+        ActionType::RunCommand => validate_run_command_action(action, issues),
+        ActionType::Delay => validate_delay_action(action, issues),
+    }
+}
+
+fn validate_open_program_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    let path = string_param(action, "path");
+    if path.trim().is_empty() {
+        issues.push(issue("path", "程序路径不能为空"));
+    }
+}
+
+fn validate_open_url_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    let url = string_param(action, "url");
+    if !has_variable_reference(url) && !(url.starts_with("http://") || url.starts_with("https://"))
+    {
+        issues.push(issue("url", "URL 必须是 http 或 https 地址"));
+    }
+}
+
+fn validate_open_file_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    let path = string_param(action, "path");
+    if path.trim().is_empty() {
+        issues.push(issue("path", "文件路径不能为空"));
+    }
+}
+
+fn validate_open_folder_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    let path = string_param(action, "path");
+    if path.trim().is_empty() {
+        issues.push(issue("path", "文件夹路径不能为空"));
+    }
+}
+
+fn validate_run_command_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    let source = command_source(action);
+    if source == "script" {
+        validate_script_command_action(action, issues);
+    } else if string_param(action, "command").trim().is_empty() {
+        issues.push(issue("command", "命令内容不能为空"));
+    }
+
+    let working_dir = string_param(action, "workingDir");
+    if working_dir.trim().is_empty() {
+        issues.push(issue("workingDir", "工作目录不能为空"));
+    }
+
+    let shell = string_param(action, "shell");
+    if !is_supported_command_shell(shell) {
+        issues.push(issue("shell", "Shell 必须是 pwsh、powershell 或 cmd"));
+    }
+}
+
+fn validate_script_command_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    let script_path = string_param(action, "scriptPath");
+    if script_path.trim().is_empty() {
+        issues.push(issue("scriptPath", "脚本文件不能为空"));
+    } else if !has_variable_reference(script_path) && !is_supported_script_path(script_path) {
+        issues.push(issue("scriptPath", "脚本文件必须是 ps1、cmd 或 bat"));
+    } else if !has_variable_reference(script_path)
+        && is_powershell_script_path(script_path)
+        && string_param(action, "shell") == "cmd"
+    {
+        issues.push(issue("shell", "ps1 脚本必须使用 pwsh 或 powershell"));
+    }
+}
+
+fn validate_delay_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    if let Some(duration) = action.params.get("durationMs") {
+        if !duration.is_null() {
+            match duration.as_u64() {
+                Some(0) | None => issues.push(issue("durationMs", "等待时长必须大于 0")),
+                Some(_) => {}
+            }
+        }
     }
 }
 

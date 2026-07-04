@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import ActionConditionForm from '@/components/tasks/ActionConditionForm.vue'
 import { usePathPicker } from '@/composables/usePathPicker'
+import { actionTypeOptions, createDefaultActionParams } from '@/domain/actionTypes'
 import type { ActionParams, ActionType, TaskAction, TaskVariable } from '@/types/domain'
 
 const action = defineModel<TaskAction>({ required: true })
@@ -22,14 +23,7 @@ const commandSourceOptions = [
   { label: '脚本文件', value: 'script' }
 ]
 
-const actionTypeOptions = [
-  { label: '打开程序', value: 'openProgram' as const },
-  { label: '打开 URL', value: 'openUrl' as const },
-  { label: '打开文件', value: 'openFile' as const },
-  { label: '打开文件夹', value: 'openFolder' as const },
-  { label: '执行命令', value: 'runCommand' as const },
-  { label: '延时等待', value: 'delay' as const }
-]
+const actionSelectOptions = actionTypeOptions.map(({ label, value }) => ({ label, value }))
 
 const pathLabel = computed(() => (action.value.type === 'openProgram' ? '程序路径' : action.value.type === 'openFolder' ? '文件夹路径' : '文件路径'))
 const params = computed(() => action.value.params as MutableParams)
@@ -73,24 +67,8 @@ function patchParams(patch: MutableParams) {
 function setActionType(type: ActionType) {
   patchAction({
     type,
-    params: defaultParams(type)
+    params: createDefaultActionParams(type)
   })
-}
-
-function defaultParams(type: ActionType): ActionParams {
-  switch (type) {
-    case 'openProgram':
-      return { path: '', args: [], workingDir: '' }
-    case 'openUrl':
-      return { url: 'https://' }
-    case 'openFile':
-    case 'openFolder':
-      return { path: '' }
-    case 'runCommand':
-      return { source: 'inline', command: '', workingDir: '', env: {}, showTerminal: false, closeTerminalOnFinish: true, shell: 'powershell', scriptPath: '', scriptArgs: [] }
-    case 'delay':
-      return { durationMs: 1000 }
-  }
 }
 
 async function chooseWorkingDir() {
@@ -136,7 +114,7 @@ function updateScriptArgs(value: string) {
     <NGrid :cols="3" :x-gap="12" :y-gap="8" responsive="screen">
       <NGi>
         <NFormItem label="动作类型">
-          <NSelect :value="action.type" :options="actionTypeOptions" @update:value="setActionType" />
+          <NSelect :value="action.type" :options="actionSelectOptions" @update:value="setActionType" />
         </NFormItem>
       </NGi>
       <NGi>

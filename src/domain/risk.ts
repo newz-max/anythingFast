@@ -1,4 +1,5 @@
 import type { RiskLevel, TaskAction, TaskItem } from '@/types/domain'
+import { inferActionRiskByDefinition } from '@/domain/actionTypes'
 
 const riskWeight: Record<RiskLevel, number> = {
   low: 1,
@@ -11,24 +12,7 @@ export function maxRisk(risks: RiskLevel[]): RiskLevel {
 }
 
 export function deriveActionRisk(action: TaskAction): RiskLevel {
-  if (action.type !== 'runCommand') {
-    return 'low'
-  }
-
-  if ('command' in action.params && action.params.source === 'script') {
-    return 'high'
-  }
-
-  const command = 'command' in action.params ? action.params.command.toLowerCase() : ''
-  if (/\b(rm|del|erase|rmdir|rd|format|shutdown|reg\s+delete|takeown|icacls|install|npm\s+i|pnpm\s+add|yarn\s+add)\b/.test(command)) {
-    return 'high'
-  }
-
-  if (/>|--force|-f\b|remove-item|set-executionpolicy|start-process\s+.*-verb\s+runas/.test(command)) {
-    return 'high'
-  }
-
-  return 'medium'
+  return inferActionRiskByDefinition(action)
 }
 
 export function deriveTaskRisk(task: TaskItem): RiskLevel {
