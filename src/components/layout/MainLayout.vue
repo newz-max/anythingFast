@@ -63,22 +63,22 @@ const importPreviewVisible = shallowRef(false)
 const importPreview = shallowRef<ImportPreview | null>(null)
 const importFilePath = shallowRef('')
 const importConfirming = shallowRef(false)
-const isCompactDesktop = shallowRef(false)
+const isStackedLayout = shallowRef(false)
 const taskListExpanded = shallowRef(false)
 const layoutRef = useTemplateRef<HTMLElement>('layout')
 const contentRef = useTemplateRef<HTMLElement>('content')
 let desktopMediaQuery: MediaQueryList | null = null
-let compactDesktopMediaQuery: MediaQueryList | null = null
+let stackedLayoutMediaQuery: MediaQueryList | null = null
 
 const selectedTask = computed(() => taskStore.selectedTask)
 const visibleTasks = computed(() => getTasksForView(taskStore.tasks, activeTaskView.value, selectedTagId.value))
 const showTemplateCenter = computed(() => activeTaskView.value === 'templates')
-const shouldShowTaskListToggle = computed(() => isCompactDesktop.value && !showTemplateCenter.value)
+const shouldShowTaskListToggle = computed(() => isStackedLayout.value && !showTemplateCenter.value)
 const shouldCollapseTaskList = computed(() => shouldShowTaskListToggle.value && !taskListExpanded.value)
 const mainLayoutClasses = computed(() => ({
-  'compact-task-list': shouldShowTaskListToggle.value,
-  'compact-task-list-expanded': shouldShowTaskListToggle.value && taskListExpanded.value,
-  'compact-task-list-collapsed': shouldCollapseTaskList.value
+  'stacked-task-list': shouldShowTaskListToggle.value,
+  'stacked-task-list-expanded': shouldShowTaskListToggle.value && taskListExpanded.value,
+  'stacked-task-list-collapsed': shouldCollapseTaskList.value
 }))
 const taskListToggleLabel = computed(() => (taskListExpanded.value ? '收起事项列表' : '展开事项列表'))
 const templateCountLabel = computed(() => `${taskStore.templates.length} 个模板`)
@@ -163,7 +163,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   desktopMediaQuery?.removeEventListener('change', handleDesktopBreakpointChange)
-  compactDesktopMediaQuery?.removeEventListener('change', handleCompactDesktopBreakpointChange)
+  stackedLayoutMediaQuery?.removeEventListener('change', handleStackedLayoutBreakpointChange)
 })
 
 watch(
@@ -227,7 +227,7 @@ function selectTask(taskId: string) {
   taskStore.selectTask(taskId)
   wizardMode.value = 'edit'
   wizardTask.value = taskStore.tasks.find((task) => task.id === taskId) || null
-  if (isCompactDesktop.value) {
+  if (isStackedLayout.value) {
     taskListExpanded.value = false
   }
 }
@@ -247,7 +247,7 @@ function toggleSelectedTaskEnabled(enabled: boolean) {
 
 function setTaskView(view: TaskView) {
   activeTaskView.value = view
-  if (isCompactDesktop.value && view !== 'templates') {
+  if (isStackedLayout.value && view !== 'templates') {
     taskListExpanded.value = false
   }
   if (view === 'templates') return
@@ -684,9 +684,9 @@ async function refreshShortcutStatusQuiet(context: string) {
 function setupResponsiveScrollReset() {
   desktopMediaQuery = window.matchMedia('(min-width: 960px)')
   desktopMediaQuery.addEventListener('change', handleDesktopBreakpointChange)
-  compactDesktopMediaQuery = window.matchMedia('(min-width: 960px) and (max-width: 1279px)')
-  syncCompactDesktopLayout(compactDesktopMediaQuery.matches)
-  compactDesktopMediaQuery.addEventListener('change', handleCompactDesktopBreakpointChange)
+  stackedLayoutMediaQuery = window.matchMedia('(max-width: 959px)')
+  syncStackedLayout(stackedLayoutMediaQuery.matches)
+  stackedLayoutMediaQuery.addEventListener('change', handleStackedLayoutBreakpointChange)
 }
 
 function handleDesktopBreakpointChange(event: MediaQueryListEvent) {
@@ -694,13 +694,13 @@ function handleDesktopBreakpointChange(event: MediaQueryListEvent) {
   void resetLayoutScroll()
 }
 
-function handleCompactDesktopBreakpointChange(event: MediaQueryListEvent) {
-  syncCompactDesktopLayout(event.matches)
+function handleStackedLayoutBreakpointChange(event: MediaQueryListEvent) {
+  syncStackedLayout(event.matches)
   void resetLayoutScroll()
 }
 
-function syncCompactDesktopLayout(matches: boolean) {
-  isCompactDesktop.value = matches
+function syncStackedLayout(matches: boolean) {
+  isStackedLayout.value = matches
   taskListExpanded.value = false
 }
 
@@ -819,8 +819,23 @@ async function resetLayoutScroll() {
       </aside>
 
     <section id="task-list-panel" class="middle-panel">
+      <button
+        v-if="shouldShowTaskListToggle"
+        class="task-list-toggle"
+        type="button"
+        aria-controls="task-list-content"
+        :aria-expanded="taskListExpanded"
+        :aria-label="taskListToggleLabel"
+        @click="toggleTaskListPanel"
+      >
+        <span class="task-list-toggle-icon" aria-hidden="true">{{ taskListExpanded ? '⌃' : '⌄' }}</span>
+        <span>{{ taskListToggleLabel }}</span>
+      </button>
+
       <TaskListPanel
         v-if="!showTemplateCenter"
+        v-show="!shouldCollapseTaskList"
+        id="task-list-content"
         :tasks="visibleTasks"
         :categories="taskStore.categories"
         :selected-task-id="taskStore.selectedTaskId"
@@ -855,19 +870,6 @@ async function resetLayoutScroll() {
     </section>
 
     <section class="workspace">
-      <button
-        v-if="!showTemplateCenter"
-        class="task-list-toggle"
-        type="button"
-        aria-controls="task-list-panel"
-        :aria-expanded="taskListExpanded"
-        :aria-label="taskListToggleLabel"
-        @click="toggleTaskListPanel"
-      >
-        <span class="task-list-toggle-icon" aria-hidden="true">{{ taskListExpanded ? '‹' : '›' }}</span>
-        <span>{{ taskListToggleLabel }}</span>
-      </button>
-
       <section v-if="showTemplateCenter" class="template-intro detail-panel">
         <div class="template-intro-copy">
           <span class="template-intro-icon" aria-hidden="true">▱</span>
@@ -2327,18 +2329,6 @@ async function resetLayoutScroll() {
     --content-padding: 18px;
   }
 
-  .main-layout.compact-task-list-collapsed .app-content {
-    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  }
-
-  .main-layout.compact-task-list-expanded .app-content {
-    grid-template-columns: var(--sidebar-width) minmax(292px, var(--middle-width)) minmax(0, 1fr);
-  }
-
-  .main-layout.compact-task-list-collapsed .middle-panel {
-    display: none;
-  }
-
   .sidebar {
     justify-items: center;
     padding: 22px 12px 18px;
@@ -2398,16 +2388,6 @@ async function resetLayoutScroll() {
   .middle-panel {
     padding: 30px 16px 24px;
     border-radius: 24px 0 0 24px;
-  }
-
-  .main-layout.compact-task-list .workspace {
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 12px;
-    padding-top: 24px;
-  }
-
-  .task-list-toggle {
-    display: inline-flex;
   }
 
   .detail-panel {
@@ -2551,11 +2531,16 @@ async function resetLayoutScroll() {
   }
 
   .middle-panel {
+    gap: 12px;
     border-radius: 0;
   }
 
   .task-list-toggle {
-    display: none;
+    display: inline-flex;
+  }
+
+  .main-layout.stacked-task-list-collapsed .middle-panel {
+    padding-bottom: 0;
   }
 
   .workspace,
