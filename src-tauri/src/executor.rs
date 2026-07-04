@@ -646,25 +646,7 @@ fn powershell_terminal_command(
     mut temp_paths: Vec<PathBuf>,
 ) -> Result<TerminalCommand, String> {
     let runner_path = temp_runner_path("ps1");
-    let arg_list = script_args
-        .iter()
-        .map(|arg| powershell_quote(arg))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let invocation = if arg_list.is_empty() {
-        format!(
-            "& {} -NoProfile -ExecutionPolicy Bypass -File {}",
-            powershell_quote(shell_program),
-            powershell_quote(script_path)
-        )
-    } else {
-        format!(
-            "& {} -NoProfile -ExecutionPolicy Bypass -File {} {}",
-            powershell_quote(shell_program),
-            powershell_quote(script_path),
-            arg_list
-        )
-    };
+    let invocation = powershell_script_invocation(script_path, script_args);
     let pause_on_success = if close_on_success { "$false" } else { "$true" };
     let runner_script = format!(
         r#"$ErrorActionPreference = 'Continue'
@@ -765,6 +747,26 @@ fn powershell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
+fn powershell_script_invocation(script_path: &str, script_args: &[String]) -> String {
+    let mut parts = vec!["&".to_string(), powershell_quote(script_path)];
+    parts.extend(script_args.iter().map(|arg| powershell_quote(arg)));
+    parts.join(" ")
+}
+
+fn powershell_exit_code_script(invocation: &str) -> String {
+    format!(
+        r#"{invocation}
+if ($null -ne $LASTEXITCODE) {{
+  exit [int]$LASTEXITCODE
+}}
+if ($?) {{
+  exit 0
+}}
+exit 1
+"#
+    )
+}
+
 fn cmd_invocation(script_path: &str, script_args: &[String]) -> String {
     let mut parts = vec![cmd_quote(script_path)];
     parts.extend(script_args.iter().map(|arg| cmd_quote(arg)));
@@ -824,14 +826,15 @@ fn script_command(action: &TaskAction, close_terminal_on_finish: bool) -> Result
         if !close_terminal_on_finish {
             ps.arg("-NoExit");
         }
+        let script_args = script_args(action);
+        let invocation = powershell_script_invocation(script_path, &script_args);
         ps.args([
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
-            "-File",
-            script_path,
+            "-Command",
+            &powershell_exit_code_script(&invocation),
         ]);
-        ps.args(script_args(action));
         Ok(ps)
     } else {
         let mut cmd = Command::new("cmd");
@@ -1410,8 +1413,96 @@ mod tests {
             .collect();
 
         assert_eq!(command.get_program().to_string_lossy(), "pwsh");
-        assert!(args.iter().any(|arg| arg == "-File"));
-        assert!(args.iter().any(|arg| arg == "dev"));
+        assert!(args.iter().any(|arg| arg == "-Command"));
+        assert!(
+            args.iter()
+                .any(|arg| arg.contains("&") && arg.contains("start.ps1") && arg.contains("'dev'"))
+        );
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn powershell_script_command_preserves_psscriptroot_in_param_default() {
+        let temp_dir = std::env::temp_dir().join(format!("anything-fast-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let script_path = temp_dir.join("start.ps1");
+        std::fs::write(
+            &script_path,
+            r#"[CmdletBinding()]
+param(
+    [string]$ConfigPath = (Join-Path $PSScriptRoot 'x.psd1')
+)
+Write-Output "root=$PSScriptRoot"
+Write-Output "config=$ConfigPath"
+"#,
+        )
+        .expect("write script");
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("script".into()),
+            params: json!({
+                "source": "script",
+                "command": "",
+                "workingDir": temp_dir.to_string_lossy(),
+                "shell": "powershell",
+                "scriptPath": script_path.to_string_lossy(),
+                "scriptArgs": []
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::High,
+        };
+
+        let output = run_command(&action).expect("run command");
+
+        let stdout = output.stdout.unwrap_or_default();
+        let temp_dir_name = temp_dir
+            .file_name()
+            .expect("temp dir name")
+            .to_string_lossy()
+            .to_string();
+        assert!(stdout.contains("root="));
+        assert!(stdout.contains(&temp_dir_name));
+        assert!(stdout.contains("x.psd1"));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn powershell_terminal_runner_invokes_script_directly() {
+        let temp_dir = std::env::temp_dir().join(format!("anything-fast-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let script_path = temp_dir.join("start.ps1");
+        std::fs::write(&script_path, "Write-Output $PSScriptRoot").expect("write script");
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("script".into()),
+            params: json!({
+                "source": "script",
+                "command": "",
+                "workingDir": temp_dir.to_string_lossy(),
+                "shell": "powershell",
+                "scriptPath": script_path.to_string_lossy(),
+                "scriptArgs": ["dev"]
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            risk_level: crate::domain::RiskLevel::High,
+        };
+
+        let terminal = terminal_command(&action, true).expect("terminal command");
+        let runner_path = terminal.temp_paths.last().expect("runner path");
+        let runner =
+            String::from_utf8_lossy(&std::fs::read(runner_path).expect("read runner")).to_string();
+
+        assert!(runner.contains("&"));
+        assert!(runner.contains("start.ps1"));
+        assert!(runner.contains("'dev'"));
+        assert!(!runner.contains("-File"));
+        cleanup_temp_paths(&terminal.temp_paths);
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
