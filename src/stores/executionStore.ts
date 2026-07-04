@@ -142,7 +142,7 @@ export const useExecutionStore = defineStore('execution', () => {
       taskId: payload.taskId,
       taskName: payload.taskName,
       scope: payload.scope,
-      status: isFinished ? (previous.status === 'failed' ? 'failed' : 'success') : eventStatusToRunStatus(payload.status),
+      status: isFinished ? finishedRunStatus(previous.status) : eventStatusToRunStatus(payload.status),
       currentActionId: payload.actionId ?? previous.currentActionId,
       currentActionName: payload.actionName || previous.currentActionName,
       currentActionType: payload.actionType ?? previous.currentActionType,
@@ -177,7 +177,7 @@ export const useExecutionStore = defineStore('execution', () => {
       totalActions: Math.max(currentRun.value?.totalActions ?? 0, completedActions),
       completedActions,
       progressPercent: progressPercent(completedActions, Math.max(currentRun.value?.totalActions ?? 0, completedActions)),
-      message: summary.status === 'success' ? '执行完成' : '执行失败'
+      message: summaryStatusMessage(summary.status)
     }
     runningTaskId.value = null
     runningActionId.value = null
@@ -211,7 +211,12 @@ export const useExecutionStore = defineStore('execution', () => {
   }
 
   function nextCompletedActions(previousCompleted: number, payload: ExecutionEventPayload) {
-    if (payload.status === 'action-success' || payload.status === 'action-failed' || payload.status === 'action-skipped') {
+    if (
+      payload.status === 'action-success' ||
+      payload.status === 'action-failed' ||
+      payload.status === 'action-skipped' ||
+      payload.status === 'action-cancelled'
+    ) {
       return Math.max(previousCompleted, payload.currentIndex ?? previousCompleted)
     }
     return previousCompleted
@@ -219,8 +224,20 @@ export const useExecutionStore = defineStore('execution', () => {
 
   function eventStatusToRunStatus(status: ExecutionEventPayload['status']): ExecutionRunSnapshot['status'] {
     if (status === 'action-failed') return 'failed'
+    if (status === 'action-cancelled') return 'cancelled'
     if (status === 'finished') return 'success'
     return 'running'
+  }
+
+  function finishedRunStatus(previousStatus: ExecutionRunSnapshot['status']): ExecutionRunSnapshot['status'] {
+    if (previousStatus === 'failed' || previousStatus === 'cancelled') return previousStatus
+    return 'success'
+  }
+
+  function summaryStatusMessage(status: TaskExecutionSummary['status']) {
+    if (status === 'success') return '执行完成'
+    if (status === 'cancelled') return '执行已取消'
+    return '执行失败'
   }
 
   function progressPercent(completedActions: number, totalActions: number) {

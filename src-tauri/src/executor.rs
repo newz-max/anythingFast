@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 const OUTPUT_LIMIT_CHARS: usize = 8192;
+const WINDOWS_CONTROL_C_EXIT_CODE: i32 = -1073741510;
 
 pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSummary, String> {
     let run_id = Uuid::new_v4().to_string();
@@ -37,7 +38,7 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
     );
 
     let mut results = Vec::new();
-    let mut failed = false;
+    let mut stop_status: Option<ExecutionStatus> = None;
 
     for (index, action) in task.actions.iter().enumerate() {
         let current_index = index + 1;
@@ -115,10 +116,11 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
                 results.push(result);
             }
             Err(output) => {
+                let status = action_failure_status(&output);
                 let finished_at = Utc::now();
                 let result = action_result(
                     action,
-                    ExecutionStatus::Failed,
+                    status.clone(),
                     Some(output.message.clone()),
                     Some(action_started_at.to_rfc3339()),
                     Some(finished_at.to_rfc3339()),
@@ -131,7 +133,7 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
                         run_id: &run_id,
                         task,
                         scope: ExecutionScope::Task,
-                        status: "action-failed",
+                        status: action_event_status(&status),
                         current_index: Some(current_index),
                         total_actions,
                         action: Some(action),
@@ -140,8 +142,8 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
                     },
                 );
                 results.push(result);
-                if !action.continue_on_error.unwrap_or(false) {
-                    failed = true;
+                if should_stop_after_failure(&status, action) {
+                    stop_status = Some(status);
                     break;
                 }
             }
@@ -149,11 +151,7 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
     }
 
     let finished_at = Utc::now().to_rfc3339();
-    let status = if failed {
-        ExecutionStatus::Failed
-    } else {
-        ExecutionStatus::Success
-    };
+    let status = final_task_status(stop_status);
     let summary = TaskExecutionSummary {
         task_id: task.id.clone(),
         task_name: task.name.clone(),
@@ -190,11 +188,7 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
             total_actions,
             action: None,
             result: None,
-            message: Some(if summary.status == ExecutionStatus::Success {
-                "事项执行完成".into()
-            } else {
-                "事项执行失败".into()
-            }),
+            message: Some(summary_message(&summary.status, "事项")),
         },
     );
 
@@ -268,10 +262,11 @@ pub fn execute_task_action(
             result
         }
         Err(output) => {
+            let status = action_failure_status(&output);
             let finished_at = Utc::now();
             let result = action_result(
                 action,
-                ExecutionStatus::Failed,
+                status.clone(),
                 Some(output.message.clone()),
                 Some(action_started_at.to_rfc3339()),
                 Some(finished_at.to_rfc3339()),
@@ -284,7 +279,7 @@ pub fn execute_task_action(
                     run_id: &run_id,
                     task,
                     scope: ExecutionScope::Action,
-                    status: "action-failed",
+                    status: action_event_status(&status),
                     current_index: Some(1),
                     total_actions: 1,
                     action: Some(action),
@@ -334,11 +329,7 @@ pub fn execute_task_action(
             total_actions: 1,
             action: Some(action),
             result: None,
-            message: Some(if summary.status == ExecutionStatus::Success {
-                "动作执行完成".into()
-            } else {
-                "动作执行失败".into()
-            }),
+            message: Some(summary_message(&summary.status, "动作")),
         },
     );
 
@@ -419,6 +410,7 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
             terminal_command(action, close_terminal_on_finish(action)).map_err(failed_output)?;
         terminal_command.command.current_dir(working_dir);
         terminal_command.command.envs(command_envs);
+        configure_terminal_process(&mut terminal_command.command);
 
         let status = terminal_command.command.status().map_err(|err| {
             cleanup_temp_paths(&terminal_command.temp_paths);
@@ -432,6 +424,7 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
             failed_output(err.to_string())
         })?;
         cleanup_temp_paths(&terminal_command.temp_paths);
+        let exit_code = status.code().unwrap_or(-1);
         if status.success() {
             return Ok(ActionRunOutput {
                 message: "命令执行成功".into(),
@@ -439,7 +432,9 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
                 ..Default::default()
             });
         }
-        let exit_code = status.code().unwrap_or(-1);
+        if is_interrupted_exit_code(exit_code) {
+            return Err(cancelled_output(Some(exit_code), None, None));
+        }
         dev_log_error(
             "Run command action failed",
             format!(
@@ -490,7 +485,10 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
             exit_code: Some(exit_code),
             stdout,
             stderr,
+            ..Default::default()
         })
+    } else if is_interrupted_exit_code(exit_code) {
+        Err(cancelled_output(Some(exit_code), stdout, stderr))
     } else {
         dev_log_error(
             "Run command action failed",
@@ -521,6 +519,7 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
             exit_code: Some(exit_code),
             stdout,
             stderr,
+            ..Default::default()
         })
     }
 }
@@ -901,6 +900,18 @@ fn hide_command_window(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_command_window(_command: &mut Command) {}
 
+#[cfg(windows)]
+fn configure_terminal_process(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+    command.creation_flags(CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP);
+}
+
+#[cfg(not(windows))]
+fn configure_terminal_process(_command: &mut Command) {}
+
 fn delay(action: &TaskAction) -> Result<String, String> {
     let duration = action
         .params
@@ -952,6 +963,7 @@ struct ActionRunOutput {
     exit_code: Option<i32>,
     stdout: Option<String>,
     stderr: Option<String>,
+    failure_status: Option<ExecutionStatus>,
 }
 
 fn ok_output(message: String) -> ActionRunOutput {
@@ -964,8 +976,60 @@ fn ok_output(message: String) -> ActionRunOutput {
 fn failed_output(message: String) -> ActionRunOutput {
     ActionRunOutput {
         message,
+        failure_status: Some(ExecutionStatus::Failed),
         ..Default::default()
     }
+}
+
+fn cancelled_output(
+    exit_code: Option<i32>,
+    stdout: Option<String>,
+    stderr: Option<String>,
+) -> ActionRunOutput {
+    ActionRunOutput {
+        message: "命令执行已取消：终端窗口被关闭或进程收到中断信号".into(),
+        exit_code,
+        stdout,
+        stderr,
+        failure_status: Some(ExecutionStatus::Cancelled),
+    }
+}
+
+fn action_failure_status(output: &ActionRunOutput) -> ExecutionStatus {
+    output
+        .failure_status
+        .clone()
+        .unwrap_or(ExecutionStatus::Failed)
+}
+
+fn should_stop_after_failure(status: &ExecutionStatus, action: &TaskAction) -> bool {
+    *status == ExecutionStatus::Cancelled || !action.continue_on_error.unwrap_or(false)
+}
+
+fn final_task_status(stop_status: Option<ExecutionStatus>) -> ExecutionStatus {
+    stop_status.unwrap_or(ExecutionStatus::Success)
+}
+
+fn action_event_status(status: &ExecutionStatus) -> &'static str {
+    match status {
+        ExecutionStatus::Success => "action-success",
+        ExecutionStatus::Failed => "action-failed",
+        ExecutionStatus::Skipped => "action-skipped",
+        ExecutionStatus::Cancelled => "action-cancelled",
+        ExecutionStatus::Pending | ExecutionStatus::Running => "action-started",
+    }
+}
+
+fn summary_message(status: &ExecutionStatus, label: &str) -> String {
+    match status {
+        ExecutionStatus::Success => format!("{label}执行完成"),
+        ExecutionStatus::Cancelled => format!("{label}执行已取消"),
+        _ => format!("{label}执行失败"),
+    }
+}
+
+fn is_interrupted_exit_code(exit_code: i32) -> bool {
+    exit_code == WINDOWS_CONTROL_C_EXIT_CODE
 }
 
 fn action_name(action: &TaskAction) -> String {
@@ -1068,6 +1132,48 @@ mod tests {
         );
         assert_eq!(result.status, ExecutionStatus::Skipped);
         assert_eq!(result.duration_ms, Some(0));
+    }
+
+    #[test]
+    fn interrupted_exit_code_maps_to_cancelled_output() {
+        assert!(is_interrupted_exit_code(WINDOWS_CONTROL_C_EXIT_CODE));
+
+        let output = cancelled_output(Some(WINDOWS_CONTROL_C_EXIT_CODE), None, None);
+
+        assert_eq!(action_failure_status(&output), ExecutionStatus::Cancelled);
+        assert_eq!(output.exit_code, Some(WINDOWS_CONTROL_C_EXIT_CODE));
+        assert!(output.message.contains("命令执行已取消"));
+    }
+
+    #[test]
+    fn cancelled_failure_stops_and_sets_task_status() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "echo ok",
+                "workingDir": "D:\\Project\\anythingFast",
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: Some(true),
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        assert!(should_stop_after_failure(
+            &ExecutionStatus::Cancelled,
+            &action
+        ));
+        assert_eq!(
+            final_task_status(Some(ExecutionStatus::Cancelled)),
+            ExecutionStatus::Cancelled
+        );
+        assert_eq!(
+            action_event_status(&ExecutionStatus::Cancelled),
+            "action-cancelled"
+        );
     }
 
     #[test]

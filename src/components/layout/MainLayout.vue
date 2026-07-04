@@ -527,7 +527,8 @@ function actionExecutionClass(action: TaskAction) {
     'action-running': status === 'running',
     'action-success': status === 'success',
     'action-failed': status === 'failed',
-    'action-skipped': status === 'skipped'
+    'action-skipped': status === 'skipped',
+    'action-cancelled': status === 'cancelled'
   }
 }
 
@@ -2005,7 +2006,8 @@ async function resetLayoutScroll() {
   border-color: rgba(239, 68, 68, 0.38);
 }
 
-.action-row.action-skipped {
+.action-row.action-skipped,
+.action-row.action-cancelled {
   border-color: rgba(245, 158, 11, 0.3);
 }
 

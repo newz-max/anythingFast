@@ -7,6 +7,7 @@ export type ExecutionEventStatus =
   | 'action-success'
   | 'action-failed'
   | 'action-skipped'
+  | 'action-cancelled'
   | 'finished'
 
 export interface ExecutionEventPayload {

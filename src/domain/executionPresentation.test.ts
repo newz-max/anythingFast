@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ExecutionEventPayload } from '@/api/events'
 import type { ExecutionRunSnapshot } from '@/stores/executionStore'
-import { deriveActionExecutionStates, eventStatusLabel, normalizedProgressPercent, runProgressLabel } from './executionPresentation'
+import { deriveActionExecutionStates, eventStatusLabel, eventStatusType, normalizedProgressPercent, runProgressLabel } from './executionPresentation'
 
 function event(patch: Partial<ExecutionEventPayload>): ExecutionEventPayload {
   return {
@@ -21,13 +21,15 @@ describe('executionPresentation', () => {
       event({ status: 'action-success', actionId: 'action-1' }),
       event({ status: 'action-failed', actionId: 'action-2' }),
       event({ status: 'action-skipped', actionId: 'action-3' }),
-      event({ status: 'action-started', actionId: 'action-4' })
+      event({ status: 'action-started', actionId: 'action-4' }),
+      event({ status: 'action-cancelled', actionId: 'action-5' })
     ])
 
     expect(states['action-1']).toMatchObject({ status: 'success', label: '成功', type: 'success' })
     expect(states['action-2']).toMatchObject({ status: 'failed', label: '失败', type: 'error' })
     expect(states['action-3']).toMatchObject({ status: 'skipped', label: '已跳过', type: 'warning' })
     expect(states['action-4']).toMatchObject({ status: 'running', label: '执行中', type: 'info' })
+    expect(states['action-5']).toMatchObject({ status: 'cancelled', label: '已取消', type: 'warning' })
   })
 
   it('keeps the current action running while the run is active', () => {
@@ -70,6 +72,8 @@ describe('executionPresentation', () => {
     }
 
     expect(eventStatusLabel('action-started')).toBe('动作开始')
+    expect(eventStatusLabel('action-cancelled')).toBe('动作取消')
+    expect(eventStatusType(event({ status: 'action-cancelled' }))).toBe('warning')
     expect(runProgressLabel(pendingRun)).toBe('等待动作事件')
     expect(normalizedProgressPercent({ ...pendingRun, totalActions: 2, progressPercent: 180 })).toBe(100)
   })

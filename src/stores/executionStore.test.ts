@@ -81,6 +81,38 @@ describe('executionStore', () => {
     expect(store.currentRun?.progressPercent).toBe(100)
   })
 
+  it('keeps cancelled status after the finished event', () => {
+    const store = useExecutionStore()
+
+    store.applyExecutionEvent(event({ status: 'started', message: '事项开始执行' }))
+    store.applyExecutionEvent(
+      event({
+        status: 'action-cancelled',
+        currentIndex: 1,
+        actionId: 'action-1',
+        actionName: '执行脚本',
+        actionType: 'runCommand',
+        result: {
+          actionId: 'action-1',
+          actionName: '执行脚本',
+          actionType: 'runCommand',
+          status: 'cancelled',
+          message: '命令执行已取消：终端窗口被关闭或进程收到中断信号',
+          exitCode: -1073741510
+        }
+      })
+    )
+
+    expect(store.currentRun?.status).toBe('cancelled')
+    expect(store.currentRun?.completedActions).toBe(1)
+
+    store.applyExecutionEvent(event({ status: 'finished', currentIndex: 1, message: '事项执行已取消' }))
+
+    expect(store.running).toBe(false)
+    expect(store.currentRun?.status).toBe('cancelled')
+    expect(store.currentRun?.message).toBe('事项执行已取消')
+  })
+
   it('does not register duplicate Tauri listeners', async () => {
     Reflect.set(window, '__TAURI_INTERNALS__', {})
     listenExecutionEventsMock.mockResolvedValue(vi.fn())

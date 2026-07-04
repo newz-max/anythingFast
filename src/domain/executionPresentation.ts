@@ -4,7 +4,7 @@ import type { ExecutionStatus } from '@/types/domain'
 
 export type NaiveStatusType = 'default' | 'info' | 'success' | 'warning' | 'error'
 export type ExecutionRunStatus = ExecutionStatus | 'started'
-export type ActionRunDisplayStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped'
+export type ActionRunDisplayStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped' | 'cancelled'
 
 export interface ActionExecutionDisplay {
   status: ActionRunDisplayStatus
@@ -32,6 +32,7 @@ export function eventStatusLabel(status: ExecutionEventPayload['status']) {
     'action-success': '动作成功',
     'action-failed': '动作失败',
     'action-skipped': '动作跳过',
+    'action-cancelled': '动作取消',
     finished: '执行结束'
   }
   return labels[status]
@@ -47,7 +48,12 @@ export function runStatusType(status: ExecutionRunStatus | null | undefined): Na
 
 export function eventStatusType(event: ExecutionEventPayload): NaiveStatusType {
   if (event.status === 'action-failed' || event.result?.status === 'failed') return 'error'
-  if (event.status === 'action-skipped' || event.result?.status === 'skipped') return 'warning'
+  if (
+    event.status === 'action-skipped' ||
+    event.status === 'action-cancelled' ||
+    event.result?.status === 'skipped' ||
+    event.result?.status === 'cancelled'
+  ) return 'warning'
   if (event.status === 'action-success' || event.status === 'finished') return 'success'
   return 'info'
 }
@@ -58,7 +64,8 @@ export function actionStatusDisplay(status: ActionRunDisplayStatus): ActionExecu
     running: { status: 'running', label: '执行中', type: 'info' },
     success: { status: 'success', label: '成功', type: 'success' },
     failed: { status: 'failed', label: '失败', type: 'error' },
-    skipped: { status: 'skipped', label: '已跳过', type: 'warning' }
+    skipped: { status: 'skipped', label: '已跳过', type: 'warning' },
+    cancelled: { status: 'cancelled', label: '已取消', type: 'warning' }
   }
   return displays[status]
 }
@@ -119,5 +126,6 @@ function actionRunStatusFromEvent(event: ExecutionEventPayload): ActionRunDispla
   if (event.status === 'action-success') return 'success'
   if (event.status === 'action-failed') return 'failed'
   if (event.status === 'action-skipped') return 'skipped'
+  if (event.status === 'action-cancelled') return 'cancelled'
   return null
 }

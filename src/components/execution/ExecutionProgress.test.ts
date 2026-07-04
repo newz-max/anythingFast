@@ -85,6 +85,25 @@ describe('ExecutionProgress', () => {
             stderr: 'bad'
           }
         ]
+      },
+      {
+        id: 'log-2',
+        taskId: 'task-2',
+        taskName: '取消事项',
+        scope: 'task',
+        startedAt: '2026-07-03T00:00:02Z',
+        finishedAt: '2026-07-03T00:00:03Z',
+        status: 'cancelled',
+        actions: [
+          {
+            actionId: 'action-3',
+            actionName: '构建脚本',
+            actionType: 'runCommand',
+            status: 'cancelled',
+            message: '命令执行已取消：终端窗口被关闭或进程收到中断信号',
+            exitCode: -1073741510
+          }
+        ]
       }
     ]
 
@@ -102,6 +121,8 @@ describe('ExecutionProgress', () => {
     expect(wrapper.text()).toContain('2/2 · 动作已停用')
     expect(wrapper.text()).toContain('执行脚本')
     expect(wrapper.text()).toContain('命令执行失败，退出码：7，bad')
+    expect(wrapper.text()).toContain('命令执行已取消：终端窗口被关闭或进程收到中断信号')
+    expect(wrapper.text()).toContain('退出码 -1073741510')
     expect(wrapper.text()).toContain('退出码 7')
     expect(wrapper.text()).toContain('hello')
     expect(wrapper.text()).toContain('bad')

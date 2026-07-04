@@ -28,8 +28,8 @@ const runTitle = computed(() => {
   return getRunTitle(run)
 })
 
-function failedActionMessages(log: ExecutionLogSummary): ActionExecutionResult[] {
-  return log.actions.filter((action) => action.status === 'failed' && Boolean(action.message))
+function attentionActionMessages(log: ExecutionLogSummary): ActionExecutionResult[] {
+  return log.actions.filter((action) => (action.status === 'failed' || action.status === 'cancelled') && Boolean(action.message))
 }
 
 function actionsWithCommandOutput(log: ExecutionLogSummary): ActionExecutionResult[] {
@@ -107,8 +107,13 @@ function formatDuration(durationMs?: number) {
               :title="log.scope === 'action' ? `${log.taskName} · 单动作` : log.taskName"
               :description="`${log.startedAt} · ${log.actions.length} 个动作`"
             />
-            <ul v-if="failedActionMessages(log).length > 0" class="error-list">
-              <li v-for="action in failedActionMessages(log)" :key="action.actionId" class="error-item">
+            <ul v-if="attentionActionMessages(log).length > 0" class="error-list">
+              <li
+                v-for="action in attentionActionMessages(log)"
+                :key="action.actionId"
+                class="error-item"
+                :class="{ 'warning-item': action.status === 'cancelled' }"
+              >
                 <span class="error-action">{{ action.actionName }}</span>
                 <span class="error-message">{{ action.message }}</span>
               </li>
@@ -203,6 +208,15 @@ function formatDuration(durationMs?: number) {
   font-size: 12px;
   font-weight: 700;
   color: #ff8a8a;
+}
+
+.warning-item {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.warning-item .error-action {
+  color: #fbbf24;
 }
 
 .error-message {

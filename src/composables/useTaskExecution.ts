@@ -29,6 +29,8 @@ export function useTaskExecution() {
       taskStore.markTaskLastRun(task.id, summary.finishedAt)
       if (summary.status === 'success') {
         message.success('事项执行完成')
+      } else if (summary.status === 'cancelled') {
+        message.warning(summary.actions.find((action) => action.status === 'cancelled')?.message || '事项执行已取消')
       } else {
         message.error(summary.actions.find((action) => action.status === 'failed')?.message || '事项执行失败')
       }
@@ -61,6 +63,8 @@ export function useTaskExecution() {
       taskStore.markTaskLastRun(task.id, summary.finishedAt)
       if (summary.status === 'success') {
         message.success('动作执行完成')
+      } else if (summary.status === 'cancelled') {
+        message.warning(summary.actions.find((item) => item.status === 'cancelled')?.message || '动作执行已取消')
       } else {
         message.error(summary.actions.find((item) => item.status === 'failed')?.message || '动作执行失败')
       }
