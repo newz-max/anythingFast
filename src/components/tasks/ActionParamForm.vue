@@ -208,6 +208,9 @@ function updateScriptArgs(value: string) {
           </NFormItem>
         </NGi>
       </NGrid>
+      <NAlert class="command-log-note" type="info" :show-icon="false">
+        执行日志仅在隐藏终端执行时记录 stdout/stderr；显示终端窗口时输出只显示在终端里，日志只保留退出码和执行结果。
+      </NAlert>
       <NGrid v-if="commandSource === 'inline'" :cols="3" :x-gap="12" responsive="screen">
         <NGi :span="3">
           <NFormItem label="命令内容" required>
@@ -264,5 +267,9 @@ function updateScriptArgs(value: string) {
 <style scoped>
 .param-form {
   padding-top: 4px;
+}
+
+.command-log-note {
+  margin-bottom: 10px;
 }
 </style>

@@ -24,6 +24,7 @@ const formStubs = {
     props: ['label'],
     template: '<div><span v-if="label">{{ label }}</span><slot /></div>'
   }),
+  NAlert: passThroughStub('NAlert'),
   NInputGroup: passThroughStub('NInputGroup'),
   NRadioButton: passThroughStub('NRadioButton'),
   NButton: defineComponent({
@@ -159,5 +160,19 @@ describe('ActionParamForm', () => {
     const shellSelect = selects[1]
 
     expect(shellSelect.props('options')).toContainEqual({ label: 'PowerShell 7', value: 'pwsh' })
+  })
+
+  it('explains command output logging behavior', () => {
+    const wrapper = mount(ActionParamForm, {
+      props: {
+        modelValue: makeCommandAction()
+      },
+      global: {
+        stubs: formStubs
+      }
+    })
+
+    expect(wrapper.text()).toContain('执行日志仅在隐藏终端执行时记录 stdout/stderr')
+    expect(wrapper.text()).toContain('显示终端窗口时输出只显示在终端里')
   })
 })
