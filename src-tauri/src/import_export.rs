@@ -176,6 +176,7 @@ pub fn template_to_task(template: &TaskTemplate) -> TaskItem {
         category: template.category.clone(),
         keywords: template.keywords.clone(),
         description: template.description.clone(),
+        variables: Vec::new(),
         actions,
         risk_level: RiskLevel::Low,
         enabled: true,
@@ -475,6 +476,7 @@ fn template_action_to_task_action(action: &TaskTemplateAction, id: String) -> Ta
         enabled: action.enabled,
         timeout_ms: action.timeout_ms,
         continue_on_error: action.continue_on_error,
+        output_binding: action.output_binding.clone(),
         risk_level: action.risk_level.clone(),
     }
 }
@@ -512,6 +514,7 @@ mod tests {
             category: Some("未分类".into()),
             keywords: Some(Vec::new()),
             description: Some(String::new()),
+            variables: Vec::new(),
             actions: vec![TaskAction {
                 id: action_id.into(),
                 action_type: ActionType::RunCommand,
@@ -525,6 +528,7 @@ mod tests {
                 enabled: true,
                 timeout_ms: None,
                 continue_on_error: None,
+                output_binding: None,
                 risk_level: RiskLevel::Low,
             }],
             risk_level: RiskLevel::Low,
@@ -545,6 +549,7 @@ mod tests {
             category: Some("未分类".into()),
             keywords: Some(Vec::new()),
             description: Some(String::new()),
+            variables: Vec::new(),
             actions: vec![TaskAction {
                 id: action_id.into(),
                 action_type: ActionType::OpenUrl,
@@ -553,6 +558,7 @@ mod tests {
                 enabled: true,
                 timeout_ms: None,
                 continue_on_error: None,
+                output_binding: None,
                 risk_level: RiskLevel::Low,
             }],
             risk_level: RiskLevel::Low,
@@ -661,6 +667,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: RiskLevel::Low,
         });
         let bundle = TaskExportBundle {

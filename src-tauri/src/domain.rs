@@ -31,7 +31,17 @@ pub struct TaskAction {
     pub enabled: bool,
     pub timeout_ms: Option<u64>,
     pub continue_on_error: Option<bool>,
+    #[serde(default)]
+    pub output_binding: Option<TaskActionOutputBinding>,
     pub risk_level: RiskLevel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskActionOutputBinding {
+    pub stdout_variable: Option<String>,
+    pub stderr_variable: Option<String>,
+    pub exit_code_variable: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +52,8 @@ pub struct TaskItem {
     pub category: Option<String>,
     pub keywords: Option<Vec<String>>,
     pub description: Option<String>,
+    #[serde(default)]
+    pub variables: Vec<TaskVariable>,
     pub actions: Vec<TaskAction>,
     pub risk_level: RiskLevel,
     pub enabled: bool,
@@ -54,6 +66,19 @@ pub struct TaskItem {
     pub last_run_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskVariable {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub default_value: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub secret: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +111,8 @@ pub struct TaskTemplateAction {
     pub enabled: bool,
     pub timeout_ms: Option<u64>,
     pub continue_on_error: Option<bool>,
+    #[serde(default)]
+    pub output_binding: Option<TaskActionOutputBinding>,
     pub risk_level: RiskLevel,
 }
 

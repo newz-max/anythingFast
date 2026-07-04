@@ -1,6 +1,8 @@
-import { computed } from 'vue'
-import { useDialog, useMessage } from 'naive-ui'
+import { computed, h, reactive } from 'vue'
+import { NForm, NFormItem, NInput, useDialog, useMessage } from 'naive-ui'
 import { tauriApi } from '@/api/tauri'
+import type { RuntimeVariableValues } from '@/api/tauri'
+import { defaultRuntimeVariableValues, variablesNeedingInput } from '@/domain/variables'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
 import { getErrorMessage, logDevError } from '@/utils/errors'
@@ -21,11 +23,12 @@ export function useTaskExecution() {
     }
 
     try {
-      const risk = await tauriApi.analyzeRisk(task.id)
+      const runtimeVariables = await collectRuntimeVariables(task)
+      const risk = await tauriApi.analyzeRisk(task.id, runtimeVariables)
       if (risk.requiresConfirmation) {
         await confirmRisk(task, risk.reasons, risk.highRiskActions.map((action) => `${action.name}: ${action.detail}`))
       }
-      const summary = await executionStore.runTask(task.id, risk.requiresConfirmation ? 'confirmed' : undefined)
+      const summary = await executionStore.runTask(task.id, risk.requiresConfirmation ? 'confirmed' : undefined, runtimeVariables)
       taskStore.markTaskLastRun(task.id, summary.finishedAt)
       if (summary.status === 'success') {
         message.success('事项执行完成')
@@ -55,11 +58,12 @@ export function useTaskExecution() {
     }
 
     try {
-      const risk = await tauriApi.analyzeActionRisk(task.id, action.id)
+      const runtimeVariables = await collectRuntimeVariables(task)
+      const risk = await tauriApi.analyzeActionRisk(task.id, action.id, runtimeVariables)
       if (risk.requiresConfirmation) {
         await confirmRisk(task, risk.reasons, risk.highRiskActions.map((item) => `${item.name}: ${item.detail}`), action)
       }
-      const summary = await executionStore.runTaskAction(task.id, action.id, risk.requiresConfirmation ? 'confirmed' : undefined)
+      const summary = await executionStore.runTaskAction(task.id, action.id, risk.requiresConfirmation ? 'confirmed' : undefined, runtimeVariables)
       taskStore.markTaskLastRun(task.id, summary.finishedAt)
       if (summary.status === 'success') {
         message.success('动作执行完成')
@@ -91,6 +95,60 @@ export function useTaskExecution() {
         positiveText: '确认执行',
         negativeText: '取消',
         onPositiveClick: () => resolve(),
+        onNegativeClick: () => reject(new Error('cancelled')),
+        onClose: () => reject(new Error('cancelled'))
+      })
+    })
+  }
+
+  function collectRuntimeVariables(task: TaskItem): Promise<RuntimeVariableValues | undefined> {
+    const variables = task.variables || []
+    const inputVariables = variablesNeedingInput(variables)
+    if (inputVariables.length === 0) {
+      return Promise.resolve(variables.length > 0 ? defaultRuntimeVariableValues(variables) : undefined)
+    }
+
+    const values = reactive(defaultRuntimeVariableValues(variables))
+    return new Promise((resolve, reject) => {
+      dialog.info({
+        title: '填写运行变量',
+        content: () =>
+          h(
+            NForm,
+            { labelPlacement: 'top' },
+            () =>
+              inputVariables.map((variable) =>
+                h(
+                  NFormItem,
+                  {
+                    key: variable.key,
+                    label: variable.label || variable.key,
+                    required: variable.required || !variable.defaultValue
+                  },
+                  () =>
+                    h(NInput, {
+                      value: values[variable.key],
+                      type: variable.secret ? 'password' : 'text',
+                      showPasswordOn: variable.secret ? 'click' : undefined,
+                      placeholder: variable.key,
+                      onUpdateValue: (value: string) => {
+                        values[variable.key] = value
+                      }
+                    })
+                )
+              )
+          ),
+        positiveText: '继续执行',
+        negativeText: '取消',
+        onPositiveClick: () => {
+          const missing = inputVariables.find((variable) => (variable.required || !variable.defaultValue) && !values[variable.key])
+          if (missing) {
+            message.warning(`请填写变量：${missing.label || missing.key}`)
+            return false
+          }
+          resolve({ ...values })
+          return true
+        },
         onNegativeClick: () => reject(new Error('cancelled')),
         onClose: () => reject(new Error('cancelled'))
       })

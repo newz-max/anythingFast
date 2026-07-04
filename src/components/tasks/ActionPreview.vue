@@ -1,11 +1,20 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { describeAction } from '@/domain/actionPresentation'
+import { maskSecretVariableText } from '@/domain/variables'
 import type { TaskItem } from '@/types/domain'
 
-defineProps<{
+const props = defineProps<{
   task: TaskItem
   actionCount: number
   containsCommand: boolean
 }>()
+
+const variableCount = computed(() => props.task.variables?.length || 0)
+
+function actionDetail(action: TaskItem['actions'][number]) {
+  return maskSecretVariableText(describeAction(action), props.task.variables || [])
+}
 </script>
 
 <template>
@@ -24,10 +33,14 @@ defineProps<{
       <span>包含命令</span>
       <strong>{{ containsCommand ? '是' : '否' }}</strong>
     </div>
+    <div class="metric">
+      <span>运行变量</span>
+      <strong>{{ variableCount }}</strong>
+    </div>
     <NDivider />
     <ol class="steps">
       <li v-for="action in task.actions" :key="action.id" :class="{ disabled: !action.enabled }">
-        {{ action.name || action.type }} · {{ action.type }}
+        {{ action.name || action.type }} · {{ actionDetail(action) }}
       </li>
     </ol>
   </NCard>

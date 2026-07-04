@@ -3,6 +3,7 @@ use crate::domain::{
     ValidationResult,
 };
 use crate::risk::{derive_action_risk, derive_task_risk};
+use crate::variables::{validate_action_output_binding, validate_task_variables};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -69,6 +70,8 @@ pub fn validate_task_model(task: &TaskItem, all_tasks: &[TaskItem]) -> Validatio
         issues.push(issue("actions", "至少需要一个动作"));
     }
 
+    issues.extend(validate_task_variables(task));
+
     for (index, action) in task.actions.iter().enumerate() {
         for action_issue in validate_action_model(action).issues {
             issues.push(issue(
@@ -92,6 +95,8 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
         issues.push(issue("timeoutMs", "超时时间必须大于 0"));
     }
 
+    issues.extend(validate_action_output_binding(action));
+
     match action.action_type {
         ActionType::OpenProgram => {
             let path = string_param(action, "path");
@@ -101,7 +106,7 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
         }
         ActionType::OpenUrl => {
             let url = string_param(action, "url");
-            if !(url.starts_with("http://") || url.starts_with("https://")) {
+            if !has_variable_reference(url) && !(url.starts_with("http://") || url.starts_with("https://")) {
                 issues.push(issue("url", "URL 必须是 http 或 https 地址"));
             }
         }
@@ -123,9 +128,10 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
                 let script_path = string_param(action, "scriptPath");
                 if script_path.trim().is_empty() {
                     issues.push(issue("scriptPath", "脚本文件不能为空"));
-                } else if !is_supported_script_path(script_path) {
+                } else if !has_variable_reference(script_path) && !is_supported_script_path(script_path) {
                     issues.push(issue("scriptPath", "脚本文件必须是 ps1、cmd 或 bat"));
-                } else if is_powershell_script_path(script_path)
+                } else if !has_variable_reference(script_path)
+                    && is_powershell_script_path(script_path)
                     && string_param(action, "shell") == "cmd"
                 {
                     issues.push(issue("shell", "ps1 脚本必须使用 pwsh 或 powershell"));
@@ -185,6 +191,10 @@ pub fn normalize_task(mut task: TaskItem) -> TaskItem {
         })
         .collect();
     task.risk_level = derive_task_risk(&task);
+    for variable in &mut task.variables {
+        variable.key = variable.key.trim().to_string();
+        variable.label = variable.label.trim().to_string();
+    }
     task.actions = task
         .actions
         .into_iter()
@@ -236,6 +246,10 @@ fn is_powershell_script_path(path: &str) -> bool {
 
 fn is_supported_command_shell(shell: &str) -> bool {
     matches!(shell, "pwsh" | "powershell" | "cmd")
+}
+
+fn has_variable_reference(value: &str) -> bool {
+    value.contains("{{") || value.contains("}}")
 }
 
 fn issue(field: &str, message: &str) -> FieldIssue {
@@ -295,6 +309,7 @@ mod tests {
             category: None,
             keywords: None,
             description: None,
+            variables: Vec::new(),
             actions: Vec::new(),
             risk_level: RiskLevel::Low,
             enabled: true,
@@ -321,6 +336,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: RiskLevel::Low,
         };
 
@@ -336,6 +352,7 @@ mod tests {
             category: None,
             keywords: None,
             description: None,
+            variables: Vec::new(),
             actions: Vec::new(),
             risk_level: RiskLevel::Low,
             enabled: true,
@@ -389,6 +406,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: RiskLevel::High,
         };
 
@@ -415,6 +433,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: RiskLevel::High,
         };
 
@@ -441,6 +460,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: RiskLevel::High,
         };
 
@@ -470,6 +490,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: RiskLevel::High,
         };
 
@@ -499,6 +520,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: RiskLevel::High,
         };
 
@@ -531,6 +553,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: RiskLevel::High,
         };
 
@@ -550,6 +573,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: RiskLevel::Low,
         };
 
@@ -566,6 +590,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: RiskLevel::Low,
         };
 

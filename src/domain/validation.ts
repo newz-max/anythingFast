@@ -1,5 +1,6 @@
 import type { FieldIssue, TaskAction, TaskItem, ValidationResult } from '@/types/domain'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
+import { collectActionStringValues, extractVariableReferences, hasInvalidVariableSyntax, hasVariableSyntax, isValidVariableKey } from '@/domain/variables'
 
 export function validateTaskLocal(task: TaskItem, allTasks: TaskItem[] = []): ValidationResult {
   const issues: FieldIssue[] = []
@@ -16,9 +17,46 @@ export function validateTaskLocal(task: TaskItem, allTasks: TaskItem[] = []): Va
     issues.push({ field: 'actions', message: '至少需要一个动作' })
   }
 
+  const variableKeys = new Set<string>()
+  ;(task.variables || []).forEach((variable, index) => {
+    const key = variable.key.trim()
+    if (!isValidVariableKey(key)) {
+      issues.push({ field: `variables.${index}.key`, message: '变量 key 只能包含字母、数字和下划线，且不能以数字开头' })
+    }
+    if (variableKeys.has(key)) {
+      issues.push({ field: `variables.${index}.key`, message: '变量 key 不能重复' })
+    }
+    variableKeys.add(key)
+    if (!variable.label.trim()) {
+      issues.push({ field: `variables.${index}.label`, message: '变量标签不能为空' })
+    }
+  })
+  task.actions.forEach((action) => {
+    if (!action.outputBinding) return
+    ;[
+      action.outputBinding.stdoutVariable,
+      action.outputBinding.stderrVariable,
+      action.outputBinding.exitCodeVariable
+    ].forEach((key) => {
+      if (key && isValidVariableKey(key)) {
+        variableKeys.add(key)
+      }
+    })
+  })
+
   task.actions.forEach((action, index) => {
     validateActionLocal(action).issues.forEach((issue) => {
       issues.push({ field: `actions.${index}.${issue.field}`, message: issue.message })
+    })
+    collectActionStringValues(action).forEach(({ field, value }) => {
+      if (hasInvalidVariableSyntax(value)) {
+        issues.push({ field: `actions.${index}.${field}`, message: '变量引用格式必须是 {{variable}}' })
+      }
+      extractVariableReferences(value).forEach((key) => {
+        if (!variableKeys.has(key)) {
+          issues.push({ field: `actions.${index}.${field}`, message: `引用了未定义变量：${key}` })
+        }
+      })
     })
   })
 
@@ -43,7 +81,7 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
       }
       break
     case 'openUrl':
-      if (!('url' in action.params) || !isHttpUrl(action.params.url)) {
+      if (!('url' in action.params) || (!hasVariableSyntax(action.params.url) && !isHttpUrl(action.params.url))) {
         issues.push({ field: 'url', message: 'URL 必须是 http 或 https 地址' })
       }
       break
@@ -61,9 +99,9 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
       if ((action.params.source || 'inline') === 'script') {
         if (!action.params.scriptPath?.trim()) {
           issues.push({ field: 'scriptPath', message: '脚本文件不能为空' })
-        } else if (!isSupportedScriptPath(action.params.scriptPath)) {
+        } else if (!hasVariableSyntax(action.params.scriptPath) && !isSupportedScriptPath(action.params.scriptPath)) {
           issues.push({ field: 'scriptPath', message: '脚本文件必须是 ps1、cmd 或 bat' })
-        } else if (isPowerShellScriptPath(action.params.scriptPath) && action.params.shell === 'cmd') {
+        } else if (!hasVariableSyntax(action.params.scriptPath) && isPowerShellScriptPath(action.params.scriptPath) && action.params.shell === 'cmd') {
           issues.push({ field: 'shell', message: 'ps1 脚本必须使用 PowerShell 7 或 PowerShell' })
         }
       } else if (!action.params.command.trim()) {
@@ -75,6 +113,7 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
       if (!isSupportedCommandShell(action.params.shell)) {
         issues.push({ field: 'shell', message: 'Shell 必须是 PowerShell 7、PowerShell 或 cmd' })
       }
+      validateOutputBinding(action, issues)
       break
     case 'delay':
       if ('durationMs' in action.params && action.params.durationMs !== undefined && action.params.durationMs !== null && action.params.durationMs <= 0) {
@@ -88,6 +127,20 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
     issues,
     riskLevel: deriveActionRisk(action)
   }
+}
+
+function validateOutputBinding(action: TaskAction, issues: FieldIssue[]) {
+  if (!action.outputBinding) return
+  const bindings = [
+    ['outputBinding.stdoutVariable', action.outputBinding.stdoutVariable],
+    ['outputBinding.stderrVariable', action.outputBinding.stderrVariable],
+    ['outputBinding.exitCodeVariable', action.outputBinding.exitCodeVariable]
+  ] as const
+  bindings.forEach(([field, key]) => {
+    if (key && !isValidVariableKey(key)) {
+      issues.push({ field, message: '输出绑定变量 key 无效' })
+    }
+  })
 }
 
 function isSupportedScriptPath(value: string) {

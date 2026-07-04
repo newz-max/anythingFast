@@ -6,6 +6,7 @@ mod import_export;
 mod risk;
 mod storage;
 mod validation;
+mod variables;
 
 use chrono::Utc;
 use commands::*;
@@ -419,7 +420,7 @@ fn trigger_task_shortcut(app: &tauri::AppHandle, task_id: String) {
             }
             return;
         }
-        match executor::execute_task(&app, &task) {
+        match executor::execute_task(&app, &task, &variables::empty_runtime_values(), false) {
             Ok(summary) => {
                 let finished_at = summary.finished_at.clone();
                 config.tasks[task_index].last_run_at = Some(finished_at.clone());

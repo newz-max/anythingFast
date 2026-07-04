@@ -175,4 +175,27 @@ describe('ActionParamForm', () => {
     expect(wrapper.text()).toContain('执行日志仅在隐藏终端执行时记录 stdout/stderr')
     expect(wrapper.text()).toContain('显示终端窗口时输出只显示在终端里')
   })
+
+  it('updates command output bindings', async () => {
+    const wrapper = mount(ActionParamForm, {
+      props: {
+        modelValue: makeCommandAction()
+      },
+      global: {
+        stubs: formStubs
+      }
+    })
+
+    const stdoutInput = wrapper
+      .findAllComponents({ name: 'NFormItem' })
+      .find((item) => item.text().includes('stdout 保存到变量'))
+      ?.findComponent({ name: 'NInput' })
+
+    expect(stdoutInput?.exists()).toBe(true)
+    await stdoutInput?.vm.$emit('update:value', 'generatedPath')
+
+    const updates = wrapper.emitted('update:modelValue')
+    const updatedAction = updates?.at(-1)?.[0] as TaskAction
+    expect(updatedAction.outputBinding?.stdoutVariable).toBe('generatedPath')
+  })
 })

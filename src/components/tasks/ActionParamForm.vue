@@ -43,6 +43,16 @@ function patchAction(patch: Partial<TaskAction>) {
   }
 }
 
+function patchOutputBinding(patch: NonNullable<TaskAction['outputBinding']>) {
+  const next = {
+    ...(action.value.outputBinding || {}),
+    ...patch
+  }
+  patchAction({
+    outputBinding: next.stdoutVariable || next.stderrVariable || next.exitCodeVariable ? next : null
+  })
+}
+
 function patchParams(patch: MutableParams) {
   patchAction({
     params: {
@@ -248,6 +258,35 @@ function updateScriptArgs(value: string) {
           <NButton secondary @click="chooseWorkingDir">选择</NButton>
         </NInputGroup>
       </NFormItem>
+      <NGrid :cols="3" :x-gap="12" responsive="screen">
+        <NGi>
+          <NFormItem label="stdout 保存到变量">
+            <NInput
+              :value="action.outputBinding?.stdoutVariable || ''"
+              placeholder="可选"
+              @update:value="(value: string) => patchOutputBinding({ stdoutVariable: value })"
+            />
+          </NFormItem>
+        </NGi>
+        <NGi>
+          <NFormItem label="stderr 保存到变量">
+            <NInput
+              :value="action.outputBinding?.stderrVariable || ''"
+              placeholder="可选"
+              @update:value="(value: string) => patchOutputBinding({ stderrVariable: value })"
+            />
+          </NFormItem>
+        </NGi>
+        <NGi>
+          <NFormItem label="exitCode 保存到变量">
+            <NInput
+              :value="action.outputBinding?.exitCodeVariable || ''"
+              placeholder="可选"
+              @update:value="(value: string) => patchOutputBinding({ exitCodeVariable: value })"
+            />
+          </NFormItem>
+        </NGi>
+      </NGrid>
     </template>
 
     <template v-else-if="action.type === 'delay'">

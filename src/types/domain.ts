@@ -38,6 +38,20 @@ export interface DelayParams {
 
 export type ActionParams = OpenProgramParams | OpenUrlParams | PathParams | CommandParams | DelayParams
 
+export interface TaskVariable {
+  key: string
+  label: string
+  defaultValue: string
+  required: boolean
+  secret: boolean
+}
+
+export interface TaskActionOutputBinding {
+  stdoutVariable?: string
+  stderrVariable?: string
+  exitCodeVariable?: string
+}
+
 export interface TaskAction {
   id: string
   type: ActionType
@@ -46,6 +60,7 @@ export interface TaskAction {
   enabled: boolean
   timeoutMs?: number | null
   continueOnError?: boolean
+  outputBinding?: TaskActionOutputBinding | null
   riskLevel: RiskLevel
 }
 
@@ -55,6 +70,7 @@ export interface TaskItem {
   category?: string
   keywords?: string[]
   description?: string
+  variables?: TaskVariable[]
   actions: TaskAction[]
   riskLevel: RiskLevel
   enabled: boolean

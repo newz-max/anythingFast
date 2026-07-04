@@ -203,4 +203,67 @@ describe('validation', () => {
 
     expect(result.valid).toBe(true)
   })
+
+  it('validates task variables and action references locally', () => {
+    const task: TaskItem = {
+      id: 'task-1',
+      name: '变量事项',
+      variables: [
+        { key: 'projectDir', label: '项目目录', defaultValue: 'D:\\Project\\anythingFast', required: true, secret: false },
+        { key: 'projectDir', label: '重复', defaultValue: '', required: false, secret: false }
+      ],
+      actions: [
+        {
+          id: 'action-1',
+          type: 'openFolder',
+          name: '打开目录',
+          params: { path: '{{missingDir}}' },
+          enabled: true,
+          riskLevel: 'low'
+        }
+      ],
+      riskLevel: 'low',
+      enabled: true,
+      favorite: false,
+      tagIds: [],
+      triggers: [{ type: 'manual', enabled: true }],
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z'
+    }
+
+    const result = validateTaskLocal(task)
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('变量 key 不能重复')
+    expect(result.issues.map((issue) => issue.message)).toContain('引用了未定义变量：missingDir')
+  })
+
+  it('allows placeholders in URL and command working directory before backend resolution', () => {
+    const task: TaskItem = {
+      id: 'task-1',
+      name: '变量事项',
+      variables: [{ key: 'projectUrl', label: '项目地址', defaultValue: 'https://example.com', required: true, secret: false }],
+      actions: [
+        {
+          id: 'action-1',
+          type: 'openUrl',
+          name: '打开地址',
+          params: { url: '{{projectUrl}}' },
+          enabled: true,
+          riskLevel: 'low'
+        }
+      ],
+      riskLevel: 'low',
+      enabled: true,
+      favorite: false,
+      tagIds: [],
+      triggers: [{ type: 'manual', enabled: true }],
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z'
+    }
+
+    const result = validateTaskLocal(task)
+
+    expect(result.valid).toBe(true)
+  })
 })

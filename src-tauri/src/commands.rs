@@ -11,7 +11,9 @@ use crate::storage;
 use crate::validation::{
     normalize_task, validate_action_model, validate_config_model, validate_task_model,
 };
+use crate::variables::{self, RuntimeVariableContext};
 use chrono::Utc;
+use std::collections::HashMap;
 use tauri::AppHandle;
 
 #[tauri::command]
@@ -74,7 +76,11 @@ pub fn validate_action(action: TaskAction) -> ValidationResult {
 }
 
 #[tauri::command]
-pub fn analyze_risk(app: AppHandle, task_id: String) -> Result<RiskAnalysis, String> {
+pub fn analyze_risk(
+    app: AppHandle,
+    task_id: String,
+    runtime_variables: Option<HashMap<String, String>>,
+) -> Result<RiskAnalysis, String> {
     let config = storage::load_config(&app)
         .map_err(|err| log_command_error("analyze_risk load config failed", err))?;
     let task = config
@@ -82,7 +88,10 @@ pub fn analyze_risk(app: AppHandle, task_id: String) -> Result<RiskAnalysis, Str
         .iter()
         .find(|item| item.id == task_id)
         .ok_or_else(|| log_command_error("analyze_risk find task failed", "事项不存在"))?;
-    Ok(analyze_task_risk(task))
+    Ok(analyze_task_risk_for_runtime(
+        task,
+        runtime_variables.unwrap_or_default(),
+    ))
 }
 
 #[tauri::command]
@@ -90,6 +99,7 @@ pub fn analyze_action_risk(
     app: AppHandle,
     task_id: String,
     action_id: String,
+    runtime_variables: Option<HashMap<String, String>>,
 ) -> Result<RiskAnalysis, String> {
     let config = storage::load_config(&app)
         .map_err(|err| log_command_error("analyze_action_risk load config failed", err))?;
@@ -104,7 +114,11 @@ pub fn analyze_action_risk(
         .find(|item| item.id == action_id)
         .ok_or_else(|| log_command_error("analyze_action_risk find action failed", "动作不存在"))?;
 
-    let action_risk = derive_action_risk(action);
+    let runtime_variables = runtime_variables.unwrap_or_default();
+    let resolved_action = RuntimeVariableContext::from_task(task, &runtime_variables)
+        .and_then(|context| variables::resolve_action(action, &context))
+        .unwrap_or_else(|_| action.clone());
+    let action_risk = derive_action_risk(&resolved_action);
     let mut reasons = Vec::new();
     let mut high_risk_actions = Vec::new();
     if action_risk == RiskLevel::High {
@@ -114,7 +128,7 @@ pub fn analyze_action_risk(
             name: action.name.clone().unwrap_or_else(|| "未命名动作".into()),
             action_type: action.action_type.clone(),
             risk_level: action_risk,
-            detail: action_detail(action),
+            detail: action_detail(&resolved_action),
         });
     }
     if action.action_type == crate::domain::ActionType::RunCommand && task.last_run_at.is_none() {
@@ -134,9 +148,10 @@ pub async fn run_task(
     app: AppHandle,
     task_id: String,
     confirmation_token: Option<String>,
+    runtime_variables: Option<HashMap<String, String>>,
 ) -> Result<TaskExecutionSummary, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        run_task_blocking(app, task_id, confirmation_token)
+        run_task_blocking(app, task_id, confirmation_token, runtime_variables.unwrap_or_default())
     })
     .await
     .map_err(|err| log_command_error("run_task blocking task failed", err))?
@@ -146,6 +161,7 @@ fn run_task_blocking(
     app: AppHandle,
     task_id: String,
     confirmation_token: Option<String>,
+    runtime_variables: HashMap<String, String>,
 ) -> Result<TaskExecutionSummary, String> {
     let mut config = storage::load_config(&app)
         .map_err(|err| log_command_error("run_task load config failed", err))?;
@@ -175,12 +191,17 @@ fn run_task_blocking(
         return Err(message);
     }
 
-    let risk = analyze_task_risk(&task);
+    let risk = analyze_task_risk_for_runtime(&task, runtime_variables.clone());
     if risk.requires_confirmation && confirmation_token.as_deref() != Some("confirmed") {
         return Err("该事项需要二次确认".into());
     }
 
-    let summary = executor::execute_task(&app, &task)
+    let summary = executor::execute_task(
+        &app,
+        &task,
+        &runtime_variables,
+        confirmation_token.as_deref() == Some("confirmed"),
+    )
         .map_err(|err| log_command_error("run_task execute failed", err))?;
     config.tasks[task_index].last_run_at = Some(Utc::now().to_rfc3339());
     config.tasks[task_index].updated_at = Utc::now().to_rfc3339();
@@ -195,9 +216,16 @@ pub async fn run_task_action(
     task_id: String,
     action_id: String,
     confirmation_token: Option<String>,
+    runtime_variables: Option<HashMap<String, String>>,
 ) -> Result<TaskExecutionSummary, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        run_task_action_blocking(app, task_id, action_id, confirmation_token)
+        run_task_action_blocking(
+            app,
+            task_id,
+            action_id,
+            confirmation_token,
+            runtime_variables.unwrap_or_default(),
+        )
     })
     .await
     .map_err(|err| log_command_error("run_task_action blocking task failed", err))?
@@ -208,6 +236,7 @@ fn run_task_action_blocking(
     task_id: String,
     action_id: String,
     confirmation_token: Option<String>,
+    runtime_variables: HashMap<String, String>,
 ) -> Result<TaskExecutionSummary, String> {
     let mut config = storage::load_config(&app)
         .map_err(|err| log_command_error("run_task_action load config failed", err))?;
@@ -245,12 +274,23 @@ fn run_task_action_blocking(
         return Err(message);
     }
 
-    let risk = analyze_action_risk(app.clone(), task_id.clone(), action_id.clone())?;
+    let risk = analyze_action_risk(
+        app.clone(),
+        task_id.clone(),
+        action_id.clone(),
+        Some(runtime_variables.clone()),
+    )?;
     if risk.requires_confirmation && confirmation_token.as_deref() != Some("confirmed") {
         return Err("该动作需要二次确认".into());
     }
 
-    let summary = executor::execute_task_action(&app, &task, &action)
+    let summary = executor::execute_task_action(
+        &app,
+        &task,
+        &action,
+        &runtime_variables,
+        confirmation_token.as_deref() == Some("confirmed"),
+    )
         .map_err(|err| log_command_error("run_task_action execute failed", err))?;
     let finished_at = summary.finished_at.clone();
     config.tasks[task_index].last_run_at = Some(finished_at.clone());
@@ -386,4 +426,38 @@ fn log_command_error(context: &str, error: impl ToString) -> String {
     let message = error.to_string();
     dev_log_error(context, &message);
     message
+}
+
+fn analyze_task_risk_for_runtime(
+    task: &TaskItem,
+    runtime_variables: HashMap<String, String>,
+) -> RiskAnalysis {
+    let resolved_task = RuntimeVariableContext::from_task(task, &runtime_variables)
+        .ok()
+        .map(|context| {
+            let mut resolved = task.clone();
+            resolved.actions = task
+                .actions
+                .iter()
+                .map(|action| variables::resolve_action(action, &context).unwrap_or_else(|_| action.clone()))
+                .collect();
+            resolved
+        });
+    let mut analysis = analyze_task_risk(resolved_task.as_ref().unwrap_or(task));
+
+    let has_command_reference = task
+        .actions
+        .iter()
+        .any(|action| action.enabled && variables::command_has_variable_reference(action));
+    if has_command_reference {
+        analysis.requires_confirmation = true;
+        if !analysis
+            .reasons
+            .iter()
+            .any(|reason| reason == "命令动作包含变量引用")
+        {
+            analysis.reasons.push("命令动作包含变量引用".to_string());
+        }
+    }
+    analysis
 }

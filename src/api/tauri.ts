@@ -18,6 +18,7 @@ import type {
 } from '@/types/domain'
 
 type InvokeArgs = Record<string, unknown>
+export type RuntimeVariableValues = Record<string, string>
 
 async function invokeCommand<T>(command: string, args?: InvokeArgs) {
   try {
@@ -33,13 +34,14 @@ export const tauriApi = {
   saveConfig: (config: AppConfig) => invokeCommand<AppConfig>('save_config', { config }),
   validateTask: (task: TaskItem) => invokeCommand<ValidationResult>('validate_task', { task }),
   validateAction: (action: TaskAction) => invokeCommand<ValidationResult>('validate_action', { action }),
-  analyzeRisk: (taskId: string) => invokeCommand<RiskAnalysis>('analyze_risk', { taskId }),
-  analyzeActionRisk: (taskId: string, actionId: string) =>
-    invokeCommand<RiskAnalysis>('analyze_action_risk', { taskId, actionId }),
-  runTask: (taskId: string, confirmationToken?: string) =>
-    invokeCommand<TaskExecutionSummary>('run_task', { taskId, confirmationToken }),
-  runTaskAction: (taskId: string, actionId: string, confirmationToken?: string) =>
-    invokeCommand<TaskExecutionSummary>('run_task_action', { taskId, actionId, confirmationToken }),
+  analyzeRisk: (taskId: string, runtimeVariables?: RuntimeVariableValues) =>
+    invokeCommand<RiskAnalysis>('analyze_risk', { taskId, runtimeVariables }),
+  analyzeActionRisk: (taskId: string, actionId: string, runtimeVariables?: RuntimeVariableValues) =>
+    invokeCommand<RiskAnalysis>('analyze_action_risk', { taskId, actionId, runtimeVariables }),
+  runTask: (taskId: string, confirmationToken?: string, runtimeVariables?: RuntimeVariableValues) =>
+    invokeCommand<TaskExecutionSummary>('run_task', { taskId, confirmationToken, runtimeVariables }),
+  runTaskAction: (taskId: string, actionId: string, confirmationToken?: string, runtimeVariables?: RuntimeVariableValues) =>
+    invokeCommand<TaskExecutionSummary>('run_task_action', { taskId, actionId, confirmationToken, runtimeVariables }),
   previewAction: (action: TaskAction) => invokeCommand<PreviewAction>('preview_action', { action }),
   exportTaskBundle: (request: ExportBundleRequest) => invokeCommand<TaskExportBundle>('export_task_bundle', { request }),
   saveTaskBundleFile: (request: ExportBundleRequest, path: string) =>

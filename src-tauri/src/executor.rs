@@ -3,7 +3,10 @@ use crate::domain::{
     ActionExecutionResult, ActionType, ExecutionLogSummary, ExecutionScope, ExecutionStatus,
     TaskAction, TaskExecutionSummary, TaskItem,
 };
+use crate::risk::derive_action_risk;
 use crate::storage;
+use crate::validation::validate_action_model;
+use crate::variables::{self, ActionOutputSnapshot, RuntimeVariableContext};
 use chrono::Utc;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -18,7 +21,13 @@ use uuid::Uuid;
 const OUTPUT_LIMIT_CHARS: usize = 8192;
 const WINDOWS_CONTROL_C_EXIT_CODE: i32 = -1073741510;
 
-pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSummary, String> {
+pub fn execute_task(
+    app: &AppHandle,
+    task: &TaskItem,
+    runtime_variables: &HashMap<String, String>,
+    risk_confirmed: bool,
+) -> Result<TaskExecutionSummary, String> {
+    let mut variable_context = RuntimeVariableContext::from_task(task, runtime_variables)?;
     let run_id = Uuid::new_v4().to_string();
     let started_at = Utc::now().to_rfc3339();
     let total_actions = task.actions.len();
@@ -52,6 +61,7 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
                 Some(timestamp),
                 Some(0),
                 ActionRunOutput::default(),
+                &variable_context,
             );
             emit_event(
                 app,
@@ -71,6 +81,41 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
             continue;
         }
 
+        let resolved_action =
+            match prepare_action_for_execution(action, &variable_context, risk_confirmed) {
+                Ok(action) => action,
+                Err(message) => {
+                    let timestamp = Utc::now().to_rfc3339();
+                    let result = action_result(
+                        action,
+                        ExecutionStatus::Failed,
+                        Some(message.clone()),
+                        Some(timestamp.clone()),
+                        Some(timestamp),
+                        Some(0),
+                        failed_output(message),
+                        &variable_context,
+                    );
+                    emit_event(
+                        app,
+                        EventContext {
+                            run_id: &run_id,
+                            task,
+                            scope: ExecutionScope::Task,
+                            status: "action-failed",
+                            current_index: Some(current_index),
+                            total_actions,
+                            action: Some(action),
+                            result: Some(&result),
+                            message: result.message.clone(),
+                        },
+                    );
+                    results.push(result);
+                    stop_status = Some(ExecutionStatus::Failed);
+                    break;
+                }
+            };
+
         emit_event(
             app,
             EventContext {
@@ -80,24 +125,33 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
                 status: "action-started",
                 current_index: Some(current_index),
                 total_actions,
-                action: Some(action),
+                action: Some(&resolved_action),
                 result: None,
-                message: Some(action_name(action)),
+                message: Some(action_name(&resolved_action)),
             },
         );
         let action_started_at = Utc::now();
         let timer = Instant::now();
-        match execute_action(action) {
+        match execute_action(&resolved_action) {
             Ok(output) => {
                 let finished_at = Utc::now();
+                let binding_snapshot = output.snapshot();
+                let binding_error = variable_context
+                    .bind_output(&resolved_action, &binding_snapshot)
+                    .err();
                 let result = action_result(
-                    action,
-                    ExecutionStatus::Success,
-                    Some(output.message.clone()),
+                    &resolved_action,
+                    if binding_error.is_some() {
+                        ExecutionStatus::Failed
+                    } else {
+                        ExecutionStatus::Success
+                    },
+                    Some(binding_error.clone().unwrap_or_else(|| output.message.clone())),
                     Some(action_started_at.to_rfc3339()),
                     Some(finished_at.to_rfc3339()),
                     Some(timer.elapsed().as_millis() as u64),
                     output,
+                    &variable_context,
                 );
                 emit_event(
                     app,
@@ -105,27 +159,36 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
                         run_id: &run_id,
                         task,
                         scope: ExecutionScope::Task,
-                        status: "action-success",
+                        status: if binding_error.is_some() {
+                            "action-failed"
+                        } else {
+                            "action-success"
+                        },
                         current_index: Some(current_index),
                         total_actions,
-                        action: Some(action),
+                        action: Some(&resolved_action),
                         result: Some(&result),
                         message: result.message.clone(),
                     },
                 );
                 results.push(result);
+                if binding_error.is_some() {
+                    stop_status = Some(ExecutionStatus::Failed);
+                    break;
+                }
             }
             Err(output) => {
                 let status = action_failure_status(&output);
                 let finished_at = Utc::now();
                 let result = action_result(
-                    action,
+                    &resolved_action,
                     status.clone(),
                     Some(output.message.clone()),
                     Some(action_started_at.to_rfc3339()),
                     Some(finished_at.to_rfc3339()),
                     Some(timer.elapsed().as_millis() as u64),
                     output,
+                    &variable_context,
                 );
                 emit_event(
                     app,
@@ -136,13 +199,13 @@ pub fn execute_task(app: &AppHandle, task: &TaskItem) -> Result<TaskExecutionSum
                         status: action_event_status(&status),
                         current_index: Some(current_index),
                         total_actions,
-                        action: Some(action),
+                        action: Some(&resolved_action),
                         result: Some(&result),
                         message: result.message.clone(),
                     },
                 );
                 results.push(result);
-                if should_stop_after_failure(&status, action) {
+                if should_stop_after_failure(&status, &resolved_action) {
                     stop_status = Some(status);
                     break;
                 }
@@ -199,7 +262,11 @@ pub fn execute_task_action(
     app: &AppHandle,
     task: &TaskItem,
     action: &TaskAction,
+    runtime_variables: &HashMap<String, String>,
+    risk_confirmed: bool,
 ) -> Result<TaskExecutionSummary, String> {
+    let mut variable_context = RuntimeVariableContext::from_task(task, runtime_variables)?;
+    let resolved_action = prepare_action_for_execution(action, &variable_context, risk_confirmed)?;
     let run_id = Uuid::new_v4().to_string();
     let started_at = Utc::now().to_rfc3339();
     emit_event(
@@ -211,7 +278,7 @@ pub fn execute_task_action(
             status: "started",
             current_index: None,
             total_actions: 1,
-            action: Some(action),
+            action: Some(&resolved_action),
             result: None,
             message: Some("动作开始执行".into()),
         },
@@ -225,25 +292,34 @@ pub fn execute_task_action(
             status: "action-started",
             current_index: Some(1),
             total_actions: 1,
-            action: Some(action),
+            action: Some(&resolved_action),
             result: None,
-            message: Some(action_name(action)),
+            message: Some(action_name(&resolved_action)),
         },
     );
 
     let action_started_at = Utc::now();
     let timer = Instant::now();
-    let result = match execute_action(action) {
+    let result = match execute_action(&resolved_action) {
         Ok(output) => {
             let finished_at = Utc::now();
+            let binding_snapshot = output.snapshot();
+            let binding_error = variable_context
+                .bind_output(&resolved_action, &binding_snapshot)
+                .err();
             let result = action_result(
-                action,
-                ExecutionStatus::Success,
-                Some(output.message.clone()),
+                &resolved_action,
+                if binding_error.is_some() {
+                    ExecutionStatus::Failed
+                } else {
+                    ExecutionStatus::Success
+                },
+                Some(binding_error.clone().unwrap_or_else(|| output.message.clone())),
                 Some(action_started_at.to_rfc3339()),
                 Some(finished_at.to_rfc3339()),
                 Some(timer.elapsed().as_millis() as u64),
                 output,
+                &variable_context,
             );
             emit_event(
                 app,
@@ -251,10 +327,14 @@ pub fn execute_task_action(
                     run_id: &run_id,
                     task,
                     scope: ExecutionScope::Action,
-                    status: "action-success",
+                    status: if binding_error.is_some() {
+                        "action-failed"
+                    } else {
+                        "action-success"
+                    },
                     current_index: Some(1),
                     total_actions: 1,
-                    action: Some(action),
+                    action: Some(&resolved_action),
                     result: Some(&result),
                     message: result.message.clone(),
                 },
@@ -265,13 +345,14 @@ pub fn execute_task_action(
             let status = action_failure_status(&output);
             let finished_at = Utc::now();
             let result = action_result(
-                action,
+                &resolved_action,
                 status.clone(),
                 Some(output.message.clone()),
                 Some(action_started_at.to_rfc3339()),
                 Some(finished_at.to_rfc3339()),
                 Some(timer.elapsed().as_millis() as u64),
                 output,
+                &variable_context,
             );
             emit_event(
                 app,
@@ -282,7 +363,7 @@ pub fn execute_task_action(
                     status: action_event_status(&status),
                     current_index: Some(1),
                     total_actions: 1,
-                    action: Some(action),
+                    action: Some(&resolved_action),
                     result: Some(&result),
                     message: result.message.clone(),
                 },
@@ -297,7 +378,7 @@ pub fn execute_task_action(
         task_id: task.id.clone(),
         task_name: task.name.clone(),
         scope: ExecutionScope::Action,
-        action_id: Some(action.id.clone()),
+        action_id: Some(resolved_action.id.clone()),
         started_at,
         finished_at,
         status: status.clone(),
@@ -327,7 +408,7 @@ pub fn execute_task_action(
             status: "finished",
             current_index: Some(1),
             total_actions: 1,
-            action: Some(action),
+            action: Some(&resolved_action),
             result: None,
             message: Some(summary_message(&summary.status, "动作")),
         },
@@ -345,6 +426,27 @@ fn execute_action(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutpu
         ActionType::RunCommand => run_command(action),
         ActionType::Delay => delay(action).map(ok_output).map_err(failed_output),
     }
+}
+
+fn prepare_action_for_execution(
+    action: &TaskAction,
+    variable_context: &RuntimeVariableContext,
+    risk_confirmed: bool,
+) -> Result<TaskAction, String> {
+    let resolved_action = variables::resolve_action(action, variable_context)?;
+    let validation = validate_action_model(&resolved_action);
+    if !validation.valid {
+        return Err(validation
+            .issues
+            .into_iter()
+            .map(|issue| issue.message)
+            .collect::<Vec<_>>()
+            .join("; "));
+    }
+    if derive_action_risk(&resolved_action) == crate::domain::RiskLevel::High && !risk_confirmed {
+        return Err("解析变量后的动作需要二次确认".into());
+    }
+    Ok(resolved_action)
 }
 
 fn open_program(action: &TaskAction) -> Result<String, String> {
@@ -941,19 +1043,20 @@ fn action_result(
     finished_at: Option<String>,
     duration_ms: Option<u64>,
     output: ActionRunOutput,
+    variable_context: &RuntimeVariableContext,
 ) -> ActionExecutionResult {
     ActionExecutionResult {
         action_id: action.id.clone(),
         action_name: action_name(action),
         action_type: action.action_type.clone(),
         status,
-        message,
+        message: variable_context.mask_optional_text(message),
         started_at,
         finished_at,
         duration_ms,
         exit_code: output.exit_code,
-        stdout: output.stdout,
-        stderr: output.stderr,
+        stdout: variable_context.mask_optional_text(output.stdout),
+        stderr: variable_context.mask_optional_text(output.stderr),
     }
 }
 
@@ -964,6 +1067,16 @@ struct ActionRunOutput {
     stdout: Option<String>,
     stderr: Option<String>,
     failure_status: Option<ExecutionStatus>,
+}
+
+impl ActionRunOutput {
+    fn snapshot(&self) -> ActionOutputSnapshot {
+        ActionOutputSnapshot {
+            exit_code: self.exit_code,
+            stdout: self.stdout.clone(),
+            stderr: self.stderr.clone(),
+        }
+    }
 }
 
 fn ok_output(message: String) -> ActionRunOutput {
@@ -1118,6 +1231,7 @@ mod tests {
             enabled: false,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Low,
         };
 
@@ -1129,9 +1243,43 @@ mod tests {
             Some("2026-07-03T00:00:00Z".into()),
             Some(0),
             ActionRunOutput::default(),
+            &RuntimeVariableContext::from_task(&test_task(Vec::new()), &HashMap::new()).unwrap(),
         );
         assert_eq!(result.status, ExecutionStatus::Skipped);
         assert_eq!(result.duration_ms, Some(0));
+    }
+
+    #[test]
+    fn resolved_high_risk_command_requires_confirmation() {
+        let task = test_task(vec![crate::domain::TaskVariable {
+            key: "command".into(),
+            label: "Command".into(),
+            default_value: "Remove-Item -Recurse dist".into(),
+            required: true,
+            secret: false,
+        }]);
+        let context = RuntimeVariableContext::from_task(&task, &HashMap::new()).unwrap();
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "{{command}}",
+                "workingDir": std::env::current_dir().unwrap().to_string_lossy(),
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        let blocked = prepare_action_for_execution(&action, &context, false).unwrap_err();
+        let allowed = prepare_action_for_execution(&action, &context, true).unwrap();
+
+        assert!(blocked.contains("二次确认"));
+        assert_eq!(derive_action_risk(&allowed), crate::domain::RiskLevel::High);
     }
 
     #[test]
@@ -1159,6 +1307,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: Some(true),
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1186,6 +1335,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Low,
         };
 
@@ -1208,6 +1358,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1229,6 +1380,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1249,6 +1401,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1271,6 +1424,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1293,6 +1447,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1313,6 +1468,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1341,6 +1497,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1373,6 +1530,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1404,6 +1562,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1439,6 +1598,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1474,6 +1634,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1509,6 +1670,7 @@ mod tests {
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::High,
         };
 
@@ -1558,6 +1720,7 @@ Write-Output "config=$ConfigPath"
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::High,
         };
 
@@ -1596,6 +1759,7 @@ Write-Output "config=$ConfigPath"
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::High,
         };
 
@@ -1633,6 +1797,7 @@ Write-Output "config=$ConfigPath"
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::High,
         };
 
@@ -1668,6 +1833,7 @@ Write-Output "config=$ConfigPath"
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::High,
         };
 
@@ -1675,6 +1841,26 @@ Write-Output "config=$ConfigPath"
 
         assert!(err.contains("ps1 脚本必须使用"));
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    fn test_task(variables: Vec<crate::domain::TaskVariable>) -> TaskItem {
+        TaskItem {
+            id: "task".into(),
+            name: "Task".into(),
+            category: None,
+            keywords: None,
+            description: None,
+            variables,
+            actions: Vec::new(),
+            risk_level: crate::domain::RiskLevel::Low,
+            enabled: true,
+            favorite: false,
+            tag_ids: Vec::new(),
+            triggers: vec![crate::domain::TaskTrigger::Manual { enabled: true }],
+            last_run_at: None,
+            created_at: "2026-07-01T00:00:00Z".into(),
+            updated_at: "2026-07-01T00:00:00Z".into(),
+        }
     }
 
     #[test]
@@ -1695,6 +1881,7 @@ Write-Output "config=$ConfigPath"
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1724,6 +1911,7 @@ Write-Output "config=$ConfigPath"
             enabled: true,
             timeout_ms: None,
             continue_on_error: None,
+            output_binding: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 

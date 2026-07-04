@@ -1,6 +1,6 @@
 import { clonePlainDto } from '@/utils/clonePlainDto'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
-import type { ActionType, AppConfig, AppSettings, RiskLevel, TaskAction, TaskItem, TaskTemplate } from '@/types/domain'
+import type { ActionType, AppConfig, AppSettings, RiskLevel, TaskAction, TaskItem, TaskTemplate, TaskVariable } from '@/types/domain'
 
 type AppConfigInput = Partial<Omit<AppConfig, 'settings'>> & {
   settings?: Partial<AppSettings>
@@ -58,6 +58,7 @@ export function normalizeTask(task: TaskItem): TaskItem {
     favorite: task.favorite ?? false,
     tagIds: task.tagIds || [],
     triggers: normalizeTriggers(task.triggers),
+    variables: normalizeVariables(task.variables),
     actions: (task.actions || []).map(normalizeAction),
     riskLevel: deriveTaskRisk(task),
     enabled: task.enabled ?? true
@@ -68,6 +69,7 @@ function normalizeAction(action: TaskAction): TaskAction {
   const normalized = {
     ...action,
     enabled: action.enabled ?? true,
+    outputBinding: normalizeOutputBinding(action.outputBinding),
     params: normalizeActionParams(action)
   }
   return {
@@ -81,6 +83,7 @@ export function normalizeTemplate(template: TaskTemplate): TaskTemplate {
     const normalized = {
       ...action,
       enabled: action.enabled ?? true,
+      outputBinding: normalizeOutputBinding(action.outputBinding),
       params: normalizeActionParams(action as TaskAction)
     }
     return {
@@ -124,6 +127,7 @@ export function createTaskDraft(): TaskItem {
     category: '未分类',
     keywords: [],
     description: '',
+    variables: [],
     actions: [],
     riskLevel: 'low',
     enabled: true,
@@ -156,8 +160,29 @@ export function createActionDraft(type: ActionType): TaskAction {
     params: defaultParams(type),
     enabled: true,
     continueOnError: false,
+    outputBinding: null,
     riskLevel: defaultRisk(type)
   }
+}
+
+function normalizeVariables(variables: TaskVariable[] | undefined): TaskVariable[] {
+  return (variables || []).map((variable) => ({
+    key: variable.key.trim(),
+    label: variable.label.trim(),
+    defaultValue: variable.defaultValue ?? '',
+    required: Boolean(variable.required),
+    secret: Boolean(variable.secret)
+  }))
+}
+
+function normalizeOutputBinding(binding: TaskAction['outputBinding'] | undefined): TaskAction['outputBinding'] {
+  if (!binding) return null
+  const next = {
+    stdoutVariable: binding.stdoutVariable?.trim() || undefined,
+    stderrVariable: binding.stderrVariable?.trim() || undefined,
+    exitCodeVariable: binding.exitCodeVariable?.trim() || undefined
+  }
+  return next.stdoutVariable || next.stderrVariable || next.exitCodeVariable ? next : null
 }
 
 export function cloneTask(task: TaskItem): TaskItem {

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { ExecutionEventPayload } from '@/api/events'
+import type { RuntimeVariableValues } from '@/api/tauri'
 import { listenExecutionEvents } from '@/api/events'
 import { tauriApi } from '@/api/tauri'
 import { getErrorMessage, logDevError } from '@/utils/errors'
@@ -45,7 +46,7 @@ export const useExecutionStore = defineStore('execution', () => {
     }
   }
 
-  async function runTask(taskId: string, confirmationToken?: string) {
+  async function runTask(taskId: string, confirmationToken?: string, runtimeVariables?: RuntimeVariableValues) {
     error.value = null
     runningTaskId.value = taskId
     runningActionId.value = null
@@ -55,7 +56,7 @@ export const useExecutionStore = defineStore('execution', () => {
       if (!('__TAURI_INTERNALS__' in window)) {
         throw new Error('浏览器预览环境不能执行本地动作，请使用 Tauri 运行。')
       }
-      lastSummary.value = await tauriApi.runTask(taskId, confirmationToken)
+      lastSummary.value = await tauriApi.runTask(taskId, confirmationToken, runtimeVariables)
       applySummary(lastSummary.value)
       await loadLogs(20)
       return lastSummary.value
@@ -69,7 +70,7 @@ export const useExecutionStore = defineStore('execution', () => {
     }
   }
 
-  async function runTaskAction(taskId: string, actionId: string, confirmationToken?: string) {
+  async function runTaskAction(taskId: string, actionId: string, confirmationToken?: string, runtimeVariables?: RuntimeVariableValues) {
     error.value = null
     runningTaskId.value = taskId
     runningActionId.value = actionId
@@ -79,7 +80,7 @@ export const useExecutionStore = defineStore('execution', () => {
       if (!('__TAURI_INTERNALS__' in window)) {
         throw new Error('浏览器预览环境不能执行本地动作，请使用 Tauri 运行。')
       }
-      lastSummary.value = await tauriApi.runTaskAction(taskId, actionId, confirmationToken)
+      lastSummary.value = await tauriApi.runTaskAction(taskId, actionId, confirmationToken, runtimeVariables)
       applySummary(lastSummary.value)
       await loadLogs(20)
       return lastSummary.value

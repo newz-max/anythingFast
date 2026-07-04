@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { TaskItem, TaskTag } from '@/types/domain'
+import TaskVariablesEditor from '@/components/tasks/TaskVariablesEditor.vue'
+import type { TaskItem, TaskTag, TaskVariable } from '@/types/domain'
 
 const task = defineModel<TaskItem>({ required: true })
 const props = defineProps<{
@@ -23,6 +24,12 @@ const nameCount = computed(() => task.value.name.length)
 const keywordCount = computed(() => task.value.keywords?.length || 0)
 const selectedTagCount = computed(() => task.value.tagIds?.length || 0)
 const descriptionCount = computed(() => task.value.description?.length || 0)
+const variablesModel = computed<TaskVariable[]>({
+  get: () => task.value.variables || [],
+  set: (value) => {
+    task.value.variables = value
+  }
+})
 
 const keywordText = computed({
   get: () => task.value.keywords?.join(', ') || '',
@@ -100,6 +107,8 @@ const keywordText = computed({
       </div>
       <NSwitch v-model:value="task.enabled" />
     </div>
+
+    <TaskVariablesEditor v-model="variablesModel" />
   </NForm>
 </template>
 
