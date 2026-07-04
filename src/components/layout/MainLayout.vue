@@ -63,13 +63,24 @@ const importPreviewVisible = shallowRef(false)
 const importPreview = shallowRef<ImportPreview | null>(null)
 const importFilePath = shallowRef('')
 const importConfirming = shallowRef(false)
+const isCompactDesktop = shallowRef(false)
+const taskListExpanded = shallowRef(false)
 const layoutRef = useTemplateRef<HTMLElement>('layout')
 const contentRef = useTemplateRef<HTMLElement>('content')
 let desktopMediaQuery: MediaQueryList | null = null
+let compactDesktopMediaQuery: MediaQueryList | null = null
 
 const selectedTask = computed(() => taskStore.selectedTask)
 const visibleTasks = computed(() => getTasksForView(taskStore.tasks, activeTaskView.value, selectedTagId.value))
 const showTemplateCenter = computed(() => activeTaskView.value === 'templates')
+const shouldShowTaskListToggle = computed(() => isCompactDesktop.value && !showTemplateCenter.value)
+const shouldCollapseTaskList = computed(() => shouldShowTaskListToggle.value && !taskListExpanded.value)
+const mainLayoutClasses = computed(() => ({
+  'compact-task-list': shouldShowTaskListToggle.value,
+  'compact-task-list-expanded': shouldShowTaskListToggle.value && taskListExpanded.value,
+  'compact-task-list-collapsed': shouldCollapseTaskList.value
+}))
+const taskListToggleLabel = computed(() => (taskListExpanded.value ? '收起事项列表' : '展开事项列表'))
 const templateCountLabel = computed(() => `${taskStore.templates.length} 个模板`)
 const selectedActionCount = computed(() => selectedTask.value?.actions.filter((action) => action.enabled).length ?? 0)
 const selectedKeywords = computed(() => selectedTask.value?.keywords?.join('、') || '无')
@@ -152,6 +163,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   desktopMediaQuery?.removeEventListener('change', handleDesktopBreakpointChange)
+  compactDesktopMediaQuery?.removeEventListener('change', handleCompactDesktopBreakpointChange)
 })
 
 watch(
@@ -215,6 +227,9 @@ function selectTask(taskId: string) {
   taskStore.selectTask(taskId)
   wizardMode.value = 'edit'
   wizardTask.value = taskStore.tasks.find((task) => task.id === taskId) || null
+  if (isCompactDesktop.value) {
+    taskListExpanded.value = false
+  }
 }
 
 function editSelectedTask(initialStep = 1) {
@@ -232,6 +247,9 @@ function toggleSelectedTaskEnabled(enabled: boolean) {
 
 function setTaskView(view: TaskView) {
   activeTaskView.value = view
+  if (isCompactDesktop.value && view !== 'templates') {
+    taskListExpanded.value = false
+  }
   if (view === 'templates') return
   const nextTasks = getTasksForView(taskStore.tasks, view, selectedTagId.value)
   if (!nextTasks.some((task) => task.id === taskStore.selectedTaskId)) {
@@ -666,10 +684,28 @@ async function refreshShortcutStatusQuiet(context: string) {
 function setupResponsiveScrollReset() {
   desktopMediaQuery = window.matchMedia('(min-width: 960px)')
   desktopMediaQuery.addEventListener('change', handleDesktopBreakpointChange)
+  compactDesktopMediaQuery = window.matchMedia('(min-width: 960px) and (max-width: 1279px)')
+  syncCompactDesktopLayout(compactDesktopMediaQuery.matches)
+  compactDesktopMediaQuery.addEventListener('change', handleCompactDesktopBreakpointChange)
 }
 
 function handleDesktopBreakpointChange(event: MediaQueryListEvent) {
   if (!event.matches) return
+  void resetLayoutScroll()
+}
+
+function handleCompactDesktopBreakpointChange(event: MediaQueryListEvent) {
+  syncCompactDesktopLayout(event.matches)
+  void resetLayoutScroll()
+}
+
+function syncCompactDesktopLayout(matches: boolean) {
+  isCompactDesktop.value = matches
+  taskListExpanded.value = false
+}
+
+function toggleTaskListPanel() {
+  taskListExpanded.value = !taskListExpanded.value
   void resetLayoutScroll()
 }
 
@@ -683,7 +719,7 @@ async function resetLayoutScroll() {
 </script>
 
 <template>
-  <main ref="layout" class="main-layout">
+  <main ref="layout" class="main-layout" :class="mainLayoutClasses">
     <div class="ambient ambient-one" aria-hidden="true"></div>
     <div class="ambient ambient-two" aria-hidden="true"></div>
     <div class="light-arc light-arc-one" aria-hidden="true"></div>
@@ -782,7 +818,7 @@ async function resetLayoutScroll() {
         </footer>
       </aside>
 
-    <section class="middle-panel">
+    <section id="task-list-panel" class="middle-panel">
       <TaskListPanel
         v-if="!showTemplateCenter"
         :tasks="visibleTasks"
@@ -819,6 +855,19 @@ async function resetLayoutScroll() {
     </section>
 
     <section class="workspace">
+      <button
+        v-if="!showTemplateCenter"
+        class="task-list-toggle"
+        type="button"
+        aria-controls="task-list-panel"
+        :aria-expanded="taskListExpanded"
+        :aria-label="taskListToggleLabel"
+        @click="toggleTaskListPanel"
+      >
+        <span class="task-list-toggle-icon" aria-hidden="true">{{ taskListExpanded ? '‹' : '›' }}</span>
+        <span>{{ taskListToggleLabel }}</span>
+      </button>
+
       <section v-if="showTemplateCenter" class="template-intro detail-panel">
         <div class="template-intro-copy">
           <span class="template-intro-icon" aria-hidden="true">▱</span>
@@ -1719,6 +1768,48 @@ async function resetLayoutScroll() {
   padding: 32px var(--content-padding) 32px 0;
 }
 
+.task-list-toggle {
+  display: none;
+  align-items: center;
+  justify-self: start;
+  gap: 8px;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid rgba(82, 106, 171, 0.28);
+  border-radius: 10px;
+  background: rgba(27, 35, 55, 0.72);
+  color: #dce9ff;
+  cursor: pointer;
+  padding: 0 12px 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.task-list-toggle:hover {
+  border-color: rgba(67, 109, 255, 0.58);
+  background: rgba(40, 54, 92, 0.82);
+}
+
+.task-list-toggle:focus-visible {
+  outline: 2px solid rgba(58, 139, 255, 0.74);
+  outline-offset: 2px;
+}
+
+.task-list-toggle-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 6px;
+  background: rgba(63, 82, 159, 0.62);
+  color: #f4f7ff;
+  font-size: 16px;
+  line-height: 1;
+}
+
 .detail-panel {
   display: grid;
   align-content: start;
@@ -2236,6 +2327,18 @@ async function resetLayoutScroll() {
     --content-padding: 18px;
   }
 
+  .main-layout.compact-task-list-collapsed .app-content {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  }
+
+  .main-layout.compact-task-list-expanded .app-content {
+    grid-template-columns: var(--sidebar-width) minmax(292px, var(--middle-width)) minmax(0, 1fr);
+  }
+
+  .main-layout.compact-task-list-collapsed .middle-panel {
+    display: none;
+  }
+
   .sidebar {
     justify-items: center;
     padding: 22px 12px 18px;
@@ -2297,6 +2400,16 @@ async function resetLayoutScroll() {
     border-radius: 24px 0 0 24px;
   }
 
+  .main-layout.compact-task-list .workspace {
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 12px;
+    padding-top: 24px;
+  }
+
+  .task-list-toggle {
+    display: inline-flex;
+  }
+
   .detail-panel {
     gap: 24px;
     padding: 30px 22px;
@@ -2304,10 +2417,12 @@ async function resetLayoutScroll() {
 
   .detail-header {
     flex-wrap: wrap;
+    gap: 18px;
   }
 
   .detail-actions {
     width: 100%;
+    gap: 12px;
   }
 
   .hero-icon {
@@ -2317,19 +2432,66 @@ async function resetLayoutScroll() {
     font-size: 32px;
   }
 
+  .actions-section {
+    gap: 16px;
+    min-width: 0;
+  }
+
+  .section-title-row {
+    flex-wrap: wrap;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .section-title {
+    min-width: 0;
+  }
+
+  .add-action-button {
+    flex: 0 0 auto;
+  }
+
   .action-row {
-    grid-template-columns: 18px 22px 38px minmax(90px, 130px) minmax(0, 1fr) auto 34px 24px;
-    gap: 10px;
-    min-height: 76px;
+    grid-template-columns: 22px 38px minmax(0, 1fr) minmax(0, auto) 34px;
+    grid-template-areas:
+      "index icon name state play"
+      "index icon detail detail play";
+    gap: 6px 10px;
+    min-height: 78px;
     padding: 12px 14px;
   }
 
+  .drag-dots,
+  .row-more {
+    display: none;
+  }
+
+  .action-index {
+    grid-area: index;
+    align-self: center;
+  }
+
+  .action-icon {
+    grid-area: icon;
+  }
+
   .action-name {
+    grid-area: name;
     min-width: 0;
   }
 
   .action-detail {
-    grid-column: 4 / -1;
+    grid-area: detail;
+    min-width: 0;
+  }
+
+  .action-state-tag {
+    grid-area: state;
+    max-width: 100%;
+  }
+
+  .action-play {
+    grid-area: play;
   }
 
   .shortcut-trigger-card,
@@ -2392,6 +2554,10 @@ async function resetLayoutScroll() {
     border-radius: 0;
   }
 
+  .task-list-toggle {
+    display: none;
+  }
+
   .workspace,
   .detail-panel {
     overflow: visible;
@@ -2449,27 +2615,32 @@ async function resetLayoutScroll() {
 
   .action-row {
     grid-template-columns: 18px 34px minmax(0, 1fr) 34px;
+    grid-template-areas:
+      "index icon name play"
+      "index icon detail play"
+      ". . state state";
   }
 
-  .action-index,
+  .drag-dots,
   .row-more {
     display: none;
   }
 
+  .action-index {
+    display: block;
+  }
+
   .action-detail {
-    grid-column: 3 / -1;
-    grid-row: 2;
+    grid-area: detail;
   }
 
   .action-state-tag {
-    grid-column: 3 / -1;
-    grid-row: 3;
+    grid-area: state;
     justify-self: start;
   }
 
   .action-play {
-    grid-column: 4;
-    grid-row: 1;
+    grid-area: play;
   }
 
   .run-button,
