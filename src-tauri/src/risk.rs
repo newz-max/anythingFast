@@ -159,6 +159,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::Medium,
         };
 
@@ -182,6 +183,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::Medium,
         };
 

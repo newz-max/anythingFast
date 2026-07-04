@@ -193,6 +193,7 @@ function saveAction(action: TaskAction) {
     v-model:show="actionWizardVisible"
     :mode="actionWizardMode"
     :action="editingAction"
+    :variables="draft?.variables || []"
     @save="saveAction"
   />
 </template>

@@ -1,6 +1,6 @@
-import type { FieldIssue, TaskAction, TaskItem, ValidationResult } from '@/types/domain'
+import type { ActionCondition, FieldIssue, TaskAction, TaskItem, ValidationResult } from '@/types/domain'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
-import { collectActionStringValues, extractVariableReferences, hasInvalidVariableSyntax, hasVariableSyntax, isValidVariableKey } from '@/domain/variables'
+import { collectActionStringValues, collectConditionStringValues, extractVariableReferences, hasInvalidVariableSyntax, hasVariableSyntax, isValidVariableKey } from '@/domain/variables'
 
 export function validateTaskLocal(task: TaskItem, allTasks: TaskItem[] = []): ValidationResult {
   const issues: FieldIssue[] = []
@@ -58,6 +58,20 @@ export function validateTaskLocal(task: TaskItem, allTasks: TaskItem[] = []): Va
         }
       })
     })
+    collectConditionStringValues(action.condition).forEach(({ field, value }) => {
+      if (hasInvalidVariableSyntax(value)) {
+        issues.push({ field: `actions.${index}.${field}`, message: '变量引用格式必须是 {{variable}}' })
+      }
+      extractVariableReferences(value).forEach((key) => {
+        if (!variableKeys.has(key)) {
+          issues.push({ field: `actions.${index}.${field}`, message: `引用了未定义变量：${key}` })
+        }
+      })
+    })
+    const conditionVariable = conditionVariableKey(action.condition)
+    if (conditionVariable && !variableKeys.has(conditionVariable)) {
+      issues.push({ field: `actions.${index}.condition.variable`, message: `引用了未定义变量：${conditionVariable}` })
+    }
   })
 
   return {
@@ -73,6 +87,7 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
   if (action.timeoutMs !== undefined && action.timeoutMs !== null && action.timeoutMs <= 0) {
     issues.push({ field: 'timeoutMs', message: '超时时间必须大于 0' })
   }
+  validateCondition(action.condition, issues)
 
   switch (action.type) {
     case 'openProgram':
@@ -127,6 +142,47 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
     issues,
     riskLevel: deriveActionRisk(action)
   }
+}
+
+function validateCondition(condition: ActionCondition | null | undefined, issues: FieldIssue[]) {
+  if (!condition || condition.type === 'always') return
+  switch (condition.type) {
+    case 'fileExists':
+      if (!condition.path.trim()) {
+        issues.push({ field: 'condition.path', message: '条件文件路径不能为空' })
+      }
+      break
+    case 'folderExists':
+      if (!condition.path.trim()) {
+        issues.push({ field: 'condition.path', message: '条件文件夹路径不能为空' })
+      }
+      break
+    case 'variableEquals':
+      if (!isValidVariableKey(condition.variable)) {
+        issues.push({ field: 'condition.variable', message: '条件变量 key 无效' })
+      }
+      break
+    case 'variableNotEmpty':
+      if (!isValidVariableKey(condition.variable)) {
+        issues.push({ field: 'condition.variable', message: '条件变量 key 无效' })
+      }
+      break
+    case 'previousActionStatus':
+      if (!['success', 'failed', 'skipped'].includes(condition.status)) {
+        issues.push({ field: 'condition.status', message: '上一动作状态条件无效' })
+      }
+      break
+    default:
+      issues.push({ field: 'condition.type', message: '动作条件类型无效' })
+  }
+}
+
+function conditionVariableKey(condition: ActionCondition | null | undefined) {
+  if (!condition) return ''
+  if (condition.type === 'variableEquals' || condition.type === 'variableNotEmpty') {
+    return condition.variable.trim()
+  }
+  return ''
 }
 
 function validateOutputBinding(action: TaskAction, issues: FieldIssue[]) {

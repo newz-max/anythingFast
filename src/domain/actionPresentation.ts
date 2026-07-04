@@ -1,4 +1,14 @@
-import type { ActionType, CommandParams, DelayParams, OpenProgramParams, OpenUrlParams, PathParams, TaskAction } from '@/types/domain'
+import type {
+  ActionCondition,
+  ActionType,
+  CommandParams,
+  DelayParams,
+  OpenProgramParams,
+  OpenUrlParams,
+  PathParams,
+  PreviousActionStatusConditionValue,
+  TaskAction
+} from '@/types/domain'
 
 export const actionTypeOptions: Array<{ label: string; value: ActionType; description: string }> = [
   { label: '打开程序', value: 'openProgram', description: '启动本地可执行程序，可附带启动参数。' },
@@ -38,6 +48,31 @@ export function describeAction(action: TaskAction) {
     case 'delay':
       return `等待 ${numberParam((action.params as DelayParams).durationMs, 0)} ms`
   }
+}
+
+export function describeCondition(condition: ActionCondition | null | undefined) {
+  if (!condition || condition.type === 'always') return '始终执行'
+  switch (condition.type) {
+    case 'fileExists':
+      return `仅当文件存在：${textParam(condition.path) || '未设置路径'}`
+    case 'folderExists':
+      return `仅当文件夹存在：${textParam(condition.path) || '未设置路径'}`
+    case 'variableEquals':
+      return `仅当变量 ${textParam(condition.variable) || '未设置'} 等于 ${textParam(condition.value) || '空值'}`
+    case 'variableNotEmpty':
+      return `仅当变量 ${textParam(condition.variable) || '未设置'} 非空`
+    case 'previousActionStatus':
+      return `仅当上一动作${previousStatusLabel(condition.status)}`
+  }
+}
+
+function previousStatusLabel(status: PreviousActionStatusConditionValue) {
+  const labels: Record<PreviousActionStatusConditionValue, string> = {
+    success: '成功',
+    failed: '失败',
+    skipped: '已跳过'
+  }
+  return labels[status]
 }
 
 function textParam(value: unknown) {

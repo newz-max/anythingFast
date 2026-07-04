@@ -477,6 +477,7 @@ fn template_action_to_task_action(action: &TaskTemplateAction, id: String) -> Ta
         timeout_ms: action.timeout_ms,
         continue_on_error: action.continue_on_error,
         output_binding: action.output_binding.clone(),
+        condition: action.condition.clone(),
         risk_level: action.risk_level.clone(),
     }
 }
@@ -529,6 +530,7 @@ mod tests {
                 timeout_ms: None,
                 continue_on_error: None,
                 output_binding: None,
+                condition: None,
                 risk_level: RiskLevel::Low,
             }],
             risk_level: RiskLevel::Low,
@@ -559,6 +561,7 @@ mod tests {
                 timeout_ms: None,
                 continue_on_error: None,
                 output_binding: None,
+                condition: None,
                 risk_level: RiskLevel::Low,
             }],
             risk_level: RiskLevel::Low,
@@ -668,6 +671,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::Low,
         });
         let bundle = TaskExportBundle {

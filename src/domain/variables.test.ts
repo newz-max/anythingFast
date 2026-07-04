@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { maskSecretVariableText, variablesNeedingInput } from '@/domain/variables'
+import { collectConditionStringValues, maskSecretVariableText, variablesNeedingInput } from '@/domain/variables'
 import type { TaskVariable } from '@/types/domain'
 
 describe('variables', () => {
@@ -19,5 +19,15 @@ describe('variables', () => {
     ]
 
     expect(variablesNeedingInput(variables).map((variable) => variable.key)).toEqual(['branch', 'token'])
+  })
+
+  it('collects condition string values for variable validation', () => {
+    expect(collectConditionStringValues({ type: 'fileExists', path: '{{projectDir}}\\out.txt' })).toEqual([
+      { field: 'condition.path', value: '{{projectDir}}\\out.txt' }
+    ])
+    expect(collectConditionStringValues({ type: 'variableEquals', variable: 'status', value: '{{expectedStatus}}' })).toEqual([
+      { field: 'condition.value', value: '{{expectedStatus}}' }
+    ])
+    expect(collectConditionStringValues({ type: 'always' })).toEqual([])
   })
 })

@@ -29,7 +29,7 @@ const runTitle = computed(() => {
 })
 
 function attentionActionMessages(log: ExecutionLogSummary): ActionExecutionResult[] {
-  return log.actions.filter((action) => (action.status === 'failed' || action.status === 'cancelled') && Boolean(action.message))
+  return log.actions.filter((action) => (action.status === 'failed' || action.status === 'cancelled' || action.status === 'skipped') && Boolean(action.message || action.skipReason))
 }
 
 function actionsWithCommandOutput(log: ExecutionLogSummary): ActionExecutionResult[] {
@@ -115,7 +115,7 @@ function formatDuration(durationMs?: number) {
                 :class="{ 'warning-item': action.status === 'cancelled' }"
               >
                 <span class="error-action">{{ action.actionName }}</span>
-                <span class="error-message">{{ action.message }}</span>
+                <span class="error-message">{{ action.skipReason || action.message }}</span>
               </li>
             </ul>
             <div v-if="actionsWithCommandOutput(log).length > 0" class="output-list">

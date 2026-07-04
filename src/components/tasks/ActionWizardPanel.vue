@@ -2,12 +2,12 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import ActionParamForm from '@/components/tasks/ActionParamForm.vue'
-import { actionTypeOptions, describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
+import { actionTypeOptions, describeAction, describeCondition, getActionTypeLabel } from '@/domain/actionPresentation'
 import { createActionDraft } from '@/domain/taskFactory'
 import { deriveActionRisk } from '@/domain/risk'
 import { validateActionLocal } from '@/domain/validation'
 import { clonePlainDto } from '@/utils/clonePlainDto'
-import type { ActionType, TaskAction } from '@/types/domain'
+import type { ActionType, TaskAction, TaskVariable } from '@/types/domain'
 
 export type ActionWizardMode = 'create' | 'edit'
 
@@ -15,6 +15,7 @@ const props = defineProps<{
   show: boolean
   mode: ActionWizardMode
   action: TaskAction | null
+  variables?: TaskVariable[]
 }>()
 
 const emit = defineEmits<{
@@ -50,10 +51,11 @@ function selectType(type: ActionType) {
   if (draft.value.type === type) return
   const nextAction = createActionDraft(type)
   draft.value = {
-    ...nextAction,
-    id: draft.value.id,
-    enabled: draft.value.enabled,
-    continueOnError: draft.value.continueOnError
+            ...nextAction,
+            id: draft.value.id,
+            enabled: draft.value.enabled,
+            continueOnError: draft.value.continueOnError,
+            condition: draft.value.condition
   }
 }
 
@@ -119,13 +121,14 @@ function normalizeRisk() {
             </button>
           </div>
 
-          <ActionParamForm v-show="currentStep === 2" v-model="draft" />
+          <ActionParamForm v-show="currentStep === 2" v-model="draft" :variables="variables" />
 
           <div v-show="currentStep === 3" class="confirm">
             <NDescriptions label-placement="left" :column="1" bordered>
               <NDescriptionsItem label="动作名称">{{ draft.name || getActionTypeLabel(draft.type) }}</NDescriptionsItem>
               <NDescriptionsItem label="动作类型">{{ getActionTypeLabel(draft.type) }}</NDescriptionsItem>
               <NDescriptionsItem label="关键设置">{{ describeAction(draft) }}</NDescriptionsItem>
+              <NDescriptionsItem label="执行条件">{{ describeCondition(draft.condition) }}</NDescriptionsItem>
               <NDescriptionsItem label="启用状态">{{ draft.enabled ? '启用' : '停用' }}</NDescriptionsItem>
               <NDescriptionsItem label="风险等级">
                 <NTag :type="draft.riskLevel === 'high' ? 'error' : draft.riskLevel === 'medium' ? 'warning' : 'success'">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
+import { describeAction, describeCondition, getActionTypeLabel } from '@/domain/actionPresentation'
 import type { TaskAction } from '@/types/domain'
 
 const actions = defineModel<TaskAction[]>('actions', { required: true })
@@ -41,6 +41,9 @@ defineEmits<{
               </NTag>
             </div>
             <div class="action-detail">{{ describeAction(action) }}</div>
+            <div v-if="action.condition && action.condition.type !== 'always'" class="condition-detail">
+              {{ describeCondition(action.condition) }}
+            </div>
           </div>
           <div class="action-controls">
             <NSpace align="center">
@@ -165,6 +168,15 @@ defineEmits<{
   overflow: hidden;
   color: #667085;
   font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.condition-detail {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #8b96b8;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

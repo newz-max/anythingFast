@@ -1,9 +1,11 @@
 use crate::domain::{
-    ActionType, AppConfig, FieldIssue, RiskLevel, TaskAction, TaskItem, TaskTrigger,
-    ValidationResult,
+    ActionCondition, ActionType, AppConfig, FieldIssue, PreviousActionStatusConditionValue,
+    RiskLevel, TaskAction, TaskItem, TaskTrigger, ValidationResult,
 };
 use crate::risk::{derive_action_risk, derive_task_risk};
-use crate::variables::{validate_action_output_binding, validate_task_variables};
+use crate::variables::{
+    is_valid_variable_key, validate_action_output_binding, validate_task_variables,
+};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -71,6 +73,18 @@ pub fn validate_task_model(task: &TaskItem, all_tasks: &[TaskItem]) -> Validatio
     }
 
     issues.extend(validate_task_variables(task));
+    let mut variable_keys: HashSet<String> = task
+        .variables
+        .iter()
+        .map(|variable| variable.key.trim().to_string())
+        .collect();
+    for action in &task.actions {
+        if let Some(binding) = &action.output_binding {
+            add_binding_key(&mut variable_keys, &binding.stdout_variable);
+            add_binding_key(&mut variable_keys, &binding.stderr_variable);
+            add_binding_key(&mut variable_keys, &binding.exit_code_variable);
+        }
+    }
 
     for (index, action) in task.actions.iter().enumerate() {
         for action_issue in validate_action_model(action).issues {
@@ -78,6 +92,14 @@ pub fn validate_task_model(task: &TaskItem, all_tasks: &[TaskItem]) -> Validatio
                 &format!("actions.{index}.{}", action_issue.field),
                 &action_issue.message,
             ));
+        }
+        if let Some(condition_variable) = condition_variable_key(&action.condition) {
+            if !variable_keys.contains(condition_variable) {
+                issues.push(issue(
+                    &format!("actions.{index}.condition.variable"),
+                    &format!("引用了未定义变量：{condition_variable}"),
+                ));
+            }
         }
     }
 
@@ -96,6 +118,7 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
     }
 
     issues.extend(validate_action_output_binding(action));
+    issues.extend(validate_action_condition(&action.condition));
 
     match action.action_type {
         ActionType::OpenProgram => {
@@ -106,7 +129,9 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
         }
         ActionType::OpenUrl => {
             let url = string_param(action, "url");
-            if !has_variable_reference(url) && !(url.starts_with("http://") || url.starts_with("https://")) {
+            if !has_variable_reference(url)
+                && !(url.starts_with("http://") || url.starts_with("https://"))
+            {
                 issues.push(issue("url", "URL 必须是 http 或 https 地址"));
             }
         }
@@ -128,7 +153,9 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
                 let script_path = string_param(action, "scriptPath");
                 if script_path.trim().is_empty() {
                     issues.push(issue("scriptPath", "脚本文件不能为空"));
-                } else if !has_variable_reference(script_path) && !is_supported_script_path(script_path) {
+                } else if !has_variable_reference(script_path)
+                    && !is_supported_script_path(script_path)
+                {
                     issues.push(issue("scriptPath", "脚本文件必须是 ps1、cmd 或 bat"));
                 } else if !has_variable_reference(script_path)
                     && is_powershell_script_path(script_path)
@@ -164,6 +191,60 @@ pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
         valid: issues.is_empty(),
         issues,
         risk_level: Some(derive_action_risk(action)),
+    }
+}
+
+fn validate_action_condition(condition: &Option<ActionCondition>) -> Vec<FieldIssue> {
+    let mut issues = Vec::new();
+    let Some(condition) = condition else {
+        return issues;
+    };
+
+    match condition {
+        ActionCondition::Always => {}
+        ActionCondition::FileExists { path } => {
+            if path.trim().is_empty() {
+                issues.push(issue("condition.path", "条件文件路径不能为空"));
+            }
+        }
+        ActionCondition::FolderExists { path } => {
+            if path.trim().is_empty() {
+                issues.push(issue("condition.path", "条件文件夹路径不能为空"));
+            }
+        }
+        ActionCondition::VariableEquals { variable, .. }
+        | ActionCondition::VariableNotEmpty { variable } => {
+            if !is_valid_variable_key(variable.trim()) {
+                issues.push(issue("condition.variable", "条件变量 key 无效"));
+            }
+        }
+        ActionCondition::PreviousActionStatus { status } => match status {
+            PreviousActionStatusConditionValue::Success
+            | PreviousActionStatusConditionValue::Failed
+            | PreviousActionStatusConditionValue::Skipped => {}
+        },
+    }
+    issues
+}
+
+fn condition_variable_key(condition: &Option<ActionCondition>) -> Option<&str> {
+    match condition {
+        Some(ActionCondition::VariableEquals { variable, .. })
+        | Some(ActionCondition::VariableNotEmpty { variable }) => Some(variable.trim()),
+        _ => None,
+    }
+}
+
+fn add_binding_key(keys: &mut HashSet<String>, value: &Option<String>) {
+    let Some(key) = value
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+    else {
+        return;
+    };
+    if is_valid_variable_key(key) {
+        keys.insert(key.to_string());
     }
 }
 
@@ -337,6 +418,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::Low,
         };
 
@@ -407,6 +489,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::High,
         };
 
@@ -434,6 +517,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::High,
         };
 
@@ -461,6 +545,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::High,
         };
 
@@ -491,6 +576,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::High,
         };
 
@@ -521,6 +607,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::High,
         };
 
@@ -554,6 +641,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::High,
         };
 
@@ -574,6 +662,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::Low,
         };
 
@@ -591,10 +680,108 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::Low,
         };
 
         assert!(validate_action_model(&action).valid);
+    }
+
+    #[test]
+    fn rejects_invalid_action_condition() {
+        let mut action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::OpenFile,
+            name: None,
+            params: json!({ "path": "D:\\Project\\input.txt" }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: Some(ActionCondition::FileExists { path: " ".into() }),
+            risk_level: RiskLevel::Low,
+        };
+
+        let result = validate_action_model(&action);
+        assert!(!result.valid);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.field == "condition.path")
+        );
+
+        action.condition = Some(ActionCondition::VariableNotEmpty {
+            variable: "1bad".into(),
+        });
+        let result = validate_action_model(&action);
+        assert!(!result.valid);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.field == "condition.variable")
+        );
+    }
+
+    #[test]
+    fn allows_condition_variable_from_output_binding() {
+        let task = TaskItem {
+            id: "task".into(),
+            name: "条件事项".into(),
+            category: None,
+            keywords: None,
+            description: None,
+            variables: Vec::new(),
+            actions: vec![
+                TaskAction {
+                    id: "a".into(),
+                    action_type: ActionType::RunCommand,
+                    name: None,
+                    params: json!({
+                        "command": "echo path",
+                        "workingDir": "D:\\Project",
+                        "shell": "powershell"
+                    }),
+                    enabled: true,
+                    timeout_ms: None,
+                    continue_on_error: None,
+                    output_binding: Some(crate::domain::TaskActionOutputBinding {
+                        stdout_variable: Some("generatedPath".into()),
+                        stderr_variable: None,
+                        exit_code_variable: None,
+                    }),
+                    condition: None,
+                    risk_level: RiskLevel::Medium,
+                },
+                TaskAction {
+                    id: "b".into(),
+                    action_type: ActionType::OpenFolder,
+                    name: None,
+                    params: json!({ "path": "{{generatedPath}}" }),
+                    enabled: true,
+                    timeout_ms: None,
+                    continue_on_error: None,
+                    output_binding: None,
+                    condition: Some(ActionCondition::VariableNotEmpty {
+                        variable: "generatedPath".into(),
+                    }),
+                    risk_level: RiskLevel::Low,
+                },
+            ],
+            risk_level: RiskLevel::Medium,
+            enabled: true,
+            favorite: false,
+            tag_ids: Vec::new(),
+            triggers: vec![TaskTrigger::Manual { enabled: true }],
+            last_run_at: None,
+            created_at: "2026-07-01T00:00:00Z".into(),
+            updated_at: "2026-07-01T00:00:00Z".into(),
+        };
+
+        let result = validate_task_model(&task, &[]);
+
+        assert!(result.valid);
     }
 
     fn temp_validation_dir() -> PathBuf {

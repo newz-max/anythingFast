@@ -237,6 +237,7 @@ export const useExecutionStore = defineStore('execution', () => {
 
   function summaryStatusMessage(status: TaskExecutionSummary['status']) {
     if (status === 'success') return '执行完成'
+    if (status === 'skipped') return '已跳过'
     if (status === 'cancelled') return '执行已取消'
     return '执行失败'
   }

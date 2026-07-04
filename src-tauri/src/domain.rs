@@ -33,6 +33,8 @@ pub struct TaskAction {
     pub continue_on_error: Option<bool>,
     #[serde(default)]
     pub output_binding: Option<TaskActionOutputBinding>,
+    #[serde(default)]
+    pub condition: Option<ActionCondition>,
     pub risk_level: RiskLevel,
 }
 
@@ -42,6 +44,36 @@ pub struct TaskActionOutputBinding {
     pub stdout_variable: Option<String>,
     pub stderr_variable: Option<String>,
     pub exit_code_variable: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum ActionCondition {
+    Always,
+    FileExists {
+        path: String,
+    },
+    FolderExists {
+        path: String,
+    },
+    VariableEquals {
+        variable: String,
+        value: String,
+    },
+    VariableNotEmpty {
+        variable: String,
+    },
+    PreviousActionStatus {
+        status: PreviousActionStatusConditionValue,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviousActionStatusConditionValue {
+    Success,
+    Failed,
+    Skipped,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +145,8 @@ pub struct TaskTemplateAction {
     pub continue_on_error: Option<bool>,
     #[serde(default)]
     pub output_binding: Option<TaskActionOutputBinding>,
+    #[serde(default)]
+    pub condition: Option<ActionCondition>,
     pub risk_level: RiskLevel,
 }
 
@@ -324,6 +358,7 @@ pub struct ActionExecutionResult {
     pub action_type: ActionType,
     pub status: ExecutionStatus,
     pub message: Option<String>,
+    pub skip_reason: Option<String>,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     pub duration_ms: Option<u64>,

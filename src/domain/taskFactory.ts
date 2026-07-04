@@ -1,6 +1,6 @@
 import { clonePlainDto } from '@/utils/clonePlainDto'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
-import type { ActionType, AppConfig, AppSettings, RiskLevel, TaskAction, TaskItem, TaskTemplate, TaskVariable } from '@/types/domain'
+import type { ActionCondition, ActionType, AppConfig, AppSettings, RiskLevel, TaskAction, TaskItem, TaskTemplate, TaskVariable } from '@/types/domain'
 
 type AppConfigInput = Partial<Omit<AppConfig, 'settings'>> & {
   settings?: Partial<AppSettings>
@@ -70,6 +70,7 @@ function normalizeAction(action: TaskAction): TaskAction {
     ...action,
     enabled: action.enabled ?? true,
     outputBinding: normalizeOutputBinding(action.outputBinding),
+    condition: normalizeCondition(action.condition),
     params: normalizeActionParams(action)
   }
   return {
@@ -84,6 +85,7 @@ export function normalizeTemplate(template: TaskTemplate): TaskTemplate {
       ...action,
       enabled: action.enabled ?? true,
       outputBinding: normalizeOutputBinding(action.outputBinding),
+      condition: normalizeCondition(action.condition),
       params: normalizeActionParams(action as TaskAction)
     }
     return {
@@ -161,6 +163,7 @@ export function createActionDraft(type: ActionType): TaskAction {
     enabled: true,
     continueOnError: false,
     outputBinding: null,
+    condition: { type: 'always' },
     riskLevel: defaultRisk(type)
   }
 }
@@ -183,6 +186,28 @@ function normalizeOutputBinding(binding: TaskAction['outputBinding'] | undefined
     exitCodeVariable: binding.exitCodeVariable?.trim() || undefined
   }
   return next.stdoutVariable || next.stderrVariable || next.exitCodeVariable ? next : null
+}
+
+function normalizeCondition(condition: ActionCondition | null | undefined): ActionCondition {
+  if (!condition) return { type: 'always' }
+  switch (condition.type) {
+    case 'fileExists':
+    case 'folderExists':
+      return { type: condition.type, path: condition.path?.trim() || '' }
+    case 'variableEquals':
+      return {
+        type: 'variableEquals',
+        variable: condition.variable?.trim() || '',
+        value: condition.value ?? ''
+      }
+    case 'variableNotEmpty':
+      return { type: 'variableNotEmpty', variable: condition.variable?.trim() || '' }
+    case 'previousActionStatus':
+      return { type: 'previousActionStatus', status: condition.status }
+    case 'always':
+    default:
+      return { type: 'always' }
+  }
 }
 
 export function cloneTask(task: TaskItem): TaskItem {

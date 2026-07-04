@@ -151,7 +151,12 @@ pub async fn run_task(
     runtime_variables: Option<HashMap<String, String>>,
 ) -> Result<TaskExecutionSummary, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        run_task_blocking(app, task_id, confirmation_token, runtime_variables.unwrap_or_default())
+        run_task_blocking(
+            app,
+            task_id,
+            confirmation_token,
+            runtime_variables.unwrap_or_default(),
+        )
     })
     .await
     .map_err(|err| log_command_error("run_task blocking task failed", err))?
@@ -202,7 +207,7 @@ fn run_task_blocking(
         &runtime_variables,
         confirmation_token.as_deref() == Some("confirmed"),
     )
-        .map_err(|err| log_command_error("run_task execute failed", err))?;
+    .map_err(|err| log_command_error("run_task execute failed", err))?;
     config.tasks[task_index].last_run_at = Some(Utc::now().to_rfc3339());
     config.tasks[task_index].updated_at = Utc::now().to_rfc3339();
     storage::save_config(&app, &config)
@@ -291,7 +296,7 @@ fn run_task_action_blocking(
         &runtime_variables,
         confirmation_token.as_deref() == Some("confirmed"),
     )
-        .map_err(|err| log_command_error("run_task_action execute failed", err))?;
+    .map_err(|err| log_command_error("run_task_action execute failed", err))?;
     let finished_at = summary.finished_at.clone();
     config.tasks[task_index].last_run_at = Some(finished_at.clone());
     config.tasks[task_index].updated_at = finished_at;
@@ -439,7 +444,9 @@ fn analyze_task_risk_for_runtime(
             resolved.actions = task
                 .actions
                 .iter()
-                .map(|action| variables::resolve_action(action, &context).unwrap_or_else(|_| action.clone()))
+                .map(|action| {
+                    variables::resolve_action(action, &context).unwrap_or_else(|_| action.clone())
+                })
                 .collect();
             resolved
         });

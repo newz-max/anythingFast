@@ -1,4 +1,4 @@
-import type { ActionParams, TaskAction, TaskVariable } from '@/types/domain'
+import type { ActionCondition, ActionParams, TaskAction, TaskVariable } from '@/types/domain'
 
 export const variableKeyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/
 const referencePattern = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g
@@ -80,8 +80,20 @@ export function collectActionStringValues(action: TaskAction) {
   return values
 }
 
+export function collectConditionStringValues(condition: ActionCondition | null | undefined) {
+  const values: Array<{ field: string; value: string }> = []
+  if (!condition || condition.type === 'always') return values
+  if (condition.type === 'fileExists' || condition.type === 'folderExists') {
+    values.push({ field: 'condition.path', value: condition.path })
+  }
+  if (condition.type === 'variableEquals') {
+    values.push({ field: 'condition.value', value: condition.value })
+  }
+  return values
+}
+
 export function actionHasVariableReference(action: TaskAction) {
-  return collectActionStringValues(action).some(({ value }) => hasVariableSyntax(value))
+  return [...collectActionStringValues(action), ...collectConditionStringValues(action.condition)].some(({ value }) => hasVariableSyntax(value))
 }
 
 export function defaultRuntimeVariableValues(variables: TaskVariable[]) {

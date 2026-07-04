@@ -64,7 +64,11 @@ impl RuntimeVariableContext {
         })
     }
 
-    pub fn bind_output(&mut self, action: &TaskAction, output: &ActionOutputSnapshot) -> Result<(), String> {
+    pub fn bind_output(
+        &mut self,
+        action: &TaskAction,
+        output: &ActionOutputSnapshot,
+    ) -> Result<(), String> {
         if action.action_type != ActionType::RunCommand {
             return Ok(());
         }
@@ -74,7 +78,10 @@ impl RuntimeVariableContext {
 
         self.bind_optional(&binding.stdout_variable, output.stdout.clone())?;
         self.bind_optional(&binding.stderr_variable, output.stderr.clone())?;
-        self.bind_optional(&binding.exit_code_variable, output.exit_code.map(|code| code.to_string()))?;
+        self.bind_optional(
+            &binding.exit_code_variable,
+            output.exit_code.map(|code| code.to_string()),
+        )?;
         Ok(())
     }
 
@@ -94,14 +101,31 @@ impl RuntimeVariableContext {
         value.map(|text| self.mask_text(&text))
     }
 
-    fn bind_optional(&mut self, target: &Option<String>, value: Option<String>) -> Result<(), String> {
-        let Some(key) = target.as_deref().map(str::trim).filter(|key| !key.is_empty()) else {
+    pub fn resolve_text(&self, value: &str) -> Result<String, String> {
+        resolve_template(value, self)
+    }
+
+    pub fn value(&self, key: &str) -> Option<&str> {
+        self.values.get(key).map(String::as_str)
+    }
+
+    fn bind_optional(
+        &mut self,
+        target: &Option<String>,
+        value: Option<String>,
+    ) -> Result<(), String> {
+        let Some(key) = target
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+        else {
             return Ok(());
         };
         if !is_valid_variable_key(key) {
             return Err(format!("输出绑定变量 key 无效：{key}"));
         }
-        self.values.insert(key.to_string(), value.unwrap_or_default());
+        self.values
+            .insert(key.to_string(), value.unwrap_or_default());
         Ok(())
     }
 
@@ -139,7 +163,10 @@ pub fn validate_task_variables(task: &TaskItem) -> Vec<FieldIssue> {
         let field = |name: &str| format!("variables.{index}.{name}");
         let key = variable.key.trim();
         if !is_valid_variable_key(key) {
-            issues.push(issue(&field("key"), "变量 key 只能包含字母、数字和下划线，且不能以数字开头"));
+            issues.push(issue(
+                &field("key"),
+                "变量 key 只能包含字母、数字和下划线，且不能以数字开头",
+            ));
         }
         if !keys.insert(key.to_string()) {
             issues.push(issue(&field("key"), "变量 key 不能重复"));
@@ -156,8 +183,16 @@ pub fn validate_action_output_binding(action: &TaskAction) -> Vec<FieldIssue> {
     let Some(binding) = &action.output_binding else {
         return issues;
     };
-    validate_binding_key(&mut issues, "outputBinding.stdoutVariable", &binding.stdout_variable);
-    validate_binding_key(&mut issues, "outputBinding.stderrVariable", &binding.stderr_variable);
+    validate_binding_key(
+        &mut issues,
+        "outputBinding.stdoutVariable",
+        &binding.stdout_variable,
+    );
+    validate_binding_key(
+        &mut issues,
+        "outputBinding.stderrVariable",
+        &binding.stderr_variable,
+    );
     validate_binding_key(
         &mut issues,
         "outputBinding.exitCodeVariable",
@@ -205,7 +240,9 @@ pub fn command_has_variable_reference(action: &TaskAction) -> bool {
     collect_string_param(&action.params, "workingDir", &mut values);
     collect_string_param(&action.params, "scriptPath", &mut values);
     collect_string_array_param(&action.params, "scriptArgs", &mut values);
-    values.iter().any(|value| value.contains("{{") || value.contains("}}"))
+    values
+        .iter()
+        .any(|value| value.contains("{{") || value.contains("}}"))
 }
 
 pub fn empty_runtime_values() -> HashMap<String, String> {
@@ -296,7 +333,11 @@ fn resolve_template(value: &str, context: &RuntimeVariableContext) -> Result<Str
 }
 
 fn validate_binding_key(issues: &mut Vec<FieldIssue>, field: &str, value: &Option<String>) {
-    let Some(key) = value.as_deref().map(str::trim).filter(|key| !key.is_empty()) else {
+    let Some(key) = value
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+    else {
         return;
     };
     if !is_valid_variable_key(key) {
@@ -383,23 +424,35 @@ mod tests {
         )
         .expect("folder");
         let command = resolve_action(
-            &action(ActionType::RunCommand, json!({
-                "command": "dir",
-                "workingDir": "{{projectDir}}",
-                "shell": "powershell"
-            })),
+            &action(
+                ActionType::RunCommand,
+                json!({
+                    "command": "dir",
+                    "workingDir": "{{projectDir}}",
+                    "shell": "powershell"
+                }),
+            ),
             &context,
         )
         .expect("command");
         let file = resolve_action(
-            &action(ActionType::OpenFile, json!({ "path": "{{projectDir}}\\README.md" })),
+            &action(
+                ActionType::OpenFile,
+                json!({ "path": "{{projectDir}}\\README.md" }),
+            ),
             &context,
         )
         .expect("file");
 
         assert_eq!(folder.params["path"], json!("D:\\Project\\anythingFast"));
-        assert_eq!(command.params["workingDir"], json!("D:\\Project\\anythingFast"));
-        assert_eq!(file.params["path"], json!("D:\\Project\\anythingFast\\README.md"));
+        assert_eq!(
+            command.params["workingDir"],
+            json!("D:\\Project\\anythingFast")
+        );
+        assert_eq!(
+            file.params["path"],
+            json!("D:\\Project\\anythingFast\\README.md")
+        );
     }
 
     #[test]
@@ -484,7 +537,10 @@ mod tests {
             )
             .expect("bind");
         let later = resolve_action(
-            &action(ActionType::OpenFolder, json!({ "path": "{{generatedPath}}" })),
+            &action(
+                ActionType::OpenFolder,
+                json!({ "path": "{{generatedPath}}" }),
+            ),
             &context,
         )
         .expect("later action");
@@ -523,6 +579,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: RiskLevel::Low,
         }
     }

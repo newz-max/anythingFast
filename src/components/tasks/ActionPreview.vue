@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { describeAction } from '@/domain/actionPresentation'
+import { describeAction, describeCondition } from '@/domain/actionPresentation'
 import { maskSecretVariableText } from '@/domain/variables'
 import type { TaskItem } from '@/types/domain'
 
@@ -14,6 +14,11 @@ const variableCount = computed(() => props.task.variables?.length || 0)
 
 function actionDetail(action: TaskItem['actions'][number]) {
   return maskSecretVariableText(describeAction(action), props.task.variables || [])
+}
+
+function conditionDetail(action: TaskItem['actions'][number]) {
+  if (!action.condition || action.condition.type === 'always') return ''
+  return maskSecretVariableText(describeCondition(action.condition), props.task.variables || [])
 }
 </script>
 
@@ -41,6 +46,7 @@ function actionDetail(action: TaskItem['actions'][number]) {
     <ol class="steps">
       <li v-for="action in task.actions" :key="action.id" :class="{ disabled: !action.enabled }">
         {{ action.name || action.type }} · {{ actionDetail(action) }}
+        <span v-if="conditionDetail(action)" class="condition-summary"> · {{ conditionDetail(action) }}</span>
       </li>
     </ol>
   </NCard>
@@ -71,5 +77,9 @@ function actionDetail(action: TaskItem['actions'][number]) {
 .disabled {
   opacity: 0.48;
   text-decoration: line-through;
+}
+
+.condition-summary {
+  color: #8b96b8;
 }
 </style>

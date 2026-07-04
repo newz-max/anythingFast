@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import ActionConditionForm from '@/components/tasks/ActionConditionForm.vue'
 import { usePathPicker } from '@/composables/usePathPicker'
-import type { ActionParams, ActionType, TaskAction } from '@/types/domain'
+import type { ActionParams, ActionType, TaskAction, TaskVariable } from '@/types/domain'
 
 const action = defineModel<TaskAction>({ required: true })
+defineProps<{
+  variables?: TaskVariable[]
+}>()
 type MutableParams = Record<string, any>
 const { pickDirectory, pickScriptFile } = usePathPicker()
 
@@ -51,6 +55,10 @@ function patchOutputBinding(patch: NonNullable<TaskAction['outputBinding']>) {
   patchAction({
     outputBinding: next.stdoutVariable || next.stderrVariable || next.exitCodeVariable ? next : null
   })
+}
+
+function patchCondition(condition: TaskAction['condition']) {
+  patchAction({ condition })
 }
 
 function patchParams(patch: MutableParams) {
@@ -300,6 +308,12 @@ function updateScriptArgs(value: string) {
         />
       </NFormItem>
     </template>
+
+    <NCollapse class="advanced-condition" display-directive="show">
+      <NCollapseItem title="高级条件" name="condition">
+        <ActionConditionForm :model-value="action.condition" :variables="variables" @update:model-value="patchCondition" />
+      </NCollapseItem>
+    </NCollapse>
   </NForm>
 </template>
 
@@ -310,5 +324,9 @@ function updateScriptArgs(value: string) {
 
 .command-log-note {
   margin-bottom: 10px;
+}
+
+.advanced-condition {
+  margin-top: 8px;
 }
 </style>

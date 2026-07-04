@@ -104,6 +104,25 @@ describe('ExecutionProgress', () => {
             exitCode: -1073741510
           }
         ]
+      },
+      {
+        id: 'log-3',
+        taskId: 'task-3',
+        taskName: '条件事项',
+        scope: 'task',
+        startedAt: '2026-07-03T00:00:04Z',
+        finishedAt: '2026-07-03T00:00:05Z',
+        status: 'success',
+        actions: [
+          {
+            actionId: 'action-4',
+            actionName: '条件动作',
+            actionType: 'openFile',
+            status: 'skipped',
+            message: '条件不满足：文件不存在：D:\\missing.txt',
+            skipReason: '条件不满足：文件不存在：D:\\missing.txt'
+          }
+        ]
       }
     ]
 
@@ -122,6 +141,7 @@ describe('ExecutionProgress', () => {
     expect(wrapper.text()).toContain('执行脚本')
     expect(wrapper.text()).toContain('命令执行失败，退出码：7，bad')
     expect(wrapper.text()).toContain('命令执行已取消：终端窗口被关闭或进程收到中断信号')
+    expect(wrapper.text()).toContain('条件不满足：文件不存在：D:\\missing.txt')
     expect(wrapper.text()).toContain('退出码 -1073741510')
     expect(wrapper.text()).toContain('退出码 7')
     expect(wrapper.text()).toContain('hello')

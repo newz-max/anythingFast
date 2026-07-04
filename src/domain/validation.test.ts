@@ -238,6 +238,91 @@ describe('validation', () => {
     expect(result.issues.map((issue) => issue.message)).toContain('引用了未定义变量：missingDir')
   })
 
+  it('validates condition fields and condition variable references locally', () => {
+    const task: TaskItem = {
+      id: 'task-1',
+      name: '条件事项',
+      variables: [{ key: 'projectDir', label: '项目目录', defaultValue: 'D:\\Project', required: true, secret: false }],
+      actions: [
+        {
+          id: 'action-1',
+          type: 'openFolder',
+          name: '打开目录',
+          params: { path: 'D:\\Project' },
+          enabled: true,
+          condition: { type: 'fileExists', path: '{{missingFile}}' },
+          riskLevel: 'low'
+        },
+        {
+          id: 'action-2',
+          type: 'delay',
+          name: '等待',
+          params: { durationMs: 1000 },
+          enabled: true,
+          condition: { type: 'variableNotEmpty', variable: 'missingOutput' },
+          outputBinding: { stdoutVariable: 'generatedPath' },
+          riskLevel: 'low'
+        }
+      ],
+      riskLevel: 'low',
+      enabled: true,
+      favorite: false,
+      tagIds: [],
+      triggers: [{ type: 'manual', enabled: true }],
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z'
+    }
+
+    const result = validateTaskLocal(task)
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('引用了未定义变量：missingFile')
+    expect(result.issues.map((issue) => issue.message)).toContain('引用了未定义变量：missingOutput')
+  })
+
+  it('allows condition variables created by output bindings locally', () => {
+    const task: TaskItem = {
+      id: 'task-1',
+      name: '输出条件事项',
+      variables: [],
+      actions: [
+        {
+          id: 'action-1',
+          type: 'runCommand',
+          name: '生成路径',
+          params: {
+            command: 'echo path',
+            workingDir: 'D:\\Project\\anythingFast',
+            shell: 'powershell'
+          },
+          enabled: true,
+          outputBinding: { stdoutVariable: 'generatedPath' },
+          riskLevel: 'medium'
+        },
+        {
+          id: 'action-2',
+          type: 'openFolder',
+          name: '打开目录',
+          params: { path: '{{generatedPath}}' },
+          enabled: true,
+          condition: { type: 'variableNotEmpty', variable: 'generatedPath' },
+          riskLevel: 'low'
+        }
+      ],
+      riskLevel: 'medium',
+      enabled: true,
+      favorite: false,
+      tagIds: [],
+      triggers: [{ type: 'manual', enabled: true }],
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z'
+    }
+
+    const result = validateTaskLocal(task)
+
+    expect(result.valid).toBe(true)
+  })
+
   it('allows placeholders in URL and command working directory before backend resolution', () => {
     const task: TaskItem = {
       id: 'task-1',

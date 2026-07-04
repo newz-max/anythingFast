@@ -26,6 +26,8 @@ const formStubs = {
   }),
   NAlert: passThroughStub('NAlert'),
   NInputGroup: passThroughStub('NInputGroup'),
+  NCollapse: passThroughStub('NCollapse'),
+  NCollapseItem: passThroughStub('NCollapseItem'),
   NRadioButton: passThroughStub('NRadioButton'),
   NButton: defineComponent({
     name: 'NButton',
@@ -197,5 +199,39 @@ describe('ActionParamForm', () => {
     const updates = wrapper.emitted('update:modelValue')
     const updatedAction = updates?.at(-1)?.[0] as TaskAction
     expect(updatedAction.outputBinding?.stdoutVariable).toBe('generatedPath')
+  })
+
+  it('updates advanced action conditions', async () => {
+    const wrapper = mount(ActionParamForm, {
+      props: {
+        modelValue: makeCommandAction(),
+        variables: [{ key: 'projectDir', label: '项目目录', defaultValue: 'D:\\Project', required: false, secret: false }]
+      },
+      global: {
+        stubs: formStubs
+      }
+    })
+
+    const conditionSelect = wrapper.findAllComponents({ name: 'NSelect' }).find((select) => {
+      const options = select.props('options') as Array<{ value: string }> | undefined
+      return options?.some((option) => option.value === 'fileExists')
+    })
+    expect(conditionSelect?.exists()).toBe(true)
+    await conditionSelect?.vm.$emit('update:value', 'fileExists')
+
+    let updates = wrapper.emitted('update:modelValue')
+    let updatedAction = updates?.at(-1)?.[0] as TaskAction
+    expect(updatedAction.condition).toEqual({ type: 'fileExists', path: '' })
+
+    await wrapper.setProps({ modelValue: updatedAction })
+    const filePathInput = wrapper
+      .findAllComponents({ name: 'NFormItem' })
+      .find((item) => item.text().includes('文件路径'))
+      ?.findComponent({ name: 'NInput' })
+
+    await filePathInput?.vm.$emit('update:value', '{{projectDir}}\\input.txt')
+    updates = wrapper.emitted('update:modelValue')
+    updatedAction = updates?.at(-1)?.[0] as TaskAction
+    expect(updatedAction.condition).toEqual({ type: 'fileExists', path: '{{projectDir}}\\input.txt' })
   })
 })

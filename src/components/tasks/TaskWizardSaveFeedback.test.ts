@@ -48,6 +48,8 @@ const naiveStubs = {
   NDescriptionsItem: passThroughStub('NDescriptionsItem'),
   NTag: passThroughStub('NTag'),
   NAlert: passThroughStub('NAlert'),
+  NCollapse: passThroughStub('NCollapse'),
+  NCollapseItem: passThroughStub('NCollapseItem'),
   NButton: defineComponent({
     name: 'NButton',
     props: ['disabled'],

@@ -52,6 +52,16 @@ export interface TaskActionOutputBinding {
   exitCodeVariable?: string
 }
 
+export type PreviousActionStatusConditionValue = 'success' | 'failed' | 'skipped'
+
+export type ActionCondition =
+  | { type: 'always' }
+  | { type: 'fileExists'; path: string }
+  | { type: 'folderExists'; path: string }
+  | { type: 'variableEquals'; variable: string; value: string }
+  | { type: 'variableNotEmpty'; variable: string }
+  | { type: 'previousActionStatus'; status: PreviousActionStatusConditionValue }
+
 export interface TaskAction {
   id: string
   type: ActionType
@@ -61,6 +71,7 @@ export interface TaskAction {
   timeoutMs?: number | null
   continueOnError?: boolean
   outputBinding?: TaskActionOutputBinding | null
+  condition?: ActionCondition | null
   riskLevel: RiskLevel
 }
 
@@ -237,6 +248,7 @@ export interface ActionExecutionResult {
   actionType: ActionType
   status: ExecutionStatus
   message?: string
+  skipReason?: string
   startedAt?: string
   finishedAt?: string
   durationMs?: number

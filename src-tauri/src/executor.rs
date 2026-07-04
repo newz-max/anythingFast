@@ -1,7 +1,8 @@
 use crate::diagnostics::dev_log_error;
 use crate::domain::{
-    ActionExecutionResult, ActionType, ExecutionLogSummary, ExecutionScope, ExecutionStatus,
-    TaskAction, TaskExecutionSummary, TaskItem,
+    ActionCondition, ActionExecutionResult, ActionType, ExecutionLogSummary, ExecutionScope,
+    ExecutionStatus, PreviousActionStatusConditionValue, TaskAction, TaskExecutionSummary,
+    TaskItem,
 };
 use crate::risk::derive_action_risk;
 use crate::storage;
@@ -46,11 +47,12 @@ pub fn execute_task(
         },
     );
 
-    let mut results = Vec::new();
+    let mut results: Vec<ActionExecutionResult> = Vec::new();
     let mut stop_status: Option<ExecutionStatus> = None;
 
     for (index, action) in task.actions.iter().enumerate() {
         let current_index = index + 1;
+        let previous_status = results.last().map(|result| result.status.clone());
         if !action.enabled {
             let timestamp = Utc::now().to_rfc3339();
             let result = action_result(
@@ -79,6 +81,69 @@ pub fn execute_task(
             );
             results.push(result);
             continue;
+        }
+
+        match evaluate_action_condition(action, &variable_context, previous_status.as_ref()) {
+            Ok(ConditionDecision::Run) => {}
+            Ok(ConditionDecision::Skip(reason)) => {
+                let timestamp = Utc::now().to_rfc3339();
+                let result = action_result(
+                    action,
+                    ExecutionStatus::Skipped,
+                    Some(reason),
+                    Some(timestamp.clone()),
+                    Some(timestamp),
+                    Some(0),
+                    ActionRunOutput::default(),
+                    &variable_context,
+                );
+                emit_event(
+                    app,
+                    EventContext {
+                        run_id: &run_id,
+                        task,
+                        scope: ExecutionScope::Task,
+                        status: "action-skipped",
+                        current_index: Some(current_index),
+                        total_actions,
+                        action: Some(action),
+                        result: Some(&result),
+                        message: result.message.clone(),
+                    },
+                );
+                results.push(result);
+                continue;
+            }
+            Err(message) => {
+                let timestamp = Utc::now().to_rfc3339();
+                let result = action_result(
+                    action,
+                    ExecutionStatus::Failed,
+                    Some(message.clone()),
+                    Some(timestamp.clone()),
+                    Some(timestamp),
+                    Some(0),
+                    failed_output(message),
+                    &variable_context,
+                );
+                emit_event(
+                    app,
+                    EventContext {
+                        run_id: &run_id,
+                        task,
+                        scope: ExecutionScope::Task,
+                        status: "action-failed",
+                        current_index: Some(current_index),
+                        total_actions,
+                        action: Some(action),
+                        result: Some(&result),
+                        message: result.message.clone(),
+                    },
+                );
+                results.push(result);
+                stop_status = Some(ExecutionStatus::Failed);
+                break;
+            }
         }
 
         let resolved_action =
@@ -146,7 +211,11 @@ pub fn execute_task(
                     } else {
                         ExecutionStatus::Success
                     },
-                    Some(binding_error.clone().unwrap_or_else(|| output.message.clone())),
+                    Some(
+                        binding_error
+                            .clone()
+                            .unwrap_or_else(|| output.message.clone()),
+                    ),
                     Some(action_started_at.to_rfc3339()),
                     Some(finished_at.to_rfc3339()),
                     Some(timer.elapsed().as_millis() as u64),
@@ -266,7 +335,6 @@ pub fn execute_task_action(
     risk_confirmed: bool,
 ) -> Result<TaskExecutionSummary, String> {
     let mut variable_context = RuntimeVariableContext::from_task(task, runtime_variables)?;
-    let resolved_action = prepare_action_for_execution(action, &variable_context, risk_confirmed)?;
     let run_id = Uuid::new_v4().to_string();
     let started_at = Utc::now().to_rfc3339();
     emit_event(
@@ -278,11 +346,73 @@ pub fn execute_task_action(
             status: "started",
             current_index: None,
             total_actions: 1,
-            action: Some(&resolved_action),
+            action: Some(action),
             result: None,
             message: Some("动作开始执行".into()),
         },
     );
+
+    let condition_decision = evaluate_action_condition(action, &variable_context, None)?;
+    let resolved_action = match condition_decision {
+        ConditionDecision::Run => {
+            prepare_action_for_execution(action, &variable_context, risk_confirmed)?
+        }
+        ConditionDecision::Skip(reason) => {
+            let timestamp = Utc::now().to_rfc3339();
+            let result = action_result(
+                action,
+                ExecutionStatus::Skipped,
+                Some(reason),
+                Some(timestamp.clone()),
+                Some(timestamp),
+                Some(0),
+                ActionRunOutput::default(),
+                &variable_context,
+            );
+            emit_event(
+                app,
+                EventContext {
+                    run_id: &run_id,
+                    task,
+                    scope: ExecutionScope::Action,
+                    status: "action-skipped",
+                    current_index: Some(1),
+                    total_actions: 1,
+                    action: Some(action),
+                    result: Some(&result),
+                    message: result.message.clone(),
+                },
+            );
+
+            let finished_at = Utc::now().to_rfc3339();
+            let summary = TaskExecutionSummary {
+                task_id: task.id.clone(),
+                task_name: task.name.clone(),
+                scope: ExecutionScope::Action,
+                action_id: Some(action.id.clone()),
+                started_at,
+                finished_at,
+                status: ExecutionStatus::Skipped,
+                actions: vec![result],
+            };
+            append_execution_log(app, &summary);
+            emit_event(
+                app,
+                EventContext {
+                    run_id: &run_id,
+                    task,
+                    scope: ExecutionScope::Action,
+                    status: "finished",
+                    current_index: Some(1),
+                    total_actions: 1,
+                    action: Some(action),
+                    result: None,
+                    message: Some(summary_message(&summary.status, "动作")),
+                },
+            );
+            return Ok(summary);
+        }
+    };
     emit_event(
         app,
         EventContext {
@@ -314,7 +444,11 @@ pub fn execute_task_action(
                 } else {
                     ExecutionStatus::Success
                 },
-                Some(binding_error.clone().unwrap_or_else(|| output.message.clone())),
+                Some(
+                    binding_error
+                        .clone()
+                        .unwrap_or_else(|| output.message.clone()),
+                ),
                 Some(action_started_at.to_rfc3339()),
                 Some(finished_at.to_rfc3339()),
                 Some(timer.elapsed().as_millis() as u64),
@@ -385,20 +519,7 @@ pub fn execute_task_action(
         actions: vec![result],
     };
 
-    let log = ExecutionLogSummary {
-        id: Uuid::new_v4().to_string(),
-        task_id: summary.task_id.clone(),
-        task_name: summary.task_name.clone(),
-        scope: summary.scope.clone(),
-        action_id: summary.action_id.clone(),
-        started_at: summary.started_at.clone(),
-        finished_at: summary.finished_at.clone(),
-        status,
-        actions: summary.actions.clone(),
-    };
-    if let Err(err) = storage::append_log(app, log) {
-        dev_log_error("Append action execution log failed", &err);
-    }
+    append_execution_log(app, &summary);
     emit_event(
         app,
         EventContext {
@@ -428,6 +549,23 @@ fn execute_action(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutpu
     }
 }
 
+fn append_execution_log(app: &AppHandle, summary: &TaskExecutionSummary) {
+    let log = ExecutionLogSummary {
+        id: Uuid::new_v4().to_string(),
+        task_id: summary.task_id.clone(),
+        task_name: summary.task_name.clone(),
+        scope: summary.scope.clone(),
+        action_id: summary.action_id.clone(),
+        started_at: summary.started_at.clone(),
+        finished_at: summary.finished_at.clone(),
+        status: summary.status.clone(),
+        actions: summary.actions.clone(),
+    };
+    if let Err(err) = storage::append_log(app, log) {
+        dev_log_error("Append execution log failed", &err);
+    }
+}
+
 fn prepare_action_for_execution(
     action: &TaskAction,
     variable_context: &RuntimeVariableContext,
@@ -447,6 +585,115 @@ fn prepare_action_for_execution(
         return Err("解析变量后的动作需要二次确认".into());
     }
     Ok(resolved_action)
+}
+
+#[derive(Debug)]
+enum ConditionDecision {
+    Run,
+    Skip(String),
+}
+
+fn evaluate_action_condition(
+    action: &TaskAction,
+    variable_context: &RuntimeVariableContext,
+    previous_status: Option<&ExecutionStatus>,
+) -> Result<ConditionDecision, String> {
+    let Some(condition) = &action.condition else {
+        return Ok(ConditionDecision::Run);
+    };
+
+    match condition {
+        ActionCondition::Always => Ok(ConditionDecision::Run),
+        ActionCondition::FileExists { path } => {
+            let resolved_path = variable_context.resolve_text(path)?;
+            if Path::new(&resolved_path).is_file() {
+                Ok(ConditionDecision::Run)
+            } else {
+                Ok(ConditionDecision::Skip(format!(
+                    "条件不满足：文件不存在：{resolved_path}"
+                )))
+            }
+        }
+        ActionCondition::FolderExists { path } => {
+            let resolved_path = variable_context.resolve_text(path)?;
+            if Path::new(&resolved_path).is_dir() {
+                Ok(ConditionDecision::Run)
+            } else {
+                Ok(ConditionDecision::Skip(format!(
+                    "条件不满足：文件夹不存在：{resolved_path}"
+                )))
+            }
+        }
+        ActionCondition::VariableEquals { variable, value } => {
+            let variable = variable.trim();
+            let actual = variable_context
+                .value(variable)
+                .ok_or_else(|| format!("变量未定义或尚未绑定：{variable}"))?;
+            let expected = variable_context.resolve_text(value)?;
+            if actual == expected {
+                Ok(ConditionDecision::Run)
+            } else {
+                Ok(ConditionDecision::Skip(format!(
+                    "条件不满足：变量 {variable} 不等于期望值"
+                )))
+            }
+        }
+        ActionCondition::VariableNotEmpty { variable } => {
+            let variable = variable.trim();
+            let actual = variable_context
+                .value(variable)
+                .ok_or_else(|| format!("变量未定义或尚未绑定：{variable}"))?;
+            if actual.trim().is_empty() {
+                Ok(ConditionDecision::Skip(format!(
+                    "条件不满足：变量 {variable} 为空"
+                )))
+            } else {
+                Ok(ConditionDecision::Run)
+            }
+        }
+        ActionCondition::PreviousActionStatus { status } => {
+            let Some(previous_status) = previous_status else {
+                return Ok(ConditionDecision::Skip(
+                    "条件不满足：没有上一动作执行结果".into(),
+                ));
+            };
+            if previous_status_matches(previous_status, status) {
+                Ok(ConditionDecision::Run)
+            } else {
+                Ok(ConditionDecision::Skip(format!(
+                    "条件不满足：上一动作状态不是{}",
+                    previous_status_condition_label(status)
+                )))
+            }
+        }
+    }
+}
+
+fn previous_status_matches(
+    actual: &ExecutionStatus,
+    expected: &PreviousActionStatusConditionValue,
+) -> bool {
+    matches!(
+        (actual, expected),
+        (
+            ExecutionStatus::Success,
+            PreviousActionStatusConditionValue::Success
+        ) | (
+            ExecutionStatus::Failed,
+            PreviousActionStatusConditionValue::Failed
+        ) | (
+            ExecutionStatus::Skipped,
+            PreviousActionStatusConditionValue::Skipped
+        )
+    )
+}
+
+fn previous_status_condition_label(status: &PreviousActionStatusConditionValue) -> &'static str {
+    match status {
+        PreviousActionStatusConditionValue::Success => "成功",
+        PreviousActionStatusConditionValue::Failed => "失败",
+        PreviousActionStatusConditionValue::Skipped => "已跳过",
+    }
 }
 
 fn open_program(action: &TaskAction) -> Result<String, String> {
@@ -1045,12 +1292,19 @@ fn action_result(
     output: ActionRunOutput,
     variable_context: &RuntimeVariableContext,
 ) -> ActionExecutionResult {
+    let masked_message = variable_context.mask_optional_text(message);
+    let is_skipped = status == ExecutionStatus::Skipped;
     ActionExecutionResult {
         action_id: action.id.clone(),
         action_name: action_name(action),
         action_type: action.action_type.clone(),
         status,
-        message: variable_context.mask_optional_text(message),
+        skip_reason: if is_skipped {
+            masked_message.clone()
+        } else {
+            None
+        },
+        message: masked_message,
         started_at,
         finished_at,
         duration_ms,
@@ -1136,6 +1390,7 @@ fn action_event_status(status: &ExecutionStatus) -> &'static str {
 fn summary_message(status: &ExecutionStatus, label: &str) -> String {
     match status {
         ExecutionStatus::Success => format!("{label}执行完成"),
+        ExecutionStatus::Skipped => format!("{label}已跳过"),
         ExecutionStatus::Cancelled => format!("{label}执行已取消"),
         _ => format!("{label}执行失败"),
     }
@@ -1232,6 +1487,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Low,
         };
 
@@ -1272,6 +1528,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1280,6 +1537,197 @@ mod tests {
 
         assert!(blocked.contains("二次确认"));
         assert_eq!(derive_action_risk(&allowed), crate::domain::RiskLevel::High);
+    }
+
+    #[test]
+    fn file_and_folder_conditions_evaluate_local_paths() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("anything-fast-condition-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let file_path = temp_dir.join("input.txt");
+        std::fs::write(&file_path, "ok").expect("write file");
+        let context =
+            RuntimeVariableContext::from_task(&test_task(Vec::new()), &HashMap::new()).unwrap();
+
+        let file_action = conditioned_action(ActionCondition::FileExists {
+            path: file_path.to_string_lossy().to_string(),
+        });
+        let folder_action = conditioned_action(ActionCondition::FolderExists {
+            path: temp_dir.to_string_lossy().to_string(),
+        });
+        let missing_file_action = conditioned_action(ActionCondition::FileExists {
+            path: temp_dir.join("missing.txt").to_string_lossy().to_string(),
+        });
+
+        assert!(matches!(
+            evaluate_action_condition(&file_action, &context, None).unwrap(),
+            ConditionDecision::Run
+        ));
+        assert!(matches!(
+            evaluate_action_condition(&folder_action, &context, None).unwrap(),
+            ConditionDecision::Run
+        ));
+        assert!(matches!(
+            evaluate_action_condition(&missing_file_action, &context, None).unwrap(),
+            ConditionDecision::Skip(reason) if reason.contains("文件不存在")
+        ));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn variable_conditions_use_runtime_and_bound_values() {
+        let task = test_task(vec![crate::domain::TaskVariable {
+            key: "status".into(),
+            label: "Status".into(),
+            default_value: "ready".into(),
+            required: false,
+            secret: false,
+        }]);
+        let mut context = RuntimeVariableContext::from_task(&task, &HashMap::new()).unwrap();
+        let mut command = conditioned_action(ActionCondition::Always);
+        command.action_type = ActionType::RunCommand;
+        command.params = json!({
+            "command": "echo ok",
+            "workingDir": std::env::current_dir().unwrap().to_string_lossy(),
+            "shell": "powershell"
+        });
+        command.output_binding = Some(crate::domain::TaskActionOutputBinding {
+            stdout_variable: Some("generatedPath".into()),
+            stderr_variable: None,
+            exit_code_variable: Some("lastExitCode".into()),
+        });
+        context
+            .bind_output(
+                &command,
+                &ActionOutputSnapshot {
+                    exit_code: Some(0),
+                    stdout: Some("D:\\Generated".into()),
+                    stderr: None,
+                },
+            )
+            .unwrap();
+
+        let equals = conditioned_action(ActionCondition::VariableEquals {
+            variable: "status".into(),
+            value: "ready".into(),
+        });
+        let not_empty = conditioned_action(ActionCondition::VariableNotEmpty {
+            variable: "generatedPath".into(),
+        });
+        let mismatch = conditioned_action(ActionCondition::VariableEquals {
+            variable: "status".into(),
+            value: "done".into(),
+        });
+
+        assert!(matches!(
+            evaluate_action_condition(&equals, &context, None).unwrap(),
+            ConditionDecision::Run
+        ));
+        assert!(matches!(
+            evaluate_action_condition(&not_empty, &context, None).unwrap(),
+            ConditionDecision::Run
+        ));
+        assert!(matches!(
+            evaluate_action_condition(&mismatch, &context, None).unwrap(),
+            ConditionDecision::Skip(reason) if reason.contains("不等于")
+        ));
+    }
+
+    #[test]
+    fn previous_action_status_condition_uses_backend_result() {
+        let context =
+            RuntimeVariableContext::from_task(&test_task(Vec::new()), &HashMap::new()).unwrap();
+        let action = conditioned_action(ActionCondition::PreviousActionStatus {
+            status: PreviousActionStatusConditionValue::Skipped,
+        });
+
+        assert!(matches!(
+            evaluate_action_condition(&action, &context, Some(&ExecutionStatus::Skipped)).unwrap(),
+            ConditionDecision::Run
+        ));
+        assert!(matches!(
+            evaluate_action_condition(&action, &context, Some(&ExecutionStatus::Success)).unwrap(),
+            ConditionDecision::Skip(reason) if reason.contains("上一动作状态")
+        ));
+        assert!(matches!(
+            evaluate_action_condition(&action, &context, None).unwrap(),
+            ConditionDecision::Skip(reason) if reason.contains("没有上一动作")
+        ));
+    }
+
+    #[test]
+    fn condition_errors_are_diagnostic_not_skipped() {
+        let context =
+            RuntimeVariableContext::from_task(&test_task(Vec::new()), &HashMap::new()).unwrap();
+        let action = conditioned_action(ActionCondition::VariableNotEmpty {
+            variable: "missing".into(),
+        });
+
+        let err = evaluate_action_condition(&action, &context, None).unwrap_err();
+
+        assert!(err.contains("missing"));
+    }
+
+    #[test]
+    fn skipped_result_records_masked_skip_reason() {
+        let task = test_task(vec![crate::domain::TaskVariable {
+            key: "secretPath".into(),
+            label: "Secret".into(),
+            default_value: "D:\\Secret\\missing.txt".into(),
+            required: false,
+            secret: true,
+        }]);
+        let context = RuntimeVariableContext::from_task(&task, &HashMap::new()).unwrap();
+        let action = conditioned_action(ActionCondition::FileExists {
+            path: "{{secretPath}}".into(),
+        });
+        let decision = evaluate_action_condition(&action, &context, None).unwrap();
+        let ConditionDecision::Skip(reason) = decision else {
+            panic!("expected skipped condition");
+        };
+
+        let result = action_result(
+            &action,
+            ExecutionStatus::Skipped,
+            Some(reason),
+            Some("2026-07-03T00:00:00Z".into()),
+            Some("2026-07-03T00:00:00Z".into()),
+            Some(0),
+            ActionRunOutput::default(),
+            &context,
+        );
+
+        assert_eq!(result.status, ExecutionStatus::Skipped);
+        assert_eq!(result.message, result.skip_reason);
+        assert!(result.skip_reason.unwrap().contains("••••"));
+    }
+
+    #[test]
+    fn conditional_high_risk_command_still_requires_confirmation() {
+        let task = test_task(Vec::new());
+        let context = RuntimeVariableContext::from_task(&task, &HashMap::new()).unwrap();
+        let mut action = conditioned_action(ActionCondition::FileExists {
+            path: std::env::current_dir()
+                .unwrap()
+                .join("Cargo.toml")
+                .to_string_lossy()
+                .to_string(),
+        });
+        action.action_type = ActionType::RunCommand;
+        action.params = json!({
+            "command": "Remove-Item -Recurse dist",
+            "workingDir": std::env::current_dir().unwrap().to_string_lossy(),
+            "shell": "powershell"
+        });
+        action.risk_level = crate::domain::RiskLevel::High;
+
+        assert!(matches!(
+            evaluate_action_condition(&action, &context, None).unwrap(),
+            ConditionDecision::Run
+        ));
+        let blocked = prepare_action_for_execution(&action, &context, false).unwrap_err();
+
+        assert!(blocked.contains("二次确认"));
     }
 
     #[test]
@@ -1308,6 +1756,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: Some(true),
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1336,6 +1785,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Low,
         };
 
@@ -1359,6 +1809,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1381,6 +1832,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1402,6 +1854,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1425,6 +1878,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1448,6 +1902,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1469,6 +1924,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1498,6 +1954,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1531,6 +1988,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1563,6 +2021,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1599,6 +2058,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1635,6 +2095,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1671,6 +2132,7 @@ mod tests {
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::High,
         };
 
@@ -1721,6 +2183,7 @@ Write-Output "config=$ConfigPath"
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::High,
         };
 
@@ -1760,6 +2223,7 @@ Write-Output "config=$ConfigPath"
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::High,
         };
 
@@ -1798,6 +2262,7 @@ Write-Output "config=$ConfigPath"
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::High,
         };
 
@@ -1834,6 +2299,7 @@ Write-Output "config=$ConfigPath"
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::High,
         };
 
@@ -1863,6 +2329,21 @@ Write-Output "config=$ConfigPath"
         }
     }
 
+    fn conditioned_action(condition: ActionCondition) -> TaskAction {
+        TaskAction {
+            id: "a".into(),
+            action_type: ActionType::Delay,
+            name: Some("conditioned".into()),
+            params: json!({ "durationMs": 1 }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: Some(condition),
+            risk_level: crate::domain::RiskLevel::Low,
+        }
+    }
+
     #[test]
     fn command_failure_message_keeps_exit_code_and_stderr() {
         let working_dir = std::env::current_dir()
@@ -1882,6 +2363,7 @@ Write-Output "config=$ConfigPath"
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
@@ -1912,6 +2394,7 @@ Write-Output "config=$ConfigPath"
             timeout_ms: None,
             continue_on_error: None,
             output_binding: None,
+            condition: None,
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
