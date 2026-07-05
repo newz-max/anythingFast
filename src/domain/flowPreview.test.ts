@@ -77,6 +77,7 @@ describe('flowPreview', () => {
   it('maps running and completed execution status by action id', () => {
     const currentRun: ExecutionRunSnapshot = {
       runId: 'run-1',
+      targetKey: 'task:task-1',
       taskId: 'task-1',
       taskName: '测试事项',
       scope: 'task',
@@ -103,6 +104,49 @@ describe('flowPreview', () => {
 
     expect(states['action-1']).toMatchObject({ status: 'success', label: '成功' })
     expect(states['action-2']).toMatchObject({ status: 'running', label: '执行中', message: '执行脚本' })
+  })
+
+  it('maps multiple active runs for the same task by action id', () => {
+    const states = deriveFlowExecutionStates({
+      taskId: 'task-1',
+      currentRuns: [
+        {
+          runId: 'run-1',
+          targetKey: 'action:task-1:action-1',
+          taskId: 'task-1',
+          taskName: '测试事项',
+          scope: 'action',
+          status: 'running',
+          currentActionId: 'action-1',
+          currentActionName: '动作 1',
+          currentActionType: 'delay',
+          currentIndex: 1,
+          totalActions: 1,
+          completedActions: 0,
+          progressPercent: 0,
+          message: '动作 1'
+        },
+        {
+          runId: 'run-2',
+          targetKey: 'action:task-1:action-2',
+          taskId: 'task-1',
+          taskName: '测试事项',
+          scope: 'action',
+          status: 'running',
+          currentActionId: 'action-2',
+          currentActionName: '动作 2',
+          currentActionType: 'delay',
+          currentIndex: 1,
+          totalActions: 1,
+          completedActions: 0,
+          progressPercent: 0,
+          message: '动作 2'
+        }
+      ]
+    })
+
+    expect(states['action-1']).toMatchObject({ status: 'running', label: '执行中', message: '动作 1' })
+    expect(states['action-2']).toMatchObject({ status: 'running', label: '执行中', message: '动作 2' })
   })
 
   it('maps skipped reasons from events and ignores stale task data', () => {

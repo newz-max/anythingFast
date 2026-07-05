@@ -103,7 +103,7 @@ export function runMessage(run: ExecutionRunSnapshot) {
 
 export function deriveActionExecutionStates(
   events: ExecutionEventPayload[],
-  currentRun?: ExecutionRunSnapshot | null
+  currentRun?: ExecutionRunSnapshot | ExecutionRunSnapshot[] | null
 ): Record<string, ActionExecutionDisplay> {
   const states: Record<string, ActionExecutionDisplay> = {}
 
@@ -114,8 +114,11 @@ export function deriveActionExecutionStates(
     states[event.actionId] = actionStatusDisplay(status)
   }
 
-  if (currentRun?.currentActionId && isRunActive(currentRun)) {
-    states[currentRun.currentActionId] = actionStatusDisplay('running')
+  const currentRuns = Array.isArray(currentRun) ? currentRun : currentRun ? [currentRun] : []
+  for (const run of currentRuns) {
+    if (run.currentActionId && isRunActive(run)) {
+      states[run.currentActionId] = actionStatusDisplay('running')
+    }
   }
 
   return states

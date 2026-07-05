@@ -61,7 +61,7 @@ pub fn execute_unattended_task(app: &AppHandle, task_id: &str) -> Result<TaskExe
     }
 
     let summary = executor::execute_task(app, &task, &runtime_variables, false)?;
-    update_task_run_metadata(app, &summary.task_id, Some(summary.finished_at.clone()))
+    storage::update_task_run_metadata(app, &summary.task_id, summary.finished_at.clone())
         .map_err(|err| format!("保存执行结果失败：{err}"))?;
     Ok(summary)
 }
@@ -151,21 +151,6 @@ pub(crate) fn analyze_task_risk_for_unattended(
         analysis.high_risk_actions = high_risk_actions;
     }
     analysis
-}
-
-fn update_task_run_metadata(
-    app: &AppHandle,
-    task_id: &str,
-    last_run_at: Option<String>,
-) -> Result<(), String> {
-    let mut config = storage::load_config(app).map_err(|err| err.to_string())?;
-    let Some(task) = config.tasks.iter_mut().find(|task| task.id == task_id) else {
-        return Err(format!("事项不存在：{task_id}"));
-    };
-    let timestamp = last_run_at.unwrap_or_else(|| Utc::now().to_rfc3339());
-    task.last_run_at = Some(timestamp.clone());
-    task.updated_at = timestamp;
-    storage::save_config(app, &config).map_err(|err| err.to_string())
 }
 
 fn record_blocked_task(app: &AppHandle, task: &TaskItem, message: &str) {

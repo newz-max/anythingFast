@@ -15,7 +15,7 @@ import { createTaskDraft, cloneTask } from '@/domain/taskFactory'
 import { createTaskFromTemplate, deriveTemplateRisk } from '@/domain/taskTemplates'
 import { getTasksForView, type TaskView } from '@/domain/taskViews'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
-import { deriveActionExecutionStates, isRunActive, statusLabel } from '@/domain/executionPresentation'
+import { deriveActionExecutionStates, statusLabel } from '@/domain/executionPresentation'
 import { deriveFlowExecutionStates, deriveFlowPreviewModel } from '@/domain/flowPreview'
 import { useTaskStore } from '@/stores/taskStore'
 import { useExecutionStore } from '@/stores/executionStore'
@@ -131,26 +131,31 @@ const themeOptions = [
 ]
 const tagItems = computed(() => taskStore.tags.map((tag, index) => ({ ...tag, tone: tagTone(index) })))
 const showExecutionPanel = computed(() => showLogs.value || autoShowExecution.value)
-const actionExecutionStates = computed(() => deriveActionExecutionStates(executionStore.events, executionStore.currentRun))
+const selectedTaskActiveRun = computed(() => selectedTask.value ? executionStore.latestActiveRunForTask(selectedTask.value.id) : null)
+const selectedTaskActiveRuns = computed(() => selectedTask.value ? executionStore.activeRuns.filter((run) => run.taskId === selectedTask.value?.id) : [])
+const selectedTaskLatestRun = computed(() => selectedTask.value ? executionStore.latestRunForTask(selectedTask.value.id) : null)
+const selectedTaskStatusRun = computed(() => selectedTaskActiveRun.value || selectedTaskLatestRun.value)
+const selectedTaskEvents = computed(() => selectedTask.value ? executionStore.eventsForTask(selectedTask.value.id) : [])
+const selectedTaskLatestSummary = computed(() => selectedTask.value ? executionStore.latestSummaryForTask(selectedTask.value.id) : null)
+const actionExecutionStates = computed(() => deriveActionExecutionStates(selectedTaskEvents.value, selectedTaskActiveRuns.value))
 const flowExecutionStates = computed(() => {
   if (!selectedTask.value) return {}
   return deriveFlowExecutionStates({
     taskId: selectedTask.value.id,
-    events: executionStore.events,
-    currentRun: executionStore.currentRun,
-    latestSummary: executionStore.lastSummary
+    events: selectedTaskEvents.value,
+    currentRuns: selectedTaskActiveRuns.value,
+    latestSummary: selectedTaskLatestSummary.value
   })
 })
 const selectedFlowPreview = computed(() => {
   if (!selectedTask.value) return { nodes: [], edges: [] }
   return deriveFlowPreviewModel(selectedTask.value, flowExecutionStates.value)
 })
-const runningSelectedTask = computed(() => Boolean(selectedTask.value && executionStore.runningTaskId === selectedTask.value.id))
+const runningSelectedTask = computed(() => Boolean(selectedTask.value && executionStore.activeRunForTarget(executionStore.taskRunTargetKey(selectedTask.value.id))))
 const runButtonLabel = computed(() => {
-  const run = executionStore.currentRun
-  if (!running.value) return '运行'
-  if (runningSelectedTask.value) return run?.status ? statusLabel(run.status) : '执行中'
-  return '等待中'
+  const run = selectedTask.value ? executionStore.activeRunForTarget(executionStore.taskRunTargetKey(selectedTask.value.id)) : null
+  if (run) return run.status ? statusLabel(run.status) : '执行中'
+  return '运行'
 })
 const logsButtonLabel = computed(() => {
   if (showExecutionPanel.value) return '隐藏执行日志'
@@ -625,7 +630,8 @@ function actionExecutionState(action: TaskAction) {
 }
 
 function isActionRunning(action: TaskAction) {
-  return actionExecutionStates.value[action.id]?.status === 'running' && isRunActive(executionStore.currentRun)
+  if (!selectedTask.value) return false
+  return Boolean(executionStore.activeRunForTarget(executionStore.actionRunTargetKey(selectedTask.value.id, action.id)))
 }
 
 function toggleExecutionPanel() {
@@ -971,7 +977,7 @@ async function resetLayoutScroll() {
           </div>
 
           <div class="detail-actions">
-            <button class="run-button" type="button" :disabled="running" @click="runSelectedTask">
+            <button class="run-button" type="button" :disabled="runningSelectedTask" @click="runSelectedTask">
               <NSpin v-if="runningSelectedTask" size="small" />
               <span v-else aria-hidden="true">▶</span>
               {{ runButtonLabel }}
@@ -995,9 +1001,9 @@ async function resetLayoutScroll() {
         </header>
 
         <ExecutionStatusStrip
-          v-if="executionStore.currentRun"
+          v-if="selectedTaskStatusRun"
           class="detail-status-strip"
-          :current-run="executionStore.currentRun"
+          :current-run="selectedTaskStatusRun"
         />
 
         <section class="actions-section">
@@ -1061,7 +1067,7 @@ async function resetLayoutScroll() {
               <button
                 class="action-play"
                 type="button"
-                :disabled="running || !selectedTask.enabled || !action.enabled"
+                :disabled="isActionRunning(action) || !selectedTask.enabled || !action.enabled"
                 aria-label="单动作运行"
                 @click="runSelectedAction(action)"
               >
@@ -1127,6 +1133,7 @@ async function resetLayoutScroll() {
           v-if="showExecutionPanel"
           class="logs"
           :current-run="executionStore.currentRun"
+          :active-runs="executionStore.activeRuns"
           :logs="executionStore.logs"
           :events="executionStore.events"
         />

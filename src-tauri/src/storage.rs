@@ -2,8 +2,12 @@ use crate::diagnostics::dev_log_error;
 use crate::domain::{AppConfig, ExecutionLogSummary};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use thiserror::Error;
+
+static CONFIG_WRITE_LOCK: Mutex<()> = Mutex::new(());
+static LOG_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -13,6 +17,8 @@ pub enum StorageError {
     Io(#[from] std::io::Error),
     #[error("JSON 错误：{0}")]
     Json(#[from] serde_json::Error),
+    #[error("存储锁不可用：{0}")]
+    Lock(&'static str),
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;
@@ -36,8 +42,41 @@ pub fn load_config(app: &AppHandle) -> StorageResult<AppConfig> {
 }
 
 pub fn save_config(app: &AppHandle, config: &AppConfig) -> StorageResult<()> {
+    let _guard = CONFIG_WRITE_LOCK
+        .lock()
+        .map_err(|_| StorageError::Lock("config"))?;
     let path = config_path(app)?;
-    ensure_parent(&path)?;
+    write_config_file(&path, config)
+}
+
+pub fn update_task_run_metadata(
+    app: &AppHandle,
+    task_id: &str,
+    finished_at: String,
+) -> StorageResult<()> {
+    let path = config_path(app)?;
+    update_task_run_metadata_file(&path, task_id, finished_at)
+}
+
+fn update_task_run_metadata_file(
+    path: &PathBuf,
+    task_id: &str,
+    finished_at: String,
+) -> StorageResult<()> {
+    let _guard = CONFIG_WRITE_LOCK
+        .lock()
+        .map_err(|_| StorageError::Lock("config"))?;
+    let mut config = read_config_file(&path)?;
+    config.settings.config_path = Some(path.to_string_lossy().to_string());
+    if let Some(task) = config.tasks.iter_mut().find(|task| task.id == task_id) {
+        task.last_run_at = Some(finished_at.clone());
+        task.updated_at = finished_at;
+    }
+    write_config_file(&path, &config)
+}
+
+fn write_config_file(path: &PathBuf, config: &AppConfig) -> StorageResult<()> {
+    ensure_parent(path)?;
     let temp_path = path.with_extension("json.tmp");
     let content = serde_json::to_string_pretty(config)?;
     fs::write(&temp_path, content)?;
@@ -45,8 +84,23 @@ pub fn save_config(app: &AppHandle, config: &AppConfig) -> StorageResult<()> {
     Ok(())
 }
 
+fn read_config_file(path: &PathBuf) -> StorageResult<AppConfig> {
+    if !path.exists() {
+        return Ok(AppConfig::default());
+    }
+    let content = fs::read_to_string(path)?;
+    if content.trim().is_empty() {
+        return Ok(AppConfig::default());
+    }
+    Ok(serde_json::from_str(&content)?)
+}
+
 pub fn load_logs(app: &AppHandle, limit: usize) -> StorageResult<Vec<ExecutionLogSummary>> {
     let path = logs_path(app)?;
+    read_logs_file(&path, limit)
+}
+
+fn read_logs_file(path: &PathBuf, limit: usize) -> StorageResult<Vec<ExecutionLogSummary>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -62,8 +116,15 @@ pub fn load_logs(app: &AppHandle, limit: usize) -> StorageResult<Vec<ExecutionLo
 
 pub fn append_log(app: &AppHandle, log: ExecutionLogSummary) -> StorageResult<()> {
     let path = logs_path(app)?;
+    append_log_file(&path, log)
+}
+
+fn append_log_file(path: &PathBuf, log: ExecutionLogSummary) -> StorageResult<()> {
+    let _guard = LOG_WRITE_LOCK
+        .lock()
+        .map_err(|_| StorageError::Lock("logs"))?;
     ensure_parent(&path)?;
-    let mut logs = match load_logs(app, 200) {
+    let mut logs = match read_logs_file(path, 200) {
         Ok(logs) => logs,
         Err(err) => {
             dev_log_error("Read existing execution logs failed", &err);
@@ -102,7 +163,10 @@ fn ensure_parent(path: &PathBuf) -> StorageResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{ActionType, ExecutionScope, ExecutionStatus, RiskLevel, TaskItem, TaskTrigger};
     use std::fs;
+    use std::thread;
+    use uuid::Uuid;
 
     #[test]
     fn app_config_roundtrip_json_shape() {
@@ -155,5 +219,114 @@ mod tests {
             PathBuf::from("config.json.tmp")
         );
         let _ = fs::remove_file("config.json.tmp");
+    }
+
+    #[test]
+    fn concurrent_run_metadata_updates_preserve_other_tasks() {
+        let dir = temp_storage_dir();
+        let path = dir.join("config.json");
+        let mut config = AppConfig::default();
+        config.tasks = vec![task("task-1"), task("task-2")];
+        write_config_file(&path, &config).expect("write config");
+
+        let first_path = path.clone();
+        let second_path = path.clone();
+        let first = thread::spawn(move || {
+            update_task_run_metadata_file(&first_path, "task-1", "2026-07-01T00:00:01Z".into())
+                .expect("update first task")
+        });
+        let second = thread::spawn(move || {
+            update_task_run_metadata_file(&second_path, "task-2", "2026-07-01T00:00:02Z".into())
+                .expect("update second task")
+        });
+
+        first.join().expect("join first");
+        second.join().expect("join second");
+
+        let restored = read_config_file(&path).expect("read config");
+        assert_eq!(
+            restored.tasks.iter().find(|task| task.id == "task-1").and_then(|task| task.last_run_at.clone()),
+            Some("2026-07-01T00:00:01Z".into())
+        );
+        assert_eq!(
+            restored.tasks.iter().find(|task| task.id == "task-2").and_then(|task| task.last_run_at.clone()),
+            Some("2026-07-01T00:00:02Z".into())
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn concurrent_log_appends_preserve_both_entries() {
+        let dir = temp_storage_dir();
+        let path = dir.join("execution-logs.json");
+
+        let first_path = path.clone();
+        let second_path = path.clone();
+        let first = thread::spawn(move || append_log_file(&first_path, log("log-1", "task-1")).expect("append first log"));
+        let second = thread::spawn(move || append_log_file(&second_path, log("log-2", "task-2")).expect("append second log"));
+
+        first.join().expect("join first");
+        second.join().expect("join second");
+
+        let logs = read_logs_file(&path, 20).expect("read logs");
+        assert_eq!(logs.len(), 2);
+        assert!(logs.iter().any(|log| log.id == "log-1"));
+        assert!(logs.iter().any(|log| log.id == "log-2"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn temp_storage_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("anything-fast-storage-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("create temp storage dir");
+        dir
+    }
+
+    fn task(id: &str) -> TaskItem {
+        TaskItem {
+            id: id.into(),
+            name: id.into(),
+            category: None,
+            keywords: None,
+            description: None,
+            variables: Vec::new(),
+            actions: Vec::new(),
+            risk_level: RiskLevel::Low,
+            enabled: true,
+            favorite: false,
+            tag_ids: Vec::new(),
+            triggers: vec![TaskTrigger::Manual { enabled: true }],
+            last_run_at: None,
+            created_at: "2026-07-01T00:00:00Z".into(),
+            updated_at: "2026-07-01T00:00:00Z".into(),
+        }
+    }
+
+    fn log(id: &str, task_id: &str) -> ExecutionLogSummary {
+        ExecutionLogSummary {
+            id: id.into(),
+            task_id: task_id.into(),
+            task_name: task_id.into(),
+            scope: ExecutionScope::Task,
+            action_id: None,
+            started_at: format!("2026-07-01T00:00:0{}Z", if id == "log-1" { 1 } else { 2 }),
+            finished_at: "2026-07-01T00:00:03Z".into(),
+            status: ExecutionStatus::Success,
+            actions: vec![crate::domain::ActionExecutionResult {
+                action_id: "action-1".into(),
+                action_name: "动作".into(),
+                action_type: ActionType::Delay,
+                status: ExecutionStatus::Success,
+                message: None,
+                skip_reason: None,
+                started_at: None,
+                finished_at: None,
+                duration_ms: None,
+                exit_code: None,
+                stdout: None,
+                stderr: None,
+            }],
+        }
     }
 }

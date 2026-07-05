@@ -15,6 +15,7 @@ const stubs = {
 function run(patch: Partial<ExecutionRunSnapshot> = {}): ExecutionRunSnapshot {
   return {
     runId: 'run-1',
+    targetKey: 'task:task-1',
     taskId: 'task-1',
     taskName: '测试事项',
     scope: 'task',

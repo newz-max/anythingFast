@@ -45,6 +45,7 @@ export interface FlowExecutionStateInput {
   taskId: string
   events?: ExecutionEventPayload[]
   currentRun?: ExecutionRunSnapshot | null
+  currentRuns?: ExecutionRunSnapshot[]
   latestSummary?: TaskExecutionSummary | null
 }
 
@@ -93,9 +94,12 @@ export function deriveFlowExecutionStates(input: FlowExecutionStateInput): Recor
     states[event.actionId] = status
   })
 
-  if (input.currentRun?.taskId === input.taskId && input.currentRun.currentActionId && isRunActive(input.currentRun)) {
-    states[input.currentRun.currentActionId] = flowStatus('running', input.currentRun.message)
-  }
+  const currentRuns = input.currentRuns ?? (input.currentRun ? [input.currentRun] : [])
+  currentRuns.forEach((run) => {
+    if (run.taskId === input.taskId && run.currentActionId && isRunActive(run)) {
+      states[run.currentActionId] = flowStatus('running', run.message)
+    }
+  })
 
   return states
 }

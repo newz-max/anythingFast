@@ -13,20 +13,17 @@ import type { ActionExecutionResult, ExecutionLogSummary } from '@/types/domain'
 
 const props = defineProps<{
   currentRun: ExecutionRunSnapshot | null
+  activeRuns?: ExecutionRunSnapshot[]
   events: ExecutionEventPayload[]
   logs: ExecutionLogSummary[]
 }>()
 
+const displayRuns = computed(() => {
+  if (props.activeRuns?.length) return props.activeRuns
+  return props.currentRun ? [props.currentRun] : []
+})
 const visibleEvents = computed(() => props.events.slice(-12))
 const latestSummary = computed(() => props.logs[0] ?? null)
-const runStatusType = computed(() => {
-  return getRunStatusType(props.currentRun?.status)
-})
-const runTitle = computed(() => {
-  const run = props.currentRun
-  if (!run) return '暂无执行'
-  return getRunTitle(run)
-})
 
 function attentionActionMessages(log: ExecutionLogSummary): ActionExecutionResult[] {
   return log.actions.filter((action) => (action.status === 'failed' || action.status === 'cancelled' || action.status === 'skipped') && Boolean(action.message || action.skipReason))
@@ -57,6 +54,14 @@ function eventKey(event: ExecutionEventPayload, index: number) {
   return `${event.runId}-${event.status}-${event.actionId || 'task'}-${event.currentIndex || index}`
 }
 
+function runStatusType(run: ExecutionRunSnapshot) {
+  return getRunStatusType(run.status)
+}
+
+function runTitle(run: ExecutionRunSnapshot) {
+  return getRunTitle(run)
+}
+
 function formatDuration(durationMs?: number) {
   if (typeof durationMs !== 'number') return ''
   if (durationMs < 1000) return `${durationMs} ms`
@@ -66,17 +71,19 @@ function formatDuration(durationMs?: number) {
 
 <template>
   <NCard size="small" class="execution" title="执行反馈">
-    <section v-if="currentRun" class="run-card">
-      <div class="run-heading">
-        <span class="run-title">{{ runTitle }}</span>
-        <NTag size="small" :type="runStatusType">{{ statusLabel(currentRun.status) }}</NTag>
-      </div>
-      <NProgress type="line" :percentage="currentRun.progressPercent" :status="runStatusType" :height="8" />
-      <div class="run-meta">
-        <span>{{ currentRun.completedActions }}/{{ currentRun.totalActions }} 个动作</span>
-        <span v-if="currentRun.currentActionName">当前：{{ currentRun.currentActionName }}</span>
-        <span>{{ currentRun.message }}</span>
-      </div>
+    <section v-if="displayRuns.length > 0" class="run-list" aria-label="当前执行">
+      <article v-for="run in displayRuns" :key="run.runId || run.targetKey" class="run-card">
+        <div class="run-heading">
+          <span class="run-title">{{ runTitle(run) }}</span>
+          <NTag size="small" :type="runStatusType(run)">{{ statusLabel(run.status) }}</NTag>
+        </div>
+        <NProgress type="line" :percentage="run.progressPercent" :status="runStatusType(run)" :height="8" />
+        <div class="run-meta">
+          <span>{{ run.completedActions }}/{{ run.totalActions }} 个动作</span>
+          <span v-if="run.currentActionName">当前：{{ run.currentActionName }}</span>
+          <span>{{ run.message }}</span>
+        </div>
+      </article>
     </section>
 
     <NGrid :cols="2" :x-gap="14" responsive="screen">
@@ -147,10 +154,15 @@ function formatDuration(durationMs?: number) {
   border-radius: 8px;
 }
 
+.run-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
 .run-card {
   display: grid;
   gap: 9px;
-  margin-bottom: 14px;
   padding: 12px;
   border: 1px solid rgba(82, 106, 171, 0.18);
   border-radius: 8px;

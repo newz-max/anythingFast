@@ -17,7 +17,7 @@ const taskStore = useTaskStore()
 const executionStore = useExecutionStore()
 const enabledTasks = computed(() => taskStore.tasks.filter((task) => task.enabled))
 const { query, results } = useTaskSearch(enabledTasks, { ranking: 'quickRecent' })
-const { execute, running } = useTaskExecution()
+const { execute } = useTaskExecution()
 const selectedIndex = shallowRef(0)
 const inputRef = useTemplateRef<{ focus: () => void }>('searchInput')
 const resultsRef = useTemplateRef<HTMLElement>('results')
@@ -32,7 +32,7 @@ const resultRows = computed(() =>
       actionDetail: action ? `${getActionTypeLabel(action.type)} · ${describeAction(action)}` : `${task.actions.length} 个动作`,
       categoryTone: categoryTone(task.category),
       meta: formatTaskMeta(task),
-      running: running.value && executionStore.runningTaskId === task.id
+      running: Boolean(executionStore.activeRunForTarget(executionStore.taskRunTargetKey(task.id)))
     }
   })
 )
@@ -75,7 +75,7 @@ function onKeydown(event: KeyboardEvent) {
     moveSelection(-1)
     return
   }
-  if (event.key === 'Enter' && selectedTask.value && !running.value) {
+  if (event.key === 'Enter' && selectedTask.value) {
     event.preventDefault()
     void execute(selectedTask.value)
   }
@@ -108,7 +108,6 @@ async function scrollSelectedIntoView() {
 }
 
 function runTask(task: TaskItem) {
-  if (running.value) return
   void execute(task)
 }
 

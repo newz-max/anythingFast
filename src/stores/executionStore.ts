@@ -8,8 +8,11 @@ import { tauriApi } from '@/api/tauri'
 import { getErrorMessage, logDevError } from '@/utils/errors'
 import type { ActionType, ExecutionLogSummary, ExecutionScope, ExecutionStatus, TaskExecutionSummary } from '@/types/domain'
 
+export type RunTargetKey = `task:${string}` | `action:${string}:${string}`
+
 export interface ExecutionRunSnapshot {
   runId: string | null
+  targetKey: RunTargetKey
   taskId: string | null
   taskName: string
   scope: ExecutionScope
@@ -25,14 +28,24 @@ export interface ExecutionRunSnapshot {
 }
 
 export const useExecutionStore = defineStore('execution', () => {
-  const runningTaskId = shallowRef<string | null>(null)
-  const runningActionId = shallowRef<string | null>(null)
-  const events = shallowRef<ExecutionEventPayload[]>([])
+  const runsById = shallowRef<Record<string, ExecutionRunSnapshot>>({})
+  const runOrder = shallowRef<string[]>([])
+  const activeRunIds = shallowRef<string[]>([])
+  const eventsByRunId = shallowRef<Record<string, ExecutionEventPayload[]>>({})
+  const summariesByRunId = shallowRef<Record<string, TaskExecutionSummary>>({})
   const logs = shallowRef<ExecutionLogSummary[]>([])
-  const lastSummary = shallowRef<TaskExecutionSummary | null>(null)
   const error = shallowRef<string | null>(null)
-  const currentRun = shallowRef<ExecutionRunSnapshot | null>(null)
   let executionUnlisten: UnlistenFn | null = null
+
+  const runs = computed(() => runOrder.value.map((runId) => runsById.value[runId]).filter(Boolean))
+  const activeRuns = computed(() => activeRunIds.value.map((runId) => runsById.value[runId]).filter(Boolean))
+  const events = computed(() => runOrder.value.flatMap((runId) => eventsByRunId.value[runId] || []))
+  const summaries = computed(() => runOrder.value.map((runId) => summariesByRunId.value[runId]).filter(Boolean))
+  const currentRun = computed(() => activeRuns.value.at(-1) || runs.value.at(-1) || null)
+  const lastSummary = computed(() => summaries.value.at(-1) || null)
+  const running = computed(() => activeRunIds.value.length > 0)
+  const runningTaskId = computed(() => activeRuns.value.at(-1)?.taskId ?? null)
+  const runningActionId = computed(() => activeRuns.value.at(-1)?.currentActionId ?? null)
 
   async function setupListeners() {
     if (!('__TAURI_INTERNALS__' in window)) return
@@ -47,49 +60,39 @@ export const useExecutionStore = defineStore('execution', () => {
   }
 
   async function runTask(taskId: string, confirmationToken?: string, runtimeVariables?: RuntimeVariableValues) {
-    error.value = null
-    runningTaskId.value = taskId
-    runningActionId.value = null
-    events.value = []
-    currentRun.value = createPendingRun(taskId, null)
-    try {
-      if (!('__TAURI_INTERNALS__' in window)) {
-        throw new Error('浏览器预览环境不能执行本地动作，请使用 Tauri 运行。')
-      }
-      lastSummary.value = await tauriApi.runTask(taskId, confirmationToken, runtimeVariables)
-      applySummary(lastSummary.value)
-      await loadLogs(20)
-      return lastSummary.value
-    } catch (err) {
-      logDevError('Run task failed', err, { taskId })
-      error.value = getErrorMessage(err)
-      runningTaskId.value = null
-      runningActionId.value = null
-      markCurrentRunFailed(getErrorMessage(err))
-      throw err
-    }
+    const targetKey = taskRunTargetKey(taskId)
+    assertTargetNotActive(targetKey, '事项已在执行中')
+    return runTarget(targetKey, createPendingRun(taskId, null), () => tauriApi.runTask(taskId, confirmationToken, runtimeVariables), { taskId })
   }
 
   async function runTaskAction(taskId: string, actionId: string, confirmationToken?: string, runtimeVariables?: RuntimeVariableValues) {
+    const targetKey = actionRunTargetKey(taskId, actionId)
+    assertTargetNotActive(targetKey, '动作已在执行中')
+    return runTarget(targetKey, createPendingRun(taskId, actionId), () => tauriApi.runTaskAction(taskId, actionId, confirmationToken, runtimeVariables), { taskId, actionId })
+  }
+
+  async function runTarget(
+    targetKey: RunTargetKey,
+    pendingRun: ExecutionRunSnapshot,
+    dispatch: () => Promise<TaskExecutionSummary>,
+    logContext: Record<string, string>
+  ) {
     error.value = null
-    runningTaskId.value = taskId
-    runningActionId.value = actionId
-    events.value = []
-    currentRun.value = createPendingRun(taskId, actionId)
+    const pendingRunId = pendingRun.runId || createPendingRunId(targetKey)
+    upsertRun({ ...pendingRun, runId: pendingRunId, targetKey })
+
     try {
       if (!('__TAURI_INTERNALS__' in window)) {
         throw new Error('浏览器预览环境不能执行本地动作，请使用 Tauri 运行。')
       }
-      lastSummary.value = await tauriApi.runTaskAction(taskId, actionId, confirmationToken, runtimeVariables)
-      applySummary(lastSummary.value)
+      const summary = await dispatch()
+      applySummary(summary, targetKey, pendingRunId)
       await loadLogs(20)
-      return lastSummary.value
+      return summary
     } catch (err) {
-      logDevError('Run task action failed', err, { taskId, actionId })
+      logDevError(targetKey.startsWith('action:') ? 'Run task action failed' : 'Run task failed', err, logContext)
       error.value = getErrorMessage(err)
-      runningTaskId.value = null
-      runningActionId.value = null
-      markCurrentRunFailed(getErrorMessage(err))
+      markRunFailed(pendingRunId, getErrorMessage(err))
       throw err
     }
   }
@@ -109,11 +112,18 @@ export const useExecutionStore = defineStore('execution', () => {
   }
 
   function applyExecutionEvent(payload: ExecutionEventPayload) {
-    events.value = [...events.value, payload]
+    const targetKey = eventTargetKey(payload)
+    const runId = payload.runId
+    appendEvent(runId, payload)
 
     if (payload.status === 'started') {
-      currentRun.value = {
-        runId: payload.runId,
+      const pendingRunId = activeRuns.value.find((run) => run.targetKey === targetKey && run.runId?.startsWith('pending:'))?.runId
+      if (pendingRunId && pendingRunId !== runId) {
+        removeRun(pendingRunId)
+      }
+      upsertRun({
+        runId,
+        targetKey,
         taskId: payload.taskId,
         taskName: payload.taskName,
         scope: payload.scope,
@@ -126,20 +136,19 @@ export const useExecutionStore = defineStore('execution', () => {
         completedActions: 0,
         progressPercent: 0,
         message: payload.message || '开始执行'
-      }
-      runningTaskId.value = payload.taskId
-      runningActionId.value = payload.actionId ?? null
+      })
       return
     }
 
-    const previous = currentRun.value ?? createPendingRun(payload.taskId, payload.actionId ?? null)
+    const previous = runsById.value[runId] ?? createPendingRun(payload.taskId, payload.actionId ?? null, runId, targetKey)
     const completedActions = nextCompletedActions(previous.completedActions, payload)
     const totalActions = payload.totalActions || previous.totalActions
     const isFinished = payload.status === 'finished'
 
-    currentRun.value = {
+    upsertRun({
       ...previous,
-      runId: payload.runId,
+      runId,
+      targetKey,
       taskId: payload.taskId,
       taskName: payload.taskName,
       scope: payload.scope,
@@ -152,41 +161,80 @@ export const useExecutionStore = defineStore('execution', () => {
       completedActions: isFinished ? totalActions : completedActions,
       progressPercent: progressPercent(isFinished ? totalActions : completedActions, totalActions),
       message: payload.result?.message || payload.message || previous.message
-    }
-
-    if (isFinished) {
-      runningTaskId.value = null
-      runningActionId.value = null
-    } else {
-      runningTaskId.value = payload.taskId
-      runningActionId.value = payload.actionId ?? previous.currentActionId
-    }
+    })
   }
 
-  function applySummary(summary: TaskExecutionSummary) {
+  function applySummary(summary: TaskExecutionSummary, targetKey = summaryTargetKey(summary), fallbackRunId?: string) {
+    const runId = latestRunIdForTarget(targetKey) || fallbackRunId || createPendingRunId(targetKey)
+    const previous = runsById.value[runId] ?? createPendingRun(summary.taskId, summary.actionId ?? null, runId, targetKey)
     const completedActions = summary.actions.length
-    currentRun.value = {
-      runId: currentRun.value?.runId ?? null,
+    const totalActions = Math.max(previous.totalActions, completedActions)
+
+    upsertRun({
+      ...previous,
+      runId,
+      targetKey,
       taskId: summary.taskId,
       taskName: summary.taskName,
       scope: summary.scope,
       status: summary.status,
-      currentActionId: summary.actionId ?? currentRun.value?.currentActionId ?? null,
-      currentActionName: currentRun.value?.currentActionName || summary.actions.at(-1)?.actionName || '',
-      currentActionType: currentRun.value?.currentActionType ?? summary.actions.at(-1)?.actionType ?? null,
+      currentActionId: summary.actionId ?? previous.currentActionId ?? null,
+      currentActionName: previous.currentActionName || summary.actions.at(-1)?.actionName || '',
+      currentActionType: previous.currentActionType ?? summary.actions.at(-1)?.actionType ?? null,
       currentIndex: completedActions,
-      totalActions: Math.max(currentRun.value?.totalActions ?? 0, completedActions),
+      totalActions,
       completedActions,
-      progressPercent: progressPercent(completedActions, Math.max(currentRun.value?.totalActions ?? 0, completedActions)),
+      progressPercent: progressPercent(completedActions, totalActions),
       message: summaryStatusMessage(summary.status)
+    })
+    summariesByRunId.value = {
+      ...summariesByRunId.value,
+      [runId]: summary
     }
-    runningTaskId.value = null
-    runningActionId.value = null
   }
 
-  function createPendingRun(taskId: string, actionId: string | null): ExecutionRunSnapshot {
+  function upsertRun(run: ExecutionRunSnapshot) {
+    const runId = run.runId || createPendingRunId(run.targetKey)
+    runsById.value = {
+      ...runsById.value,
+      [runId]: { ...run, runId }
+    }
+    if (!runOrder.value.includes(runId)) {
+      runOrder.value = [...runOrder.value, runId]
+    }
+    syncActiveRunIds()
+  }
+
+  function appendEvent(runId: string, payload: ExecutionEventPayload) {
+    eventsByRunId.value = {
+      ...eventsByRunId.value,
+      [runId]: [...(eventsByRunId.value[runId] || []), payload]
+    }
+    if (!runOrder.value.includes(runId)) {
+      runOrder.value = [...runOrder.value, runId]
+    }
+  }
+
+  function removeRun(runId: string) {
+    const { [runId]: _removedRun, ...nextRunsById } = runsById.value
+    const { [runId]: _removedEvents, ...nextEventsByRunId } = eventsByRunId.value
+    const { [runId]: _removedSummary, ...nextSummariesByRunId } = summariesByRunId.value
+    runsById.value = nextRunsById
+    eventsByRunId.value = nextEventsByRunId
+    summariesByRunId.value = nextSummariesByRunId
+    runOrder.value = runOrder.value.filter((item) => item !== runId)
+    syncActiveRunIds()
+  }
+
+  function createPendingRun(
+    taskId: string,
+    actionId: string | null,
+    runId = createPendingRunId(actionId ? actionRunTargetKey(taskId, actionId) : taskRunTargetKey(taskId)),
+    targetKey: RunTargetKey = actionId ? actionRunTargetKey(taskId, actionId) : taskRunTargetKey(taskId)
+  ): ExecutionRunSnapshot {
     return {
-      runId: null,
+      runId,
+      targetKey,
       taskId,
       taskName: '',
       scope: actionId ? 'action' : 'task',
@@ -202,13 +250,56 @@ export const useExecutionStore = defineStore('execution', () => {
     }
   }
 
-  function markCurrentRunFailed(message: string) {
-    if (!currentRun.value) return
-    currentRun.value = {
-      ...currentRun.value,
+  function markRunFailed(runId: string, message: string) {
+    const run = runsById.value[runId]
+    if (!run) return
+    upsertRun({
+      ...run,
       status: 'failed',
       message
+    })
+  }
+
+  function isTargetActive(targetKey: RunTargetKey) {
+    return activeRuns.value.some((run) => run.targetKey === targetKey)
+  }
+
+  function activeRunForTarget(targetKey: RunTargetKey) {
+    return activeRuns.value.find((run) => run.targetKey === targetKey) || null
+  }
+
+  function latestRunForTask(taskId: string) {
+    return [...runs.value].reverse().find((run) => run.taskId === taskId) || null
+  }
+
+  function latestActiveRunForTask(taskId: string) {
+    return [...activeRuns.value].reverse().find((run) => run.taskId === taskId) || null
+  }
+
+  function eventsForRun(runId: string | null | undefined) {
+    return runId ? eventsByRunId.value[runId] || [] : []
+  }
+
+  function eventsForTask(taskId: string) {
+    return events.value.filter((event) => event.taskId === taskId)
+  }
+
+  function latestSummaryForTask(taskId: string) {
+    return [...summaries.value].reverse().find((summary) => summary.taskId === taskId) || null
+  }
+
+  function assertTargetNotActive(targetKey: RunTargetKey, message: string) {
+    if (isTargetActive(targetKey)) {
+      throw new Error(message)
     }
+  }
+
+  function latestRunIdForTarget(targetKey: RunTargetKey) {
+    return [...runOrder.value].reverse().find((runId) => runsById.value[runId]?.targetKey === targetKey)
+  }
+
+  function syncActiveRunIds() {
+    activeRunIds.value = runOrder.value.filter((runId) => isActiveRun(runsById.value[runId]))
   }
 
   function nextCompletedActions(previousCompleted: number, payload: ExecutionEventPayload) {
@@ -247,9 +338,15 @@ export const useExecutionStore = defineStore('execution', () => {
     return Math.min(100, Math.round((completedActions / totalActions) * 100))
   }
 
-  const running = computed(() => Boolean(runningTaskId.value || runningActionId.value))
-
   return {
+    runsById,
+    runOrder,
+    activeRunIds,
+    activeRuns,
+    runs,
+    eventsByRunId,
+    summariesByRunId,
+    summaries,
     runningTaskId,
     runningActionId,
     running,
@@ -262,6 +359,44 @@ export const useExecutionStore = defineStore('execution', () => {
     runTask,
     runTaskAction,
     loadLogs,
-    applyExecutionEvent
+    applyExecutionEvent,
+    applySummary,
+    taskRunTargetKey,
+    actionRunTargetKey,
+    isTargetActive,
+    activeRunForTarget,
+    latestRunForTask,
+    latestActiveRunForTask,
+    eventsForRun,
+    eventsForTask,
+    latestSummaryForTask
   }
 })
+
+export function taskRunTargetKey(taskId: string): RunTargetKey {
+  return `task:${taskId}`
+}
+
+export function actionRunTargetKey(taskId: string, actionId: string): RunTargetKey {
+  return `action:${taskId}:${actionId}`
+}
+
+function eventTargetKey(payload: ExecutionEventPayload): RunTargetKey {
+  return payload.scope === 'action' && payload.actionId
+    ? actionRunTargetKey(payload.taskId, payload.actionId)
+    : taskRunTargetKey(payload.taskId)
+}
+
+function summaryTargetKey(summary: TaskExecutionSummary): RunTargetKey {
+  return summary.scope === 'action' && summary.actionId
+    ? actionRunTargetKey(summary.taskId, summary.actionId)
+    : taskRunTargetKey(summary.taskId)
+}
+
+function createPendingRunId(targetKey: RunTargetKey) {
+  return `pending:${targetKey}:${Date.now()}:${Math.random().toString(36).slice(2)}`
+}
+
+function isActiveRun(run: ExecutionRunSnapshot | undefined) {
+  return run?.status === 'started' || run?.status === 'running' || run?.status === 'pending'
+}

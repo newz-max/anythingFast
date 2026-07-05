@@ -35,6 +35,7 @@ describe('executionPresentation', () => {
   it('keeps the current action running while the run is active', () => {
     const currentRun: ExecutionRunSnapshot = {
       runId: 'run-1',
+      targetKey: 'task:task-1',
       taskId: 'task-1',
       taskName: '测试事项',
       scope: 'task',
@@ -54,9 +55,56 @@ describe('executionPresentation', () => {
     expect(states['action-1']).toMatchObject({ status: 'running', label: '执行中', type: 'info' })
   })
 
+  it('keeps multiple current actions running while runs are active', () => {
+    const states = deriveActionExecutionStates(
+      [
+        event({ status: 'action-success', actionId: 'action-1' }),
+        event({ status: 'action-success', actionId: 'action-2' })
+      ],
+      [
+        {
+          runId: 'run-1',
+          targetKey: 'action:task-1:action-1',
+          taskId: 'task-1',
+          taskName: '测试事项',
+          scope: 'action',
+          status: 'running',
+          currentActionId: 'action-1',
+          currentActionName: '动作 1',
+          currentActionType: 'delay',
+          currentIndex: 1,
+          totalActions: 1,
+          completedActions: 0,
+          progressPercent: 0,
+          message: '动作 1'
+        },
+        {
+          runId: 'run-2',
+          targetKey: 'action:task-1:action-2',
+          taskId: 'task-1',
+          taskName: '测试事项',
+          scope: 'action',
+          status: 'running',
+          currentActionId: 'action-2',
+          currentActionName: '动作 2',
+          currentActionType: 'delay',
+          currentIndex: 1,
+          totalActions: 1,
+          completedActions: 0,
+          progressPercent: 0,
+          message: '动作 2'
+        }
+      ]
+    )
+
+    expect(states['action-1']).toMatchObject({ status: 'running', label: '执行中' })
+    expect(states['action-2']).toMatchObject({ status: 'running', label: '执行中' })
+  })
+
   it('formats event labels and progress fallbacks', () => {
     const pendingRun: ExecutionRunSnapshot = {
       runId: null,
+      targetKey: 'task:task-1',
       taskId: 'task-1',
       taskName: '',
       scope: 'task',

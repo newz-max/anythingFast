@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExecutionEventPayload } from '@/api/events'
+import type { TaskExecutionSummary } from '@/types/domain'
 
 const listenExecutionEventsMock = vi.hoisted(() => vi.fn())
 
@@ -16,7 +17,7 @@ vi.mock('@/api/tauri', () => ({
   }
 }))
 
-import { useExecutionStore } from './executionStore'
+import { actionRunTargetKey, taskRunTargetKey, useExecutionStore } from './executionStore'
 
 function event(patch: Partial<ExecutionEventPayload>): ExecutionEventPayload {
   return {
@@ -81,6 +82,112 @@ describe('executionStore', () => {
     expect(store.currentRun?.progressPercent).toBe(100)
   })
 
+  it('keeps interleaved runs isolated by run id', () => {
+    const store = useExecutionStore()
+
+    store.applyExecutionEvent(event({ runId: 'run-1', taskId: 'task-1', taskName: '事项 A', status: 'started' }))
+    store.applyExecutionEvent(event({ runId: 'run-2', taskId: 'task-2', taskName: '事项 B', status: 'started' }))
+    store.applyExecutionEvent(
+      event({
+        runId: 'run-1',
+        taskId: 'task-1',
+        taskName: '事项 A',
+        status: 'action-started',
+        currentIndex: 1,
+        actionId: 'action-a',
+        actionName: '动作 A',
+        actionType: 'delay'
+      })
+    )
+    store.applyExecutionEvent(
+      event({
+        runId: 'run-2',
+        taskId: 'task-2',
+        taskName: '事项 B',
+        status: 'action-started',
+        currentIndex: 1,
+        actionId: 'action-b',
+        actionName: '动作 B',
+        actionType: 'delay'
+      })
+    )
+
+    expect(store.activeRunIds).toEqual(['run-1', 'run-2'])
+    expect(store.runsById['run-1'].currentActionName).toBe('动作 A')
+    expect(store.runsById['run-2'].currentActionName).toBe('动作 B')
+    expect(store.eventsByRunId['run-1']).toHaveLength(2)
+    expect(store.eventsByRunId['run-2']).toHaveLength(2)
+
+    store.applyExecutionEvent(event({ runId: 'run-1', taskId: 'task-1', taskName: '事项 A', status: 'finished', currentIndex: 2 }))
+
+    expect(store.activeRunIds).toEqual(['run-2'])
+    expect(store.runsById['run-1'].status).toBe('success')
+    expect(store.runsById['run-2'].status).toBe('running')
+    expect(store.running).toBe(true)
+  })
+
+  it('detects duplicate active run targets while allowing different targets', async () => {
+    const store = useExecutionStore()
+
+    store.applyExecutionEvent(event({ runId: 'run-1', taskId: 'task-1', status: 'started' }))
+
+    expect(store.isTargetActive(taskRunTargetKey('task-1'))).toBe(true)
+    expect(store.isTargetActive(taskRunTargetKey('task-2'))).toBe(false)
+    await expect(store.runTask('task-1')).rejects.toThrow('事项已在执行中')
+
+    store.applyExecutionEvent(
+      event({
+        runId: 'run-2',
+        taskId: 'task-1',
+        scope: 'action',
+        actionId: 'action-1',
+        status: 'started',
+        totalActions: 1
+      })
+    )
+
+    expect(store.isTargetActive(actionRunTargetKey('task-1', 'action-1'))).toBe(true)
+    await expect(store.runTaskAction('task-1', 'action-1')).rejects.toThrow('动作已在执行中')
+    expect(store.isTargetActive(actionRunTargetKey('task-1', 'action-2'))).toBe(false)
+  })
+
+  it('applies summaries to the matching run target without replacing unrelated runs', () => {
+    const store = useExecutionStore()
+
+    store.applyExecutionEvent(event({ runId: 'run-1', taskId: 'task-1', taskName: '事项 A', status: 'started' }))
+    store.applyExecutionEvent(event({ runId: 'run-2', taskId: 'task-2', taskName: '事项 B', status: 'started' }))
+    store.applySummary(summary({
+      taskId: 'task-1',
+      taskName: '事项 A',
+      finishedAt: '2026-07-01T00:00:02Z',
+      actions: [
+        {
+          actionId: 'action-1',
+          actionName: '动作 1',
+          actionType: 'delay',
+          status: 'success'
+        },
+        {
+          actionId: 'action-2',
+          actionName: '动作 2',
+          actionType: 'delay',
+          status: 'success'
+        }
+      ]
+    }))
+
+    expect(store.runsById['run-1']).toMatchObject({
+      taskId: 'task-1',
+      status: 'success',
+      progressPercent: 100
+    })
+    expect(store.summariesByRunId['run-1']?.taskId).toBe('task-1')
+    expect(store.runsById['run-2']).toMatchObject({
+      taskId: 'task-2',
+      status: 'started'
+    })
+  })
+
   it('keeps cancelled status after the finished event', () => {
     const store = useExecutionStore()
 
@@ -124,3 +231,23 @@ describe('executionStore', () => {
     expect(listenExecutionEventsMock).toHaveBeenCalledTimes(1)
   })
 })
+
+function summary(patch: Partial<TaskExecutionSummary>): TaskExecutionSummary {
+  return {
+    taskId: 'task-1',
+    taskName: '测试事项',
+    scope: 'task',
+    startedAt: '2026-07-01T00:00:00Z',
+    finishedAt: '2026-07-01T00:00:01Z',
+    status: 'success',
+    actions: [
+      {
+        actionId: 'action-1',
+        actionName: '动作 1',
+        actionType: 'delay',
+        status: 'success'
+      }
+    ],
+    ...patch
+  }
+}

@@ -23,6 +23,7 @@ describe('ExecutionProgress', () => {
   it('renders current progress events and command output from recent logs', () => {
     const currentRun: ExecutionRunSnapshot = {
       runId: 'run-1',
+      targetKey: 'task:task-1',
       taskId: 'task-1',
       taskName: '测试事项',
       scope: 'task',
@@ -146,5 +147,55 @@ describe('ExecutionProgress', () => {
     expect(wrapper.text()).toContain('退出码 7')
     expect(wrapper.text()).toContain('hello')
     expect(wrapper.text()).toContain('bad')
+  })
+
+  it('renders multiple active runs', () => {
+    const wrapper = mount(ExecutionProgress, {
+      props: {
+        currentRun: null,
+        activeRuns: [
+          {
+            runId: 'run-1',
+            targetKey: 'task:task-1',
+            taskId: 'task-1',
+            taskName: '事项 A',
+            scope: 'task',
+            status: 'running',
+            currentActionId: 'action-1',
+            currentActionName: '动作 A',
+            currentActionType: 'delay',
+            currentIndex: 1,
+            totalActions: 2,
+            completedActions: 1,
+            progressPercent: 50,
+            message: '动作 A'
+          },
+          {
+            runId: 'run-2',
+            targetKey: 'action:task-2:action-2',
+            taskId: 'task-2',
+            taskName: '事项 B',
+            scope: 'action',
+            status: 'running',
+            currentActionId: 'action-2',
+            currentActionName: '动作 B',
+            currentActionType: 'delay',
+            currentIndex: 1,
+            totalActions: 1,
+            completedActions: 0,
+            progressPercent: 0,
+            message: '动作 B'
+          }
+        ],
+        events: [],
+        logs: []
+      },
+      global: { stubs }
+    })
+
+    expect(wrapper.text()).toContain('事项 A')
+    expect(wrapper.text()).toContain('事项 B · 单动作')
+    expect(wrapper.text()).toContain('进度 50%')
+    expect(wrapper.text()).toContain('进度 0%')
   })
 })

@@ -12,7 +12,6 @@ use crate::validation::{
     normalize_task, validate_action_model, validate_config_model, validate_task_model,
 };
 use crate::variables::{self, RuntimeVariableContext};
-use chrono::Utc;
 use std::collections::HashMap;
 use tauri::AppHandle;
 
@@ -170,7 +169,7 @@ fn run_task_blocking(
     confirmation_token: Option<String>,
     runtime_variables: HashMap<String, String>,
 ) -> Result<TaskExecutionSummary, String> {
-    let mut config = storage::load_config(&app)
+    let config = storage::load_config(&app)
         .map_err(|err| log_command_error("run_task load config failed", err))?;
     let task_index = config
         .tasks
@@ -210,10 +209,8 @@ fn run_task_blocking(
         confirmation_token.as_deref() == Some("confirmed"),
     )
     .map_err(|err| log_command_error("run_task execute failed", err))?;
-    config.tasks[task_index].last_run_at = Some(Utc::now().to_rfc3339());
-    config.tasks[task_index].updated_at = Utc::now().to_rfc3339();
-    storage::save_config(&app, &config)
-        .map_err(|err| log_command_error("run_task save config failed", err))?;
+    storage::update_task_run_metadata(&app, &summary.task_id, summary.finished_at.clone())
+        .map_err(|err| log_command_error("run_task save run metadata failed", err))?;
     Ok(summary)
 }
 
@@ -245,7 +242,7 @@ fn run_task_action_blocking(
     confirmation_token: Option<String>,
     runtime_variables: HashMap<String, String>,
 ) -> Result<TaskExecutionSummary, String> {
-    let mut config = storage::load_config(&app)
+    let config = storage::load_config(&app)
         .map_err(|err| log_command_error("run_task_action load config failed", err))?;
     let task_index = config
         .tasks
@@ -299,11 +296,8 @@ fn run_task_action_blocking(
         confirmation_token.as_deref() == Some("confirmed"),
     )
     .map_err(|err| log_command_error("run_task_action execute failed", err))?;
-    let finished_at = summary.finished_at.clone();
-    config.tasks[task_index].last_run_at = Some(finished_at.clone());
-    config.tasks[task_index].updated_at = finished_at;
-    storage::save_config(&app, &config)
-        .map_err(|err| log_command_error("run_task_action save config failed", err))?;
+    storage::update_task_run_metadata(&app, &summary.task_id, summary.finished_at.clone())
+        .map_err(|err| log_command_error("run_task_action save run metadata failed", err))?;
     Ok(summary)
 }
 

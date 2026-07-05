@@ -3,7 +3,7 @@ import { NForm, NFormItem, NInput, useDialog, useMessage } from 'naive-ui'
 import { tauriApi } from '@/api/tauri'
 import type { RuntimeVariableValues } from '@/api/tauri'
 import { defaultRuntimeVariableValues, variablesNeedingInput } from '@/domain/variables'
-import { useExecutionStore } from '@/stores/executionStore'
+import { actionRunTargetKey, taskRunTargetKey, useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
 import { getErrorMessage, logDevError } from '@/utils/errors'
 import type { TaskAction, TaskItem } from '@/types/domain'
@@ -14,11 +14,16 @@ export function useTaskExecution() {
   const executionStore = useExecutionStore()
   const taskStore = useTaskStore()
 
-  const running = computed(() => Boolean(executionStore.runningTaskId || executionStore.runningActionId))
+  const running = computed(() => executionStore.running)
 
   async function execute(task: TaskItem) {
     if (!task.enabled) {
       message.warning('事项已停用')
+      return
+    }
+    const targetKey = taskRunTargetKey(task.id)
+    if (executionStore.isTargetActive(targetKey)) {
+      message.warning('事项已在执行中')
       return
     }
 
@@ -27,6 +32,10 @@ export function useTaskExecution() {
       const risk = await tauriApi.analyzeRisk(task.id, runtimeVariables)
       if (risk.requiresConfirmation) {
         await confirmRisk(task, risk.reasons, risk.highRiskActions.map((action) => `${action.name}: ${action.detail}`))
+      }
+      if (executionStore.isTargetActive(targetKey)) {
+        message.warning('事项已在执行中')
+        return
       }
       const summary = await executionStore.runTask(task.id, risk.requiresConfirmation ? 'confirmed' : undefined, runtimeVariables)
       taskStore.markTaskLastRun(task.id, summary.finishedAt)
@@ -56,12 +65,21 @@ export function useTaskExecution() {
       message.warning('动作已停用')
       return
     }
+    const targetKey = actionRunTargetKey(task.id, action.id)
+    if (executionStore.isTargetActive(targetKey)) {
+      message.warning('动作已在执行中')
+      return
+    }
 
     try {
       const runtimeVariables = await collectRuntimeVariables(task)
       const risk = await tauriApi.analyzeActionRisk(task.id, action.id, runtimeVariables)
       if (risk.requiresConfirmation) {
         await confirmRisk(task, risk.reasons, risk.highRiskActions.map((item) => `${item.name}: ${item.detail}`), action)
+      }
+      if (executionStore.isTargetActive(targetKey)) {
+        message.warning('动作已在执行中')
+        return
       }
       const summary = await executionStore.runTaskAction(task.id, action.id, risk.requiresConfirmation ? 'confirmed' : undefined, runtimeVariables)
       taskStore.markTaskLastRun(task.id, summary.finishedAt)
