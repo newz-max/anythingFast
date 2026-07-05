@@ -72,6 +72,17 @@ yarn build
 yarn tauri:build
 ```
 
+## 自动发布
+
+GitHub Actions 会在推送 `v*` 标签时自动构建 Windows 安装包并创建 GitHub Release：
+
+```powershell
+git tag v0.1.0
+git push github v0.1.0
+```
+
+也可以在 GitHub 的 Actions 页面手动运行 `Release` workflow。当前发布包未配置代码签名，Windows 可能会提示未知发布者。
+
 ## 验证命令
 
 前端类型检查：
