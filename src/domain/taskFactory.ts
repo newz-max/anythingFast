@@ -116,6 +116,7 @@ function normalizeActionParams(action: TaskAction): TaskAction['params'] {
     env: action.params.env || {},
     showTerminal: action.params.showTerminal ?? false,
     closeTerminalOnFinish: action.params.closeTerminalOnFinish ?? true,
+    terminalHost: action.params.terminalHost || 'systemTerminal',
     shell: action.params.shell || 'powershell',
     scriptPath: action.params.scriptPath || '',
     scriptArgs: action.params.scriptArgs || []

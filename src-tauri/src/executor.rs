@@ -767,10 +767,17 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
     let command_envs = command_envs(action);
     if show_terminal {
         let mut terminal_command =
-            terminal_command(action, close_terminal_on_finish(action)).map_err(failed_output)?;
+            terminal_command(action, close_terminal_on_finish(action), working_dir)
+                .map_err(failed_output)?;
         terminal_command.command.current_dir(working_dir);
         terminal_command.command.envs(command_envs);
-        configure_terminal_process(&mut terminal_command.command);
+        #[cfg(test)]
+        terminal_command
+            .command
+            .env("ANYTHING_FAST_SKIP_TERMINAL_PAUSE", "1");
+        if terminal_command.configure_process {
+            configure_terminal_process(&mut terminal_command.command);
+        }
 
         let output_log_path = terminal_command.output_log_path.clone();
         let status = terminal_command.command.status().map_err(|err| {
@@ -784,15 +791,44 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
             );
             failed_output(err.to_string())
         })?;
+        if terminal_command.wait_for_completion && !status.success() {
+            cleanup_temp_paths(&terminal_command.temp_paths);
+            let exit_code = status.code().unwrap_or(-1);
+            return Err(ActionRunOutput {
+                message: format!(
+                    "系统终端启动失败，退出码：{exit_code}，请确认 Windows Terminal 已安装，或切换为直接启动 Shell"
+                ),
+                exit_code: Some(exit_code),
+                ..Default::default()
+            });
+        }
+        let exit_code = if terminal_command.wait_for_completion {
+            match wait_for_terminal_completion(&terminal_command) {
+                Ok(code) => code,
+                Err(message) => {
+                    let terminal_output = output_log_path
+                        .as_ref()
+                        .and_then(|path| read_command_output_log(path));
+                    cleanup_temp_paths(&terminal_command.temp_paths);
+                    return Err(ActionRunOutput {
+                        message,
+                        exit_code: None,
+                        stderr: terminal_output,
+                        ..Default::default()
+                    });
+                }
+            }
+        } else {
+            status.code().unwrap_or(-1)
+        };
         let terminal_output = output_log_path
             .as_ref()
             .and_then(|path| read_command_output_log(path));
         cleanup_temp_paths(&terminal_command.temp_paths);
-        let exit_code = status.code().unwrap_or(-1);
-        if status.success() {
+        if exit_code == 0 {
             return Ok(ActionRunOutput {
                 message: "命令执行成功".into(),
-                exit_code: status.code(),
+                exit_code: Some(exit_code),
                 stdout: terminal_output,
                 ..Default::default()
             });
@@ -930,6 +966,10 @@ struct TerminalCommand {
     command: Command,
     temp_paths: Vec<PathBuf>,
     output_log_path: Option<PathBuf>,
+    exit_code_path: Option<PathBuf>,
+    completion_path: Option<PathBuf>,
+    wait_for_completion: bool,
+    configure_process: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -938,7 +978,24 @@ enum PowershellExitCodeStrategy {
     PipelineSuccess,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TerminalHostMode {
+    Direct,
+    WindowsTerminal,
+}
+
 fn terminal_command(
+    action: &TaskAction,
+    close_on_success: bool,
+    working_dir: &str,
+) -> Result<TerminalCommand, String> {
+    if command_terminal_host(action) == "systemTerminal" {
+        return windows_terminal_command(action, close_on_success, working_dir);
+    }
+    direct_terminal_command(action, close_on_success)
+}
+
+fn direct_terminal_command(
     action: &TaskAction,
     close_on_success: bool,
 ) -> Result<TerminalCommand, String> {
@@ -966,6 +1023,7 @@ fn terminal_command(
                 close_on_success,
                 PowershellExitCodeStrategy::PipelineSuccess,
                 Vec::new(),
+                TerminalHostMode::Direct,
             )
         } else {
             cmd_terminal_command(
@@ -973,6 +1031,7 @@ fn terminal_command(
                 &script_args(action),
                 close_on_success,
                 Vec::new(),
+                TerminalHostMode::Direct,
             )
         }
     } else {
@@ -995,6 +1054,7 @@ fn terminal_command(
                 &[],
                 close_on_success,
                 vec![user_script_path],
+                TerminalHostMode::Direct,
             )
         } else {
             let user_script_path = temp_runner_path("ps1");
@@ -1007,9 +1067,35 @@ fn terminal_command(
                 close_on_success,
                 PowershellExitCodeStrategy::LastExitCode,
                 vec![user_script_path],
+                TerminalHostMode::Direct,
             )
         }
     }
+}
+
+fn windows_terminal_command(
+    action: &TaskAction,
+    close_on_success: bool,
+    working_dir: &str,
+) -> Result<TerminalCommand, String> {
+    ensure_program_available("wt", "Windows Terminal")?;
+
+    let mut terminal = direct_terminal_command(action, close_on_success)?;
+    let runner_program = terminal.command.get_program().to_string_lossy().to_string();
+    let runner_args: Vec<String> = terminal
+        .command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().to_string())
+        .collect();
+
+    let mut command = Command::new("wt");
+    command.args(["new-tab", "-d", working_dir, "--", &runner_program]);
+    command.args(runner_args);
+
+    terminal.command = command;
+    terminal.wait_for_completion = true;
+    terminal.configure_process = false;
+    Ok(terminal)
 }
 
 fn powershell_terminal_command(
@@ -1019,19 +1105,34 @@ fn powershell_terminal_command(
     close_on_success: bool,
     exit_code_strategy: PowershellExitCodeStrategy,
     mut temp_paths: Vec<PathBuf>,
+    host_mode: TerminalHostMode,
 ) -> Result<TerminalCommand, String> {
+    ensure_shell_program_available(shell_program)?;
     let runner_path = temp_runner_path("ps1");
     let output_log_path = temp_runner_path("log");
+    let exit_code_path = temp_runner_path("txt");
+    let completion_path = temp_runner_path("done");
     let invocation = powershell_script_invocation(script_path, script_args);
     let pause_on_success = if close_on_success { "$false" } else { "$true" };
     let output_log_path_text = output_log_path.to_string_lossy().to_string();
+    let exit_code_path_text = exit_code_path.to_string_lossy().to_string();
+    let completion_path_text = completion_path.to_string_lossy().to_string();
     let exit_code_block = powershell_terminal_exit_code_block(exit_code_strategy);
     let runner_script = format!(
         r#"$ErrorActionPreference = 'Continue'
 $outputLogPath = {output_log_path}
+$exitCodePath = {exit_code_path}
+$completionPath = {completion_path}
+$skipTerminalPause = $env:ANYTHING_FAST_SKIP_TERMINAL_PAUSE -eq '1'
 try {{
   if (Test-Path -LiteralPath $outputLogPath) {{
     Remove-Item -LiteralPath $outputLogPath -Force
+  }}
+  if (Test-Path -LiteralPath $exitCodePath) {{
+    Remove-Item -LiteralPath $exitCodePath -Force
+  }}
+  if (Test-Path -LiteralPath $completionPath) {{
+    Remove-Item -LiteralPath $completionPath -Force
   }}
   {invocation} *>&1 | Tee-Object -FilePath $outputLogPath
   $commandSucceeded = $?
@@ -1040,18 +1141,26 @@ try {{
   $_ | Out-String | Tee-Object -FilePath $outputLogPath -Append
   $exitCode = 1
 }}
+Set-Content -LiteralPath $exitCodePath -Value $exitCode -Encoding UTF8
+Set-Content -LiteralPath $completionPath -Value 'done' -Encoding UTF8
 if ($exitCode -ne 0) {{
   Write-Host ''
   Write-Host "命令执行失败，退出码：$exitCode"
-  Read-Host '按 Enter 关闭终端' | Out-Null
+  if (-not $skipTerminalPause) {{
+    Read-Host '按 Enter 关闭终端' | Out-Null
+  }}
 }} elseif ({pause_on_success}) {{
   Write-Host ''
   Write-Host "命令执行成功，退出码：$exitCode"
-  Read-Host '按 Enter 关闭终端' | Out-Null
+  if (-not $skipTerminalPause) {{
+    Read-Host '按 Enter 关闭终端' | Out-Null
+  }}
 }}
 exit $exitCode
 "#,
         output_log_path = powershell_quote(&output_log_path_text),
+        exit_code_path = powershell_quote(&exit_code_path_text),
+        completion_path = powershell_quote(&completion_path_text),
     );
     write_powershell_script(&runner_path, &runner_script)?;
 
@@ -1065,10 +1174,16 @@ exit $exitCode
     ]);
     temp_paths.push(runner_path);
     temp_paths.push(output_log_path.clone());
+    temp_paths.push(exit_code_path.clone());
+    temp_paths.push(completion_path.clone());
     Ok(TerminalCommand {
         command,
         temp_paths,
         output_log_path: Some(output_log_path),
+        exit_code_path: Some(exit_code_path),
+        completion_path: Some(completion_path),
+        wait_for_completion: host_mode == TerminalHostMode::WindowsTerminal,
+        configure_process: host_mode == TerminalHostMode::Direct,
     })
 }
 
@@ -1098,22 +1213,27 @@ fn cmd_terminal_command(
     script_args: &[String],
     close_on_success: bool,
     mut temp_paths: Vec<PathBuf>,
+    host_mode: TerminalHostMode,
 ) -> Result<TerminalCommand, String> {
+    ensure_program_available("cmd", "cmd")?;
     let runner_path = temp_runner_path("cmd");
     let output_log_path = temp_runner_path("log");
     let exit_code_path = temp_runner_path("txt");
+    let completion_path = temp_runner_path("done");
     let invocation = cmd_invocation(script_path, script_args);
     let pause_success_block = if close_on_success {
         String::new()
     } else {
-        "\r\n) else (\r\n  echo.\r\n  echo 命令执行成功，退出码：%exitCode%\r\n  set /p \"=按 Enter 关闭终端\"\r\n".to_string()
+        "\r\n) else (\r\n  echo.\r\n  echo 命令执行成功，退出码：%exitCode%\r\n  if not \"%ANYTHING_FAST_SKIP_TERMINAL_PAUSE%\"==\"1\" set /p \"=按 Enter 关闭终端\"\r\n".to_string()
     };
     let output_log_path_text = output_log_path.to_string_lossy().to_string();
     let exit_code_path_text = exit_code_path.to_string_lossy().to_string();
+    let completion_path_text = completion_path.to_string_lossy().to_string();
     let runner_script = format!(
-        "@echo off\r\nsetlocal EnableDelayedExpansion\r\nset \"outputLogPath={output_log_path}\"\r\nset \"exitCodePath={exit_code_path}\"\r\nif exist \"%outputLogPath%\" del /f /q \"%outputLogPath%\" >nul 2>nul\r\nif exist \"%exitCodePath%\" del /f /q \"%exitCodePath%\" >nul 2>nul\r\n(\r\n  cmd /C \"{invocation}\"\r\n  echo(!ERRORLEVEL!>\"%exitCodePath%\"\r\n) 2>&1 | powershell -NoProfile -ExecutionPolicy Bypass -Command \"$input | Tee-Object -FilePath {powershell_output_log_path}\"\r\nif exist \"%exitCodePath%\" (\r\n  set /p exitCode=<\"%exitCodePath%\"\r\n) else (\r\n  set \"exitCode=1\"\r\n)\r\nif not \"%exitCode%\"==\"0\" (\r\n  echo.\r\n  echo 命令执行失败，退出码：%exitCode%\r\n  set /p \"=按 Enter 关闭终端\"{pause_success_block})\r\nexit /b %exitCode%\r\n",
+        "@echo off\r\nsetlocal EnableDelayedExpansion\r\nset \"outputLogPath={output_log_path}\"\r\nset \"exitCodePath={exit_code_path}\"\r\nset \"completionPath={completion_path}\"\r\nif exist \"%outputLogPath%\" del /f /q \"%outputLogPath%\" >nul 2>nul\r\nif exist \"%exitCodePath%\" del /f /q \"%exitCodePath%\" >nul 2>nul\r\nif exist \"%completionPath%\" del /f /q \"%completionPath%\" >nul 2>nul\r\n(\r\n  cmd /C \"{invocation}\"\r\n  echo(!ERRORLEVEL!>\"%exitCodePath%\"\r\n) 2>&1 | powershell -NoProfile -ExecutionPolicy Bypass -Command \"$input | Tee-Object -FilePath {powershell_output_log_path}\"\r\nif exist \"%exitCodePath%\" (\r\n  set /p exitCode=<\"%exitCodePath%\"\r\n) else (\r\n  set \"exitCode=1\"\r\n)\r\necho done>\"%completionPath%\"\r\nif not \"%exitCode%\"==\"0\" (\r\n  echo.\r\n  echo 命令执行失败，退出码：%exitCode%\r\n  if not \"%ANYTHING_FAST_SKIP_TERMINAL_PAUSE%\"==\"1\" set /p \"=按 Enter 关闭终端\"{pause_success_block})\r\nexit /b %exitCode%\r\n",
         output_log_path = output_log_path_text,
         exit_code_path = exit_code_path_text,
+        completion_path = completion_path_text,
         powershell_output_log_path = powershell_quote(&output_log_path_text),
     );
     write_cmd_script(&runner_path, &runner_script)?;
@@ -1122,11 +1242,16 @@ fn cmd_terminal_command(
     command.args(["/C", &runner_path.to_string_lossy()]);
     temp_paths.push(runner_path);
     temp_paths.push(output_log_path.clone());
-    temp_paths.push(exit_code_path);
+    temp_paths.push(exit_code_path.clone());
+    temp_paths.push(completion_path.clone());
     Ok(TerminalCommand {
         command,
         temp_paths,
         output_log_path: Some(output_log_path),
+        exit_code_path: Some(exit_code_path),
+        completion_path: Some(completion_path),
+        wait_for_completion: host_mode == TerminalHostMode::WindowsTerminal,
+        configure_process: host_mode == TerminalHostMode::Direct,
     })
 }
 
@@ -1236,11 +1361,14 @@ fn inline_command(action: &TaskAction, close_terminal_on_finish: bool) -> Result
         .unwrap_or("powershell");
 
     if shell == "cmd" {
+        ensure_program_available("cmd", "cmd")?;
         let mut cmd = Command::new("cmd");
         cmd.args([cmd_keep_open_flag(close_terminal_on_finish), command_text]);
         Ok(cmd)
     } else {
-        let mut ps = Command::new(powershell_program(shell));
+        let shell_program = powershell_program(shell);
+        ensure_shell_program_available(shell_program)?;
+        let mut ps = Command::new(shell_program);
         if !close_terminal_on_finish {
             ps.arg("-NoExit");
         }
@@ -1272,7 +1400,9 @@ fn script_command(action: &TaskAction, close_terminal_on_finish: bool) -> Result
         if shell == "cmd" {
             return Err("ps1 脚本必须使用 pwsh 或 powershell".to_string());
         }
-        let mut ps = Command::new(powershell_program(shell));
+        let shell_program = powershell_program(shell);
+        ensure_shell_program_available(shell_program)?;
+        let mut ps = Command::new(shell_program);
         if !close_terminal_on_finish {
             ps.arg("-NoExit");
         }
@@ -1287,6 +1417,7 @@ fn script_command(action: &TaskAction, close_terminal_on_finish: bool) -> Result
         ]);
         Ok(ps)
     } else {
+        ensure_program_available("cmd", "cmd")?;
         let mut cmd = Command::new("cmd");
         cmd.args([cmd_keep_open_flag(close_terminal_on_finish), script_path]);
         cmd.args(script_args(action));
@@ -1296,6 +1427,30 @@ fn script_command(action: &TaskAction, close_terminal_on_finish: bool) -> Result
 
 fn cmd_keep_open_flag(close_terminal_on_finish: bool) -> &'static str {
     if close_terminal_on_finish { "/C" } else { "/K" }
+}
+
+fn wait_for_terminal_completion(terminal: &TerminalCommand) -> Result<i32, String> {
+    let completion_path = terminal
+        .completion_path
+        .as_ref()
+        .ok_or_else(|| "缺少终端完成标记路径".to_string())?;
+    let exit_code_path = terminal
+        .exit_code_path
+        .as_ref()
+        .ok_or_else(|| "缺少终端退出码路径".to_string())?;
+
+    while !completion_path.exists() {
+        thread::sleep(Duration::from_millis(250));
+    }
+
+    read_exit_code(exit_code_path)
+}
+
+fn read_exit_code(path: &Path) -> Result<i32, String> {
+    let text = fs::read_to_string(path).map_err(|err| format!("读取终端退出码失败：{err}"))?;
+    text.trim()
+        .parse::<i32>()
+        .map_err(|err| format!("解析终端退出码失败：{err}"))
 }
 
 fn powershell_program(shell: &str) -> &str {
@@ -1317,6 +1472,53 @@ fn command_source(action: &TaskAction) -> &str {
     } else {
         "inline"
     }
+}
+
+fn command_terminal_host(action: &TaskAction) -> &str {
+    let host = action
+        .params
+        .get("terminalHost")
+        .and_then(|value| value.as_str())
+        .unwrap_or("systemTerminal");
+    if host == "direct" {
+        "direct"
+    } else {
+        "systemTerminal"
+    }
+}
+
+fn ensure_shell_program_available(program: &str) -> Result<(), String> {
+    let label = match program {
+        "pwsh" => "PowerShell 7",
+        "powershell" => "Windows PowerShell",
+        "cmd" => "cmd",
+        _ => program,
+    };
+    ensure_program_available(program, label)
+}
+
+fn ensure_program_available(program: &str, label: &str) -> Result<(), String> {
+    if program_available(program) {
+        return Ok(());
+    }
+
+    if program == "wt" {
+        return Err(format!(
+            "{label} 未安装或不在 PATH 中，请安装 Windows Terminal，或将终端宿主切换为直接启动 Shell"
+        ));
+    }
+
+    Err(format!(
+        "{label} 未安装或不在 PATH 中，请切换 Shell 或安装对应程序"
+    ))
+}
+
+fn program_available(program: &str) -> bool {
+    Command::new("where.exe")
+        .arg(program)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn script_extension(path: &str) -> Option<String> {
@@ -2141,6 +2343,7 @@ mod tests {
                 "command": "Write-Output 'terminal bad'; exit 7",
                 "workingDir": working_dir,
                 "showTerminal": true,
+                "terminalHost": "direct",
                 "shell": "powershell"
             }),
             enabled: true,
@@ -2174,6 +2377,7 @@ mod tests {
                 "command": "Write-Output 'terminal hello'",
                 "workingDir": working_dir,
                 "showTerminal": true,
+                "terminalHost": "direct",
                 "shell": "powershell"
             }),
             enabled: true,
@@ -2205,6 +2409,7 @@ mod tests {
                 "workingDir": working_dir,
                 "showTerminal": true,
                 "closeTerminalOnFinish": true,
+                "terminalHost": "direct",
                 "shell": "powershell"
             }),
             enabled: true,
@@ -2215,7 +2420,7 @@ mod tests {
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
-        let terminal = terminal_command(&action, true).expect("terminal command");
+        let terminal = terminal_command(&action, true, &working_dir).expect("terminal command");
         let runner_path = runner_path(&terminal, "ps1");
         let runner =
             String::from_utf8_lossy(&std::fs::read(runner_path).expect("read runner")).to_string();
@@ -2242,6 +2447,7 @@ mod tests {
                 "workingDir": working_dir,
                 "showTerminal": true,
                 "closeTerminalOnFinish": false,
+                "terminalHost": "direct",
                 "shell": "powershell"
             }),
             enabled: true,
@@ -2252,7 +2458,7 @@ mod tests {
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
-        let terminal = terminal_command(&action, false).expect("terminal command");
+        let terminal = terminal_command(&action, false, &working_dir).expect("terminal command");
         let runner_path = runner_path(&terminal, "ps1");
         let runner =
             String::from_utf8_lossy(&std::fs::read(runner_path).expect("read runner")).to_string();
@@ -2279,6 +2485,7 @@ mod tests {
                 "workingDir": working_dir,
                 "showTerminal": true,
                 "closeTerminalOnFinish": true,
+                "terminalHost": "direct",
                 "shell": "cmd"
             }),
             enabled: true,
@@ -2289,7 +2496,7 @@ mod tests {
             risk_level: crate::domain::RiskLevel::Medium,
         };
 
-        let terminal = terminal_command(&action, true).expect("terminal command");
+        let terminal = terminal_command(&action, true, &working_dir).expect("terminal command");
         let runner_path = runner_path(&terminal, "cmd");
         let runner = std::fs::read_to_string(runner_path).expect("read runner");
 
@@ -2298,6 +2505,58 @@ mod tests {
         assert!(runner.contains("if not \"%exitCode%\"==\"0\""));
         assert!(runner.contains("set /p \"=按 Enter 关闭终端\""));
         assert!(runner.contains("exit /b %exitCode%"));
+        cleanup_temp_paths(&terminal.temp_paths);
+    }
+
+    #[test]
+    fn system_terminal_command_wraps_runner_with_wt_and_completion_marker() {
+        let working_dir = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "Write-Output 'ok'",
+                "workingDir": working_dir,
+                "showTerminal": true,
+                "closeTerminalOnFinish": true,
+                "terminalHost": "systemTerminal",
+                "shell": "pwsh"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        let terminal = terminal_command(&action, true, &working_dir).expect("terminal command");
+        let args: Vec<String> = terminal
+            .command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+        let runner_path = runner_path(&terminal, "ps1");
+        let runner =
+            String::from_utf8_lossy(&std::fs::read(runner_path).expect("read runner")).to_string();
+
+        assert_eq!(terminal.command.get_program().to_string_lossy(), "wt");
+        assert_eq!(args.first().map(String::as_str), Some("new-tab"));
+        assert!(args.iter().any(|arg| arg == "-d"));
+        assert!(args.iter().any(|arg| arg == &working_dir));
+        assert!(args.iter().any(|arg| arg == "--"));
+        assert!(args.iter().any(|arg| arg == "pwsh"));
+        assert!(args.iter().any(|arg| arg == "-File"));
+        assert!(terminal.wait_for_completion);
+        assert!(!terminal.configure_process);
+        assert!(terminal.exit_code_path.is_some());
+        assert!(terminal.completion_path.is_some());
+        assert!(runner.contains("Set-Content -LiteralPath $exitCodePath"));
+        assert!(runner.contains("Set-Content -LiteralPath $completionPath"));
         cleanup_temp_paths(&terminal.temp_paths);
     }
 
@@ -2366,6 +2625,7 @@ Write-Output "config=$ConfigPath"
                 "source": "script",
                 "command": "",
                 "workingDir": temp_dir.to_string_lossy(),
+                "terminalHost": "direct",
                 "shell": "powershell",
                 "scriptPath": script_path.to_string_lossy(),
                 "scriptArgs": []
@@ -2448,6 +2708,7 @@ Write-Output "config=$ConfigPath"
                 "source": "script",
                 "command": "",
                 "workingDir": temp_dir.to_string_lossy(),
+                "terminalHost": "direct",
                 "shell": "powershell",
                 "scriptPath": script_path.to_string_lossy(),
                 "scriptArgs": ["dev"]
@@ -2460,7 +2721,8 @@ Write-Output "config=$ConfigPath"
             risk_level: crate::domain::RiskLevel::High,
         };
 
-        let terminal = terminal_command(&action, true).expect("terminal command");
+        let terminal = terminal_command(&action, true, temp_dir.to_string_lossy().as_ref())
+            .expect("terminal command");
         let runner_path = runner_path(&terminal, "ps1");
         let runner =
             String::from_utf8_lossy(&std::fs::read(runner_path).expect("read runner")).to_string();

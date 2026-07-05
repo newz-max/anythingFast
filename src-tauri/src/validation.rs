@@ -186,6 +186,14 @@ fn validate_run_command_action(action: &TaskAction, issues: &mut Vec<FieldIssue>
     if !is_supported_command_shell(shell) {
         issues.push(issue("shell", "Shell 必须是 pwsh、powershell 或 cmd"));
     }
+
+    let terminal_host = string_param(action, "terminalHost");
+    if !terminal_host.is_empty() && !is_supported_terminal_host(terminal_host) {
+        issues.push(issue(
+            "terminalHost",
+            "终端宿主必须是 systemTerminal 或 direct",
+        ));
+    }
 }
 
 fn validate_script_command_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
@@ -346,6 +354,10 @@ fn is_powershell_script_path(path: &str) -> bool {
 
 fn is_supported_command_shell(shell: &str) -> bool {
     matches!(shell, "pwsh" | "powershell" | "cmd")
+}
+
+fn is_supported_terminal_host(value: &str) -> bool {
+    matches!(value, "systemTerminal" | "direct")
 }
 
 fn has_variable_reference(value: &str) -> bool {
@@ -573,6 +585,38 @@ mod tests {
         assert!(!result.valid);
         assert!(result.issues.iter().any(|issue| issue.field == "shell"));
         let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn rejects_unsupported_terminal_host() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: None,
+            params: json!({
+                "source": "inline",
+                "command": "Write-Output 'ok'",
+                "workingDir": "D:\\Project",
+                "shell": "powershell",
+                "terminalHost": "classic"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: RiskLevel::Medium,
+        };
+
+        let result = validate_action_model(&action);
+
+        assert!(!result.valid);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.field == "terminalHost")
+        );
     }
 
     #[test]

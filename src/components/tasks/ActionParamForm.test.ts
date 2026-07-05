@@ -79,6 +79,7 @@ function makeCommandAction(): TaskAction {
       env: {},
       showTerminal: false,
       closeTerminalOnFinish: true,
+      terminalHost: 'systemTerminal',
       shell: 'powershell',
       scriptPath: '',
       scriptArgs: []
@@ -162,6 +163,73 @@ describe('ActionParamForm', () => {
     const shellSelect = selects[1]
 
     expect(shellSelect.props('options')).toContainEqual({ label: 'PowerShell 7', value: 'pwsh' })
+  })
+
+  it('shows command shell selection for script commands', () => {
+    const wrapper = mount(ActionParamForm, {
+      props: {
+        modelValue: {
+          ...makeCommandAction(),
+          params: {
+            ...makeCommandAction().params,
+            source: 'script',
+            command: '',
+            scriptPath: 'D:\\Project\\anythingFast\\start.ps1'
+          }
+        }
+      },
+      global: {
+        stubs: formStubs
+      }
+    })
+
+    const selects = wrapper.findAllComponents({ name: 'NSelect' })
+    const shellSelect = selects.find((select) => {
+      const options = select.props('options') as Array<{ value: string }> | undefined
+      return options?.some((option) => option.value === 'pwsh')
+    })
+
+    expect(shellSelect?.exists()).toBe(true)
+    expect(shellSelect?.props('options')).toContainEqual({ label: 'PowerShell 7', value: 'pwsh' })
+  })
+
+  it('shows and updates terminal host only when terminal is shown', async () => {
+    const hiddenTerminalAction = makeCommandAction()
+    const wrapper = mount(ActionParamForm, {
+      props: {
+        modelValue: hiddenTerminalAction
+      },
+      global: {
+        stubs: formStubs
+      }
+    })
+
+    expect(wrapper.text()).not.toContain('终端宿主')
+
+    await wrapper.setProps({
+      modelValue: {
+        ...hiddenTerminalAction,
+        params: {
+          ...hiddenTerminalAction.params,
+          showTerminal: true
+        }
+      }
+    })
+
+    expect(wrapper.text()).toContain('终端宿主')
+
+    const terminalHostSelect = wrapper.findAllComponents({ name: 'NSelect' }).find((select) => {
+      const options = select.props('options') as Array<{ value: string }> | undefined
+      return options?.some((option) => option.value === 'systemTerminal')
+    })
+    expect(terminalHostSelect?.props('options')).toContainEqual({ label: '系统终端', value: 'systemTerminal' })
+    expect(terminalHostSelect?.props('options')).toContainEqual({ label: '直接启动 Shell', value: 'direct' })
+
+    await terminalHostSelect?.vm.$emit('update:value', 'direct')
+
+    const updates = wrapper.emitted('update:modelValue')
+    const updatedAction = updates?.at(-1)?.[0] as TaskAction
+    expect((updatedAction.params as CommandParams).terminalHost).toBe('direct')
   })
 
   it('explains command output logging behavior', () => {

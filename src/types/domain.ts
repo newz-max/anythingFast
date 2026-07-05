@@ -3,6 +3,7 @@ export type RiskLevel = 'low' | 'medium' | 'high'
 export type ActionType = 'openProgram' | 'openUrl' | 'openFile' | 'openFolder' | 'runCommand' | 'delay'
 
 export type CommandShell = 'powershell' | 'pwsh' | 'cmd'
+export type CommandTerminalHost = 'systemTerminal' | 'direct'
 export type CommandSource = 'inline' | 'script'
 
 export interface OpenProgramParams {
@@ -27,6 +28,7 @@ export interface CommandParams {
   env?: Record<string, string>
   showTerminal?: boolean
   closeTerminalOnFinish?: boolean
+  terminalHost?: CommandTerminalHost
   shell: CommandShell
   scriptPath?: string
   scriptArgs?: string[]

@@ -59,7 +59,7 @@ export const actionTypeDefinitions: Record<ActionType, ActionTypeDefinition> = {
   },
   runCommand: {
     label: '执行命令',
-    description: '通过 PowerShell 7、PowerShell 或 cmd 执行本地命令。',
+    description: '通过 PowerShell 7、PowerShell 或 cmd 执行本地命令，可选择终端宿主。',
     createDefaultParams: () => ({
       source: 'inline',
       command: '',
@@ -67,7 +67,8 @@ export const actionTypeDefinitions: Record<ActionType, ActionTypeDefinition> = {
       env: {},
       showTerminal: false,
       closeTerminalOnFinish: true,
-      shell: 'powershell',
+      terminalHost: 'systemTerminal',
+      shell: 'pwsh',
       scriptPath: '',
       scriptArgs: []
     }),
@@ -120,6 +121,9 @@ export const actionTypeDefinitions: Record<ActionType, ActionTypeDefinition> = {
       }
       if (!isSupportedCommandShell(action.params.shell)) {
         issues.push({ field: 'shell', message: 'Shell 必须是 PowerShell 7、PowerShell 或 cmd' })
+      }
+      if (!isSupportedTerminalHost(action.params.terminalHost)) {
+        issues.push({ field: 'terminalHost', message: '终端宿主必须是系统终端或直接启动 Shell' })
       }
       validateOutputBinding(action, issues)
     }
@@ -208,6 +212,10 @@ function isPowerShellScriptPath(value: string) {
 
 function isSupportedCommandShell(value: string) {
   return value === 'pwsh' || value === 'powershell' || value === 'cmd'
+}
+
+function isSupportedTerminalHost(value: unknown) {
+  return value === undefined || value === 'systemTerminal' || value === 'direct'
 }
 
 function isHttpUrl(value: string) {

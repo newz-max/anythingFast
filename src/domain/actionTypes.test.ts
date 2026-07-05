@@ -48,7 +48,8 @@ describe('action type definitions', () => {
       env: {},
       showTerminal: false,
       closeTerminalOnFinish: true,
-      shell: 'powershell',
+      terminalHost: 'systemTerminal',
+      shell: 'pwsh',
       scriptPath: '',
       scriptArgs: []
     })

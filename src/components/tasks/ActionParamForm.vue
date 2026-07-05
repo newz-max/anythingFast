@@ -18,6 +18,11 @@ const commandShellOptions = [
   { label: 'cmd', value: 'cmd' }
 ]
 
+const commandTerminalHostOptions = [
+  { label: '系统终端', value: 'systemTerminal' },
+  { label: '直接启动 Shell', value: 'direct' }
+]
+
 const commandSourceOptions = [
   { label: '命令文本', value: 'inline' },
   { label: '脚本文件', value: 'script' }
@@ -185,7 +190,7 @@ function updateScriptArgs(value: string) {
             </NRadioGroup>
           </NFormItem>
         </NGi>
-        <NGi v-if="commandSource === 'inline'">
+        <NGi>
           <NFormItem label="Shell">
             <NSelect :value="textParam('shell')" :options="commandShellOptions" @update:value="(value: string) => patchParams({ shell: value })" />
           </NFormItem>
@@ -193,6 +198,15 @@ function updateScriptArgs(value: string) {
         <NGi>
           <NFormItem label="显示终端窗口">
             <NSwitch :value="Boolean(params.showTerminal)" @update:value="(value: boolean) => patchParams({ showTerminal: value })" />
+          </NFormItem>
+        </NGi>
+        <NGi v-if="Boolean(params.showTerminal)">
+          <NFormItem label="终端宿主">
+            <NSelect
+              :value="textParam('terminalHost') || 'systemTerminal'"
+              :options="commandTerminalHostOptions"
+              @update:value="(value: string) => patchParams({ terminalHost: value })"
+            />
           </NFormItem>
         </NGi>
         <NGi v-if="Boolean(params.showTerminal)">
