@@ -20,6 +20,8 @@ const { query, results } = useTaskSearch(enabledTasks, { ranking: 'quickRecent' 
 const { execute, running } = useTaskExecution()
 const selectedIndex = shallowRef(0)
 const inputRef = useTemplateRef<{ focus: () => void }>('searchInput')
+const resultsRef = useTemplateRef<HTMLElement>('results')
+const resultItemRefs = useTemplateRef<HTMLButtonElement[]>('resultItems')
 
 const visibleResults = computed(() => results.value.slice(0, 8))
 const resultRows = computed(() =>
@@ -65,12 +67,12 @@ function onKeydown(event: KeyboardEvent) {
   }
   if (event.key === 'ArrowDown') {
     event.preventDefault()
-    selectedIndex.value = Math.min(selectedIndex.value + 1, Math.max(resultRows.value.length - 1, 0))
+    moveSelection(1)
     return
   }
   if (event.key === 'ArrowUp') {
     event.preventDefault()
-    selectedIndex.value = Math.max(selectedIndex.value - 1, 0)
+    moveSelection(-1)
     return
   }
   if (event.key === 'Enter' && selectedTask.value && !running.value) {
@@ -81,6 +83,28 @@ function onKeydown(event: KeyboardEvent) {
 
 function resetSelection() {
   selectedIndex.value = 0
+  void resetResultsScroll()
+}
+
+function moveSelection(delta: number) {
+  const lastIndex = Math.max(resultRows.value.length - 1, 0)
+  selectedIndex.value = Math.min(Math.max(selectedIndex.value + delta, 0), lastIndex)
+  void scrollSelectedIntoView()
+}
+
+async function resetResultsScroll() {
+  await nextTick()
+  if (resultsRef.value) {
+    resultsRef.value.scrollTop = 0
+  }
+  await scrollSelectedIntoView()
+}
+
+async function scrollSelectedIntoView() {
+  await nextTick()
+  resultItemRefs.value?.[selectedIndex.value]?.scrollIntoView({
+    block: 'nearest'
+  })
 }
 
 function runTask(task: TaskItem) {
@@ -158,6 +182,10 @@ function formatTaskTime(value: string) {
 
   return `${prefix} ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}`
 }
+
+function resultOptionId(taskId: string) {
+  return `quick-result-${taskId}`
+}
 </script>
 
 <template>
@@ -188,7 +216,14 @@ function formatTaskTime(value: string) {
         />
       </section>
 
-      <section class="results" aria-live="polite">
+      <section
+        ref="results"
+        class="results"
+        role="listbox"
+        aria-label="快捷搜索结果"
+        :aria-activedescendant="selectedTask ? resultOptionId(selectedTask.id) : undefined"
+        aria-live="polite"
+      >
         <div v-if="taskStore.loading" class="state-panel">
           <NSpin size="small" />
           <span>正在加载事项配置</span>
@@ -198,9 +233,13 @@ function formatTaskTime(value: string) {
           <button
             v-for="(row, index) in resultRows"
             :key="row.task.id"
+            :id="resultOptionId(row.task.id)"
+            ref="resultItems"
             type="button"
+            role="option"
             class="result-item"
             :class="{ active: index === selectedIndex, running: row.running }"
+            :aria-selected="index === selectedIndex"
             @mouseenter="selectedIndex = index"
             @click="runTask(row.task)"
           >
@@ -393,6 +432,7 @@ function formatTaskTime(value: string) {
 }
 
 .result-item {
+  position: relative;
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
@@ -405,6 +445,7 @@ function formatTaskTime(value: string) {
   background: rgba(27, 35, 55, 0.62);
   color: inherit;
   cursor: pointer;
+  overflow: hidden;
   padding: 13px 13px 12px 15px;
   text-align: left;
   transition:
@@ -413,7 +454,18 @@ function formatTaskTime(value: string) {
     box-shadow 160ms ease;
 }
 
-.result-item.active,
+.result-item::before {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 999px 999px 0;
+  background: transparent;
+  content: "";
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+
 .result-item:hover {
   border-color: rgba(67, 109, 255, 0.9);
   background:
@@ -422,11 +474,41 @@ function formatTaskTime(value: string) {
   box-shadow: 0 0 0 1px rgba(60, 94, 161, 0.2), 0 12px 30px rgba(19, 42, 119, 0.22);
 }
 
+.result-item.active {
+  border-color: rgba(112, 154, 255, 0.98);
+  background:
+    linear-gradient(90deg, rgba(83, 132, 255, 0.18), transparent 42%),
+    radial-gradient(circle at 100% 0%, rgba(82, 90, 255, 0.28), transparent 50%),
+    rgba(31, 43, 78, 0.94);
+  box-shadow:
+    0 0 0 2px rgba(102, 146, 255, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 15px 34px rgba(19, 42, 119, 0.3);
+}
+
+.result-item.active::before {
+  background: #8db4ff;
+  box-shadow: 0 0 18px rgba(141, 180, 255, 0.9);
+}
+
+.result-item:focus-visible {
+  outline: 2px solid rgba(168, 194, 255, 0.82);
+  outline-offset: 2px;
+}
+
 .result-item.running {
   border-color: rgba(77, 135, 255, 0.66);
   background:
     radial-gradient(circle at 100% 0%, rgba(82, 90, 255, 0.22), transparent 48%),
     rgba(28, 38, 68, 0.82);
+}
+
+.result-item.running.active {
+  border-color: rgba(112, 154, 255, 0.98);
+  background:
+    linear-gradient(90deg, rgba(83, 132, 255, 0.18), transparent 42%),
+    radial-gradient(circle at 100% 0%, rgba(82, 90, 255, 0.28), transparent 50%),
+    rgba(31, 43, 78, 0.94);
 }
 
 .task-icon {
