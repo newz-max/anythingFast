@@ -26,6 +26,20 @@ Windows 本地优先的事项入口管理器，用于把程序、URL、文件、
 - 高风险动作二次确认
 - 本地 JSON 持久化配置
 
+## 界面预览
+
+主配置窗口：
+
+![主配置窗口](./screenshots/main-window.png)
+
+事项详情：
+
+![事项详情](./screenshots/task-detail.png)
+
+快捷搜索面板：
+
+![快捷搜索面板](./screenshots/quick-search.png)
+
 ## 快速开始
 
 安装依赖：
