@@ -653,6 +653,48 @@ mod tests {
     }
 
     #[test]
+    fn export_import_roundtrip_preserves_schedule_trigger() {
+        let mut task = sample_url_task("task-schedule", "action-a", "https://example.com");
+        task.triggers = vec![TaskTrigger::Schedule {
+            enabled: true,
+            mode: crate::domain::ScheduleMode::Daily,
+            interval_minutes: Some(60),
+            time_of_day: Some("09:00".into()),
+            weekdays: Vec::new(),
+            misfire_policy: crate::domain::ScheduleMisfirePolicy::Skip,
+            prevent_overlap: true,
+            next_run_at: Some("2026-07-06T01:00:00Z".into()),
+            last_scheduled_at: None,
+        }];
+        let source_config = AppConfig {
+            tasks: vec![task],
+            ..AppConfig::default()
+        };
+
+        let bundle = create_export_bundle(
+            &source_config,
+            ExportBundleRequest {
+                task_ids: vec!["task-schedule".into()],
+                template_ids: Vec::new(),
+            },
+        )
+        .unwrap();
+        let content = serde_json::to_string(&bundle).unwrap();
+        let imported = confirm_import(&content, &AppConfig::default()).unwrap();
+
+        assert!(matches!(
+            &imported.tasks[0].triggers[0],
+            TaskTrigger::Schedule {
+                mode: crate::domain::ScheduleMode::Daily,
+                time_of_day: Some(time),
+                misfire_policy: crate::domain::ScheduleMisfirePolicy::Skip,
+                prevent_overlap: true,
+                ..
+            } if time == "09:00"
+        ));
+    }
+
+    #[test]
     fn batch_import_preserves_action_order_and_regenerates_conflicting_ids() {
         let mut existing_config = AppConfig::default();
         existing_config.tasks.push(sample_url_task(

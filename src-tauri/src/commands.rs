@@ -62,6 +62,8 @@ pub fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig, Strin
         .map_err(|err| log_command_error("save_config refresh shortcuts failed", err))?;
     storage::save_config(&app, &normalized)
         .map_err(|err| log_command_error("save_config storage write failed", err))?;
+    crate::scheduler::refresh_scheduled_triggers(&app, &normalized)
+        .map_err(|err| log_command_error("save_config refresh schedules failed", err))?;
     storage::load_config(&app).map_err(|err| log_command_error("save_config reload failed", err))
 }
 
@@ -367,6 +369,8 @@ pub fn confirm_import_bundle(app: AppHandle, bundle_json: String) -> Result<AppC
         .map_err(|err| log_command_error("confirm_import_bundle refresh shortcuts failed", err))?;
     storage::save_config(&app, &next_config)
         .map_err(|err| log_command_error("confirm_import_bundle save failed", err))?;
+    crate::scheduler::refresh_scheduled_triggers(&app, &next_config)
+        .map_err(|err| log_command_error("confirm_import_bundle refresh schedules failed", err))?;
     storage::load_config(&app)
         .map_err(|err| log_command_error("confirm_import_bundle reload failed", err))
 }

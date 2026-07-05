@@ -45,4 +45,55 @@ describe('taskStore templates', () => {
     expect('id' in template.actions[0]).toBe(false)
     expect(template.description).toBe(task.description)
   })
+
+  it('persists scheduled triggers in browser fallback config', async () => {
+    const store = useTaskStore()
+    const task: TaskItem = {
+      id: 'task-schedule',
+      name: '周期事项',
+      category: '工作',
+      keywords: [],
+      description: '',
+      actions: [
+        {
+          id: 'action-a',
+          type: 'openUrl',
+          name: '打开网页',
+          params: { url: 'https://example.com' },
+          enabled: true,
+          riskLevel: 'low'
+        }
+      ],
+      riskLevel: 'low',
+      enabled: true,
+      favorite: false,
+      tagIds: [],
+      triggers: [
+        {
+          type: 'schedule',
+          enabled: true,
+          mode: 'daily',
+          timeOfDay: '09:00',
+          weekdays: [],
+          intervalMinutes: 60,
+          misfirePolicy: 'skip',
+          preventOverlap: true
+        }
+      ],
+      createdAt: '2026-07-01T00:00:00Z',
+      updatedAt: '2026-07-01T00:00:00Z'
+    }
+
+    await store.upsertTask(task)
+
+    const stored = JSON.parse(localStorage.getItem('anything-fast-config') || '{}')
+    expect(stored.tasks[0].triggers[0]).toMatchObject({
+      type: 'schedule',
+      enabled: true,
+      mode: 'daily',
+      timeOfDay: '09:00',
+      misfirePolicy: 'skip',
+      preventOverlap: true
+    })
+  })
 })

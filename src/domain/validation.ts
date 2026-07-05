@@ -1,6 +1,7 @@
 import type { ActionCondition, FieldIssue, TaskAction, TaskItem, ValidationResult } from '@/types/domain'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
 import { validateActionParamsByDefinition } from '@/domain/actionTypes'
+import { validateScheduleTrigger } from '@/domain/schedule'
 import { collectActionStringValues, collectConditionStringValues, extractVariableReferences, hasInvalidVariableSyntax, isValidVariableKey } from '@/domain/variables'
 
 export function validateTaskLocal(task: TaskItem, allTasks: TaskItem[] = []): ValidationResult {
@@ -17,6 +18,12 @@ export function validateTaskLocal(task: TaskItem, allTasks: TaskItem[] = []): Va
   if (task.actions.length === 0) {
     issues.push({ field: 'actions', message: '至少需要一个动作' })
   }
+
+  task.triggers.forEach((trigger, index) => {
+    if (trigger.type === 'schedule') {
+      issues.push(...validateScheduleTrigger(trigger, `triggers.${index}`))
+    }
+  })
 
   const variableKeys = new Set<string>()
   ;(task.variables || []).forEach((variable, index) => {

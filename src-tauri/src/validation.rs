@@ -1,6 +1,7 @@
 use crate::domain::{
     ActionCondition, ActionType, AppConfig, FieldIssue, PreviousActionStatusConditionValue,
-    RiskLevel, TaskAction, TaskItem, TaskTrigger, ValidationResult,
+    RiskLevel, ScheduleMode, ScheduleMisfirePolicy, TaskAction, TaskItem, TaskTrigger,
+    ValidationResult,
 };
 use crate::risk::{derive_action_risk, derive_task_risk};
 use crate::variables::{
@@ -8,6 +9,8 @@ use crate::variables::{
 };
 use std::collections::HashSet;
 use std::path::Path;
+
+pub const MIN_SCHEDULE_INTERVAL_MINUTES: u32 = 5;
 
 pub fn validate_config_model(config: &AppConfig) -> Vec<FieldIssue> {
     let mut issues = Vec::new();
@@ -33,20 +36,27 @@ pub fn validate_config_model(config: &AppConfig) -> Vec<FieldIssue> {
         }
 
         for trigger in &task.triggers {
-            if let TaskTrigger::Shortcut { enabled, shortcut } = trigger {
-                let normalized = normalize_shortcut(shortcut);
-                if *enabled && normalized.is_empty() {
-                    issues.push(issue("triggers", "快捷键不能为空"));
+            match trigger {
+                TaskTrigger::Shortcut { enabled, shortcut } => {
+                    let normalized = normalize_shortcut(shortcut);
+                    if *enabled && normalized.is_empty() {
+                        issues.push(issue("triggers", "快捷键不能为空"));
+                    }
+                    if *enabled && normalized == normalize_shortcut(&config.settings.global_shortcut)
+                    {
+                        issues.push(issue("triggers", "事项快捷键不能与全局快捷键冲突"));
+                    }
+                    if *enabled && !is_supported_shortcut(shortcut) {
+                        issues.push(issue("triggers", "快捷键格式无效"));
+                    }
+                    if *enabled && !shortcuts.insert(normalized) {
+                        issues.push(issue("triggers", "事项快捷键不能重复"));
+                    }
                 }
-                if *enabled && normalized == normalize_shortcut(&config.settings.global_shortcut) {
-                    issues.push(issue("triggers", "事项快捷键不能与全局快捷键冲突"));
+                TaskTrigger::Schedule { .. } => {
+                    issues.extend(validate_schedule_trigger(trigger));
                 }
-                if *enabled && !is_supported_shortcut(shortcut) {
-                    issues.push(issue("triggers", "快捷键格式无效"));
-                }
-                if *enabled && !shortcuts.insert(normalized) {
-                    issues.push(issue("triggers", "事项快捷键不能重复"));
-                }
+                TaskTrigger::Manual { .. } => {}
             }
         }
     }
@@ -307,6 +317,32 @@ pub fn normalize_task(mut task: TaskItem) -> TaskItem {
                 enabled,
                 shortcut: shortcut.trim().to_string(),
             },
+            TaskTrigger::Schedule {
+                enabled,
+                mode,
+                interval_minutes,
+                time_of_day,
+                mut weekdays,
+                misfire_policy,
+                prevent_overlap,
+                next_run_at,
+                last_scheduled_at,
+            } => {
+                weekdays.sort();
+                weekdays.dedup();
+                weekdays.retain(|weekday| (1..=7).contains(weekday));
+                TaskTrigger::Schedule {
+                    enabled,
+                    mode,
+                    interval_minutes,
+                    time_of_day: time_of_day.map(|value| value.trim().to_string()),
+                    weekdays,
+                    misfire_policy,
+                    prevent_overlap,
+                    next_run_at,
+                    last_scheduled_at,
+                }
+            }
             manual => manual,
         })
         .collect();
@@ -414,6 +450,72 @@ fn is_supported_shortcut(value: &str) -> bool {
         && (key.len() == 1 && key.chars().all(|ch| ch.is_ascii_alphanumeric()) || key == "space")
 }
 
+fn validate_schedule_trigger(trigger: &TaskTrigger) -> Vec<FieldIssue> {
+    let mut issues = Vec::new();
+    let TaskTrigger::Schedule {
+        enabled: _,
+        mode,
+        interval_minutes,
+        time_of_day,
+        weekdays,
+        misfire_policy,
+        prevent_overlap: _,
+        next_run_at: _,
+        last_scheduled_at: _,
+    } = trigger
+    else {
+        return issues;
+    };
+
+    match mode {
+        ScheduleMode::Interval => {
+            if interval_minutes.unwrap_or_default() < MIN_SCHEDULE_INTERVAL_MINUTES {
+                issues.push(issue(
+                    "triggers.intervalMinutes",
+                    &format!("间隔不能小于 {MIN_SCHEDULE_INTERVAL_MINUTES} 分钟"),
+                ));
+            }
+        }
+        ScheduleMode::Daily => {
+            if !is_valid_time_of_day(time_of_day.as_deref().unwrap_or_default()) {
+                issues.push(issue("triggers.timeOfDay", "执行时间必须是 HH:mm 格式"));
+            }
+        }
+        ScheduleMode::Weekly => {
+            if !is_valid_time_of_day(time_of_day.as_deref().unwrap_or_default()) {
+                issues.push(issue("triggers.timeOfDay", "执行时间必须是 HH:mm 格式"));
+            }
+            if weekdays.is_empty() {
+                issues.push(issue("triggers.weekdays", "每周触发至少选择一天"));
+            }
+            if weekdays.iter().any(|weekday| !(1..=7).contains(weekday)) {
+                issues.push(issue("triggers.weekdays", "星期值必须在 1 到 7 之间"));
+            }
+        }
+    }
+
+    match misfire_policy {
+        ScheduleMisfirePolicy::Skip | ScheduleMisfirePolicy::RunOnce => {}
+    }
+    issues
+}
+
+pub fn is_valid_time_of_day(value: &str) -> bool {
+    let Some((hour, minute)) = value.trim().split_once(':') else {
+        return false;
+    };
+    if hour.len() != 2 || minute.len() != 2 {
+        return false;
+    }
+    let Ok(hour) = hour.parse::<u8>() else {
+        return false;
+    };
+    let Ok(minute) = minute.parse::<u8>() else {
+        return false;
+    };
+    hour <= 23 && minute <= 59
+}
+
 #[allow(dead_code)]
 fn _risk_level_used(_: RiskLevel) {}
 
@@ -509,6 +611,120 @@ mod tests {
         let issues = validate_config_model(&config);
 
         assert!(issues.iter().any(|issue| issue.field == "tags"));
+    }
+
+    #[test]
+    fn validates_schedule_trigger_settings() {
+        let mut config = AppConfig::default();
+        config.tasks.push(TaskItem {
+            id: "task".into(),
+            name: "周期事项".into(),
+            category: None,
+            keywords: None,
+            description: None,
+            variables: Vec::new(),
+            actions: Vec::new(),
+            risk_level: RiskLevel::Low,
+            enabled: true,
+            favorite: false,
+            tag_ids: Vec::new(),
+            triggers: vec![TaskTrigger::Schedule {
+                enabled: true,
+                mode: ScheduleMode::Weekly,
+                interval_minutes: Some(1),
+                time_of_day: Some("25:00".into()),
+                weekdays: Vec::new(),
+                misfire_policy: ScheduleMisfirePolicy::Skip,
+                prevent_overlap: true,
+                next_run_at: None,
+                last_scheduled_at: None,
+            }],
+            last_run_at: None,
+            created_at: "2026-07-01T00:00:00Z".into(),
+            updated_at: "2026-07-01T00:00:00Z".into(),
+        });
+
+        let issues = validate_config_model(&config);
+
+        assert!(issues.iter().any(|issue| issue.field == "triggers.timeOfDay"));
+        assert!(issues.iter().any(|issue| issue.field == "triggers.weekdays"));
+    }
+
+    #[test]
+    fn normalize_task_preserves_schedule_trigger_fields() {
+        let task = TaskItem {
+            id: "task".into(),
+            name: "周期事项".into(),
+            category: None,
+            keywords: None,
+            description: None,
+            variables: Vec::new(),
+            actions: Vec::new(),
+            risk_level: RiskLevel::Low,
+            enabled: true,
+            favorite: false,
+            tag_ids: Vec::new(),
+            triggers: vec![TaskTrigger::Schedule {
+                enabled: true,
+                mode: ScheduleMode::Weekly,
+                interval_minutes: Some(60),
+                time_of_day: Some(" 09:30 ".into()),
+                weekdays: vec![3, 1, 3, 8],
+                misfire_policy: ScheduleMisfirePolicy::RunOnce,
+                prevent_overlap: true,
+                next_run_at: Some("2026-07-06T01:30:00Z".into()),
+                last_scheduled_at: None,
+            }],
+            last_run_at: None,
+            created_at: "2026-07-01T00:00:00Z".into(),
+            updated_at: "2026-07-01T00:00:00Z".into(),
+        };
+
+        let normalized = normalize_task(task);
+
+        assert!(matches!(
+            &normalized.triggers[0],
+            TaskTrigger::Schedule {
+                mode: ScheduleMode::Weekly,
+                time_of_day: Some(time),
+                weekdays,
+                misfire_policy: ScheduleMisfirePolicy::RunOnce,
+                prevent_overlap: true,
+                next_run_at: Some(_),
+                ..
+            } if time == "09:30" && weekdays == &vec![1, 3]
+        ));
+    }
+
+    #[test]
+    fn schedule_trigger_deserializes_default_policy_fields() {
+        let task: TaskItem = serde_json::from_value(json!({
+            "id": "task",
+            "name": "周期事项",
+            "actions": [],
+            "riskLevel": "low",
+            "enabled": true,
+            "favorite": false,
+            "tagIds": [],
+            "triggers": [{
+                "type": "schedule",
+                "enabled": true,
+                "mode": "daily",
+                "timeOfDay": "09:00"
+            }],
+            "createdAt": "2026-07-01T00:00:00Z",
+            "updatedAt": "2026-07-01T00:00:00Z"
+        }))
+        .expect("scheduled task");
+
+        assert!(matches!(
+            &task.triggers[0],
+            TaskTrigger::Schedule {
+                misfire_policy: ScheduleMisfirePolicy::Skip,
+                prevent_overlap: true,
+                ..
+            }
+        ));
     }
 
     #[test]

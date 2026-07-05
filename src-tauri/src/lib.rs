@@ -4,11 +4,12 @@ mod domain;
 mod executor;
 mod import_export;
 mod risk;
+pub(crate) mod scheduler;
 mod storage;
+pub(crate) mod triggered_execution;
 mod validation;
 mod variables;
 
-use chrono::Utc;
 use commands::*;
 use diagnostics::dev_log_error;
 use domain::{ShortcutStatus, TaskTrigger};
@@ -57,6 +58,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(TaskShortcutRegistry::default())
         .manage(GlobalShortcutState::default())
+        .manage(scheduler::SchedulerState::default())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -110,6 +112,14 @@ pub fn run() {
             }
             refresh_task_shortcuts(app.handle(), &config).map_err(|err| {
                 dev_log_error("Refresh task shortcuts during setup failed", &err);
+                tauri::Error::Anyhow(anyhow::anyhow!(err))
+            })?;
+            scheduler::refresh_scheduled_triggers(app.handle(), &config).map_err(|err| {
+                dev_log_error("Refresh scheduled triggers during setup failed", &err);
+                tauri::Error::Anyhow(anyhow::anyhow!(err))
+            })?;
+            scheduler::start_scheduler(app.handle()).map_err(|err| {
+                dev_log_error("Start scheduled trigger scheduler failed", &err);
                 tauri::Error::Anyhow(anyhow::anyhow!(err))
             })?;
             Ok(())
@@ -367,76 +377,11 @@ fn toggle_quick_panel(app: &tauri::AppHandle) {
 fn trigger_task_shortcut(app: &tauri::AppHandle, task_id: String) {
     let app = app.clone();
     std::thread::spawn(move || {
-        let mut config = match storage::load_config(&app) {
-            Ok(config) => config,
-            Err(err) => {
-                dev_log_error("Load config for task shortcut failed", &err);
-                return;
-            }
-        };
-        let task_index = match config.tasks.iter().position(|task| task.id == task_id) {
-            Some(index) => index,
-            None => {
-                dev_log_error(
-                    "Find task for shortcut failed",
-                    format!("task id not found: {task_id}"),
-                );
-                return;
-            }
-        };
-        let task = config.tasks[task_index].clone();
-        if !task.enabled {
+        if let Err(err) = triggered_execution::execute_unattended_task(&app, &task_id) {
             dev_log_error(
-                "Run task shortcut skipped",
-                format!("task disabled: {}", task.id),
+                "Execute task from shortcut failed",
+                format!("task id: {task_id}, error: {err}"),
             );
-            return;
-        }
-        let validation = validation::validate_task_model(&task, &config.tasks);
-        if !validation.valid {
-            dev_log_error(
-                "Validate task for shortcut failed",
-                validation
-                    .issues
-                    .iter()
-                    .map(|issue| format!("{}: {}", issue.field, issue.message))
-                    .collect::<Vec<_>>()
-                    .join("; "),
-            );
-            return;
-        }
-        let risk = risk::analyze_task_risk(&task);
-        if risk.requires_confirmation {
-            if let Err(err) = app.emit(
-                "task-execution",
-                serde_json::json!({
-                    "taskId": task.id,
-                    "taskName": task.name,
-                    "status": "failed",
-                    "message": "该事项需要二次确认，请在主窗口中手动运行"
-                }),
-            ) {
-                dev_log_error("Emit shortcut confirmation failure event failed", &err);
-            }
-            return;
-        }
-        match executor::execute_task(&app, &task, &variables::empty_runtime_values(), false) {
-            Ok(summary) => {
-                let finished_at = summary.finished_at.clone();
-                config.tasks[task_index].last_run_at = Some(finished_at.clone());
-                config.tasks[task_index].updated_at = finished_at;
-            }
-            Err(err) => {
-                dev_log_error(
-                    "Execute task from shortcut failed",
-                    format!("task id: {}, error: {err}", task.id),
-                );
-                let now = Utc::now().to_rfc3339();
-                config.tasks[task_index].updated_at = now;
-            }
-        }
-        if let Err(err) = storage::save_config(&app, &config) {
-            dev_log_error("Save config after task shortcut failed", &err);
         }
     });
 }

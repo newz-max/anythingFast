@@ -95,7 +95,10 @@ export interface TaskItem {
   updatedAt: string
 }
 
-export type TaskTrigger = ManualTaskTrigger | ShortcutTaskTrigger
+export type TaskTrigger = ManualTaskTrigger | ShortcutTaskTrigger | ScheduleTaskTrigger
+
+export type ScheduleMode = 'interval' | 'daily' | 'weekly'
+export type ScheduleMisfirePolicy = 'skip' | 'runOnce'
 
 export interface ManualTaskTrigger {
   type: 'manual'
@@ -106,6 +109,19 @@ export interface ShortcutTaskTrigger {
   type: 'shortcut'
   enabled: boolean
   shortcut: string
+}
+
+export interface ScheduleTaskTrigger {
+  type: 'schedule'
+  enabled: boolean
+  mode: ScheduleMode
+  intervalMinutes?: number | null
+  timeOfDay?: string
+  weekdays?: number[]
+  misfirePolicy: ScheduleMisfirePolicy
+  preventOverlap: boolean
+  nextRunAt?: string
+  lastScheduledAt?: string
 }
 
 export interface TaskTag {

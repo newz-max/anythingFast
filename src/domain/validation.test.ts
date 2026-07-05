@@ -351,4 +351,45 @@ describe('validation', () => {
 
     expect(result.valid).toBe(true)
   })
+
+  it('validates scheduled trigger settings locally', () => {
+    const task: TaskItem = {
+      id: 'task-1',
+      name: '周期事项',
+      actions: [
+        {
+          id: 'action-1',
+          type: 'openUrl',
+          name: '打开地址',
+          params: { url: 'https://example.com' },
+          enabled: true,
+          riskLevel: 'low'
+        }
+      ],
+      riskLevel: 'low',
+      enabled: true,
+      favorite: false,
+      tagIds: [],
+      triggers: [
+        {
+          type: 'schedule',
+          enabled: true,
+          mode: 'weekly',
+          timeOfDay: '25:00',
+          weekdays: [],
+          intervalMinutes: 1,
+          misfirePolicy: 'skip',
+          preventOverlap: true
+        }
+      ],
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z'
+    }
+
+    const result = validateTaskLocal(task)
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.field)).toContain('triggers.0.timeOfDay')
+    expect(result.issues.map((issue) => issue.field)).toContain('triggers.0.weekdays')
+  })
 })

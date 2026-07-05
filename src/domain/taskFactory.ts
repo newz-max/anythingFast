@@ -1,6 +1,7 @@
 import { clonePlainDto } from '@/utils/clonePlainDto'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
 import { createDefaultActionParams, getActionTypeLabel } from '@/domain/actionTypes'
+import { normalizeScheduleTrigger } from '@/domain/schedule'
 import type { ActionCondition, ActionType, AppConfig, AppSettings, RiskLevel, TaskAction, TaskItem, TaskTemplate, TaskVariable } from '@/types/domain'
 
 type AppConfigInput = Partial<Omit<AppConfig, 'settings'>> & {
@@ -157,6 +158,9 @@ function normalizeTriggers(taskTriggers: TaskItem['triggers'] | undefined): Task
         ...trigger,
         shortcut: trigger.shortcut.trim()
       }
+    }
+    if (trigger.type === 'schedule') {
+      return normalizeScheduleTrigger(trigger)
     }
     return trigger
   })

@@ -67,4 +67,51 @@ describe('taskFactory config defaults', () => {
     expect(params.terminalHost).toBe('systemTerminal')
     expect(params.shell).toBe('terminal')
   })
+
+  it('preserves normalized scheduled triggers', () => {
+    const task: TaskItem = {
+      id: 'task-1',
+      name: '周期事项',
+      category: '工具',
+      keywords: [],
+      description: '',
+      variables: [],
+      actions: [],
+      riskLevel: 'low',
+      enabled: true,
+      favorite: false,
+      tagIds: [],
+      triggers: [
+        {
+          type: 'schedule',
+          enabled: true,
+          mode: 'weekly',
+          timeOfDay: ' 09:30 ',
+          weekdays: [3, 1, 3, 8],
+          misfirePolicy: 'runOnce',
+          preventOverlap: true,
+          nextRunAt: '2026-07-06T01:30:00Z'
+        }
+      ],
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z'
+    }
+
+    const config = normalizeConfig({ tasks: [task], tags: [] })
+
+    expect(config.tasks[0].triggers).toEqual([
+      {
+        type: 'schedule',
+        enabled: true,
+        mode: 'weekly',
+        intervalMinutes: null,
+        timeOfDay: '09:30',
+        weekdays: [1, 3],
+        misfirePolicy: 'runOnce',
+        preventOverlap: true,
+        nextRunAt: '2026-07-06T01:30:00Z',
+        lastScheduledAt: undefined
+      }
+    ])
+  })
 })

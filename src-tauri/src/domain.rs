@@ -120,10 +120,57 @@ pub enum TaskTrigger {
     Manual { enabled: bool },
     #[serde(rename = "shortcut")]
     Shortcut { enabled: bool, shortcut: String },
+    #[serde(rename = "schedule")]
+    Schedule {
+        enabled: bool,
+        #[serde(default = "default_schedule_mode")]
+        mode: ScheduleMode,
+        #[serde(default)]
+        interval_minutes: Option<u32>,
+        #[serde(default)]
+        time_of_day: Option<String>,
+        #[serde(default)]
+        weekdays: Vec<u8>,
+        #[serde(default = "default_schedule_misfire_policy")]
+        misfire_policy: ScheduleMisfirePolicy,
+        #[serde(default = "default_prevent_overlap")]
+        prevent_overlap: bool,
+        #[serde(default)]
+        next_run_at: Option<String>,
+        #[serde(default)]
+        last_scheduled_at: Option<String>,
+    },
 }
 
 fn default_task_triggers() -> Vec<TaskTrigger> {
     vec![TaskTrigger::Manual { enabled: true }]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ScheduleMode {
+    Interval,
+    Daily,
+    Weekly,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ScheduleMisfirePolicy {
+    Skip,
+    RunOnce,
+}
+
+fn default_schedule_mode() -> ScheduleMode {
+    ScheduleMode::Daily
+}
+
+fn default_schedule_misfire_policy() -> ScheduleMisfirePolicy {
+    ScheduleMisfirePolicy::Skip
+}
+
+fn default_prevent_overlap() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

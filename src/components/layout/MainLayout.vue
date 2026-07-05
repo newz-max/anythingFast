@@ -7,6 +7,7 @@ import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
 import TaskImportPreviewModal from '@/components/tasks/TaskImportPreviewModal.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
 import FlowPreviewGraph from '@/components/tasks/FlowPreviewGraph.vue'
+import ScheduleTriggerCard from '@/components/tasks/ScheduleTriggerCard.vue'
 import ExecutionProgress from '@/components/execution/ExecutionProgress.vue'
 import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vue'
 import logoUrl from '@/assets/logo.png'
@@ -28,6 +29,7 @@ import type {
   ActionType,
   AppTheme,
   ImportPreview,
+  ScheduleTaskTrigger,
   ShortcutStatus,
   ShortcutTaskTrigger,
   TaskAction,
@@ -95,6 +97,10 @@ const formattedUpdatedAt = computed(() => formatDateTime(selectedTask.value?.upd
 const selectedShortcutTrigger = computed(
   () =>
     selectedTask.value?.triggers.find((trigger): trigger is ShortcutTaskTrigger => trigger.type === 'shortcut') || null
+)
+const selectedScheduleTrigger = computed(
+  () =>
+    selectedTask.value?.triggers.find((trigger): trigger is ScheduleTaskTrigger => trigger.type === 'schedule') || null
 )
 const favoriteCount = computed(() => taskStore.tasks.filter((task) => task.favorite).length)
 const recentCount = computed(() => taskStore.tasks.filter((task) => task.lastRunAt).length)
@@ -565,6 +571,27 @@ async function clearTaskShortcutTrigger() {
     triggers: selectedTask.value.triggers.filter((trigger) => trigger.type !== 'shortcut')
   })
   message.success('已移除事项快捷键')
+}
+
+async function saveTaskScheduleTrigger(trigger: ScheduleTaskTrigger) {
+  if (!selectedTask.value) return
+  const triggers: TaskTrigger[] = selectedTask.value.triggers.filter((item) => item.type !== 'schedule')
+  triggers.push(trigger)
+  try {
+    await taskStore.upsertTask({ ...selectedTask.value, triggers })
+    message.success('周期触发已保存')
+  } catch (err) {
+    reportUiError('Save task schedule trigger failed', err, { taskId: selectedTask.value.id })
+  }
+}
+
+async function clearTaskScheduleTrigger() {
+  if (!selectedTask.value) return
+  await taskStore.upsertTask({
+    ...selectedTask.value,
+    triggers: selectedTask.value.triggers.filter((trigger) => trigger.type !== 'schedule')
+  })
+  message.success('已移除周期触发')
 }
 
 function runTask(task: TaskItem) {
@@ -1074,6 +1101,11 @@ async function resetLayoutScroll() {
               <NButton size="small" secondary @click="clearTaskShortcutTrigger">移除</NButton>
             </NInputGroup>
           </article>
+          <ScheduleTriggerCard
+            :trigger="selectedScheduleTrigger"
+            @save="saveTaskScheduleTrigger"
+            @remove="clearTaskScheduleTrigger"
+          />
         </section>
 
         <section class="utility-strip">
@@ -2583,6 +2615,7 @@ async function resetLayoutScroll() {
   }
 
   .shortcut-trigger-card,
+  .schedule-trigger-card,
   .utility-strip {
     grid-template-columns: 1fr;
   }
