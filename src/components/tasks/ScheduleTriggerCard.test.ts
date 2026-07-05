@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import { describe, expect, it } from 'vitest'
 import ScheduleTriggerCard from '@/components/tasks/ScheduleTriggerCard.vue'
+import { createDefaultScheduleTrigger } from '@/domain/schedule'
 import type { ScheduleTaskTrigger } from '@/types/domain'
 
 const passThroughStub = (name: string) =>
@@ -54,6 +55,28 @@ const stubs = {
 }
 
 describe('ScheduleTriggerCard', () => {
+  it('creates disabled schedule triggers by default', async () => {
+    expect(createDefaultScheduleTrigger().enabled).toBe(false)
+
+    const wrapper = mount(ScheduleTriggerCard, {
+      props: { trigger: null },
+      global: { stubs }
+    })
+
+    await wrapper.findComponent({ name: 'NButton' }).vm.$emit('click')
+
+    const saved = wrapper.emitted('save')?.[0]?.[0] as ScheduleTaskTrigger
+    expect(saved).toMatchObject({
+      type: 'schedule',
+      enabled: false,
+      mode: 'daily',
+      timeOfDay: '09:00',
+      misfirePolicy: 'skip',
+      preventOverlap: true
+    })
+    expect(saved.nextRunAt).toBeUndefined()
+  })
+
   it('emits a normalized schedule with nextRunAt when saved', async () => {
     const trigger: ScheduleTaskTrigger = {
       type: 'schedule',

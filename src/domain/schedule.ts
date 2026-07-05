@@ -12,7 +12,7 @@ const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日']
 export function createDefaultScheduleTrigger(): ScheduleTaskTrigger {
   return {
     type: 'schedule',
-    enabled: true,
+    enabled: false,
     mode: 'daily',
     intervalMinutes: DEFAULT_SCHEDULE_INTERVAL_MINUTES,
     timeOfDay: DEFAULT_SCHEDULE_TIME_OF_DAY,
