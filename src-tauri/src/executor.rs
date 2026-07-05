@@ -999,6 +999,15 @@ fn direct_terminal_command(
     action: &TaskAction,
     close_on_success: bool,
 ) -> Result<TerminalCommand, String> {
+    terminal_command_with_shell(action, close_on_success, None, TerminalHostMode::Direct)
+}
+
+fn terminal_command_with_shell(
+    action: &TaskAction,
+    close_on_success: bool,
+    shell_override: Option<&str>,
+    host_mode: TerminalHostMode,
+) -> Result<TerminalCommand, String> {
     if command_source(action) == "script" {
         let script_path = string_param(action, "scriptPath")?;
         if !Path::new(script_path).is_file() {
@@ -1008,22 +1017,23 @@ fn direct_terminal_command(
         let extension = script_extension(script_path)
             .ok_or_else(|| "脚本文件必须是 ps1、cmd 或 bat".to_string())?;
         if extension == "ps1" {
-            let shell = action
-                .params
-                .get("shell")
-                .and_then(|value| value.as_str())
-                .unwrap_or("powershell");
+            let shell = shell_override
+                .map(ToString::to_string)
+                .unwrap_or_else(|| command_shell(action));
+            if shell == "terminal" {
+                return Err("终端默认配置只能通过系统终端执行".to_string());
+            }
             if shell == "cmd" {
                 return Err("ps1 脚本必须使用 pwsh 或 powershell".to_string());
             }
             powershell_terminal_command(
-                powershell_program(shell),
+                powershell_program(&shell),
                 script_path,
                 &script_args(action),
                 close_on_success,
                 PowershellExitCodeStrategy::PipelineSuccess,
                 Vec::new(),
-                TerminalHostMode::Direct,
+                host_mode,
             )
         } else {
             cmd_terminal_command(
@@ -1031,16 +1041,17 @@ fn direct_terminal_command(
                 &script_args(action),
                 close_on_success,
                 Vec::new(),
-                TerminalHostMode::Direct,
+                host_mode,
             )
         }
     } else {
         let command_text = string_param(action, "command")?;
-        let shell = action
-            .params
-            .get("shell")
-            .and_then(|value| value.as_str())
-            .unwrap_or("powershell");
+        let shell = shell_override
+            .map(ToString::to_string)
+            .unwrap_or_else(|| command_shell(action));
+        if shell == "terminal" {
+            return Err("终端默认配置只能通过系统终端执行".to_string());
+        }
 
         if shell == "cmd" {
             let user_script_path = temp_runner_path("cmd");
@@ -1054,20 +1065,20 @@ fn direct_terminal_command(
                 &[],
                 close_on_success,
                 vec![user_script_path],
-                TerminalHostMode::Direct,
+                host_mode,
             )
         } else {
             let user_script_path = temp_runner_path("ps1");
             write_powershell_script(&user_script_path, command_text)?;
             let user_script_path_text = user_script_path.to_string_lossy().to_string();
             powershell_terminal_command(
-                powershell_program(shell),
+                powershell_program(&shell),
                 &user_script_path_text,
                 &[],
                 close_on_success,
                 PowershellExitCodeStrategy::LastExitCode,
                 vec![user_script_path],
-                TerminalHostMode::Direct,
+                host_mode,
             )
         }
     }
@@ -1080,7 +1091,20 @@ fn windows_terminal_command(
 ) -> Result<TerminalCommand, String> {
     ensure_program_available("wt", "Windows Terminal")?;
 
-    let mut terminal = direct_terminal_command(action, close_on_success)?;
+    let default_profile = if command_shell(action) == "terminal" {
+        Some(windows_terminal_default_profile()?)
+    } else {
+        None
+    };
+    let shell_override = default_profile
+        .as_ref()
+        .map(|profile| profile.shell_program.as_str());
+    let mut terminal = terminal_command_with_shell(
+        action,
+        close_on_success,
+        shell_override,
+        TerminalHostMode::WindowsTerminal,
+    )?;
     let runner_program = terminal.command.get_program().to_string_lossy().to_string();
     let runner_args: Vec<String> = terminal
         .command
@@ -1089,7 +1113,14 @@ fn windows_terminal_command(
         .collect();
 
     let mut command = Command::new("wt");
-    command.args(["new-tab", "-d", working_dir, "--", &runner_program]);
+    command.arg("new-tab");
+    if let Some(profile) = default_profile
+        .as_ref()
+        .and_then(|profile| profile.profile.as_deref())
+    {
+        command.args(["-p", profile]);
+    }
+    command.args(["-d", working_dir, "--", &runner_program]);
     command.args(runner_args);
 
     terminal.command = command;
@@ -1474,6 +1505,23 @@ fn command_source(action: &TaskAction) -> &str {
     }
 }
 
+fn command_shell(action: &TaskAction) -> String {
+    let shell = action
+        .params
+        .get("shell")
+        .and_then(|value| value.as_str())
+        .unwrap_or("powershell");
+
+    if show_terminal(action)
+        && command_terminal_host(action) == "systemTerminal"
+        && shell == "powershell"
+    {
+        return "terminal".to_string();
+    }
+
+    shell.to_string()
+}
+
 fn command_terminal_host(action: &TaskAction) -> &str {
     let host = action
         .params
@@ -1485,6 +1533,242 @@ fn command_terminal_host(action: &TaskAction) -> &str {
     } else {
         "systemTerminal"
     }
+}
+
+struct WindowsTerminalDefaultProfile {
+    profile: Option<String>,
+    shell_program: String,
+}
+
+fn windows_terminal_default_profile() -> Result<WindowsTerminalDefaultProfile, String> {
+    let settings_path = windows_terminal_settings_paths()
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            "无法找到 Windows Terminal settings.json，请确认 Windows Terminal 已安装并初始化"
+                .to_string()
+        })?;
+    let content = fs::read_to_string(&settings_path)
+        .map_err(|err| format!("读取 Windows Terminal 配置失败：{err}"))?;
+    let value: serde_json::Value = serde_json::from_str(&normalize_jsonc(&content))
+        .map_err(|err| format!("解析 Windows Terminal 配置失败：{err}"))?;
+    windows_terminal_default_profile_from_value(&value)
+}
+
+fn windows_terminal_settings_paths() -> Vec<PathBuf> {
+    let Some(local_app_data) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) else {
+        return Vec::new();
+    };
+
+    vec![
+        local_app_data
+            .join("Packages")
+            .join("Microsoft.WindowsTerminal_8wekyb3d8bbwe")
+            .join("LocalState")
+            .join("settings.json"),
+        local_app_data
+            .join("Packages")
+            .join("Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe")
+            .join("LocalState")
+            .join("settings.json"),
+    ]
+}
+
+fn windows_terminal_default_profile_from_value(
+    value: &serde_json::Value,
+) -> Result<WindowsTerminalDefaultProfile, String> {
+    let default_profile = value.get("defaultProfile").and_then(|item| item.as_str());
+    let profile = value
+        .get("profiles")
+        .and_then(|profiles| profiles.get("list"))
+        .and_then(|list| list.as_array())
+        .and_then(|profiles| {
+            default_profile.and_then(|default_profile| {
+                profiles.iter().find(|profile| {
+                    profile
+                        .get("guid")
+                        .and_then(|value| value.as_str())
+                        .is_some_and(|guid| guid.eq_ignore_ascii_case(default_profile))
+                        || profile
+                            .get("name")
+                            .and_then(|value| value.as_str())
+                            .is_some_and(|name| name.eq_ignore_ascii_case(default_profile))
+                })
+            })
+        });
+
+    let shell_program = profile
+        .and_then(windows_terminal_profile_shell)
+        .ok_or_else(|| {
+            "无法识别 Windows Terminal 默认配置文件的 Shell，请在动作中显式选择 PowerShell 7、Windows PowerShell 或 cmd"
+                .to_string()
+        })?;
+
+    Ok(WindowsTerminalDefaultProfile {
+        profile: default_profile.map(ToString::to_string),
+        shell_program,
+    })
+}
+
+fn windows_terminal_profile_shell(profile: &serde_json::Value) -> Option<String> {
+    let commandline = profile
+        .get("commandline")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if commandline.contains("pwsh") {
+        return Some("pwsh".to_string());
+    }
+    if commandline.contains("powershell") {
+        return Some("powershell".to_string());
+    }
+    if commandline.contains("cmd") {
+        return Some("cmd".to_string());
+    }
+
+    let source = profile
+        .get("source")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if source.contains("powershellcore") {
+        return Some("pwsh".to_string());
+    }
+    if source.contains("windowspowershell") {
+        return Some("powershell".to_string());
+    }
+    if source.contains("cmd") {
+        return Some("cmd".to_string());
+    }
+
+    let name = profile
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if name.contains("powershell 7") || name.contains("powershell core") {
+        return Some("pwsh".to_string());
+    }
+    if name.contains("windows powershell") {
+        return Some("powershell".to_string());
+    }
+    if name == "powershell" {
+        return Some("pwsh".to_string());
+    }
+    if name == "cmd" || name.contains("command prompt") {
+        return Some("cmd".to_string());
+    }
+
+    None
+}
+
+fn normalize_jsonc(content: &str) -> String {
+    remove_trailing_commas(&strip_json_comments(content))
+}
+
+fn strip_json_comments(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut chars = content.chars().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while let Some(ch) = chars.next() {
+        if in_string {
+            result.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            result.push(ch);
+            continue;
+        }
+
+        if ch == '/' {
+            match chars.peek().copied() {
+                Some('/') => {
+                    chars.next();
+                    for next in chars.by_ref() {
+                        if next == '\n' {
+                            result.push('\n');
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                Some('*') => {
+                    chars.next();
+                    let mut previous = '\0';
+                    for next in chars.by_ref() {
+                        if previous == '*' && next == '/' {
+                            break;
+                        }
+                        previous = next;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
+        result.push(ch);
+    }
+
+    result
+}
+
+fn remove_trailing_commas(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let chars: Vec<char> = content.chars().collect();
+    let mut index = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while index < chars.len() {
+        let ch = chars[index];
+        if in_string {
+            result.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            result.push(ch);
+            index += 1;
+            continue;
+        }
+
+        if ch == ',' {
+            let mut next_index = index + 1;
+            while next_index < chars.len() && chars[next_index].is_whitespace() {
+                next_index += 1;
+            }
+            if next_index < chars.len() && matches!(chars[next_index], '}' | ']') {
+                index += 1;
+                continue;
+            }
+        }
+
+        result.push(ch);
+        index += 1;
+    }
+
+    result
 }
 
 fn ensure_shell_program_available(program: &str) -> Result<(), String> {
@@ -2558,6 +2842,93 @@ mod tests {
         assert!(runner.contains("Set-Content -LiteralPath $exitCodePath"));
         assert!(runner.contains("Set-Content -LiteralPath $completionPath"));
         cleanup_temp_paths(&terminal.temp_paths);
+    }
+
+    #[test]
+    fn terminal_default_profile_resolves_powershell_core_source() {
+        let value = json!({
+            "defaultProfile": "{pwsh-profile}",
+            "profiles": {
+                "list": [
+                    {
+                        "guid": "{pwsh-profile}",
+                        "name": "PowerShell",
+                        "source": "Windows.Terminal.PowershellCore"
+                    }
+                ]
+            }
+        });
+
+        let profile = windows_terminal_default_profile_from_value(&value).expect("profile");
+
+        assert_eq!(profile.profile.as_deref(), Some("{pwsh-profile}"));
+        assert_eq!(profile.shell_program, "pwsh");
+    }
+
+    #[test]
+    fn terminal_default_profile_resolves_windows_powershell_commandline() {
+        let value = json!({
+            "defaultProfile": "{windows-powershell-profile}",
+            "profiles": {
+                "list": [
+                    {
+                        "guid": "{windows-powershell-profile}",
+                        "name": "Windows PowerShell",
+                        "commandline": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+                    }
+                ]
+            }
+        });
+
+        let profile = windows_terminal_default_profile_from_value(&value).expect("profile");
+
+        assert_eq!(profile.shell_program, "powershell");
+    }
+
+    #[test]
+    fn jsonc_normalization_allows_comments_and_trailing_commas() {
+        let content = r#"{
+          // default profile
+          "defaultProfile": "{pwsh-profile}",
+          "profiles": {
+            "list": [
+              {
+                "guid": "{pwsh-profile}",
+                "source": "Windows.Terminal.PowershellCore",
+              },
+            ],
+          },
+        }"#;
+
+        let value: serde_json::Value =
+            serde_json::from_str(&normalize_jsonc(content)).expect("jsonc");
+        let profile = windows_terminal_default_profile_from_value(&value).expect("profile");
+
+        assert_eq!(profile.shell_program, "pwsh");
+    }
+
+    #[test]
+    fn visible_system_terminal_powershell_action_uses_terminal_default_shell() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "Write-Output 'ok'",
+                "workingDir": "D:\\Project\\anythingFast",
+                "showTerminal": true,
+                "terminalHost": "systemTerminal",
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        assert_eq!(command_shell(&action), "terminal");
     }
 
     #[test]

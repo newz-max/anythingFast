@@ -13,6 +13,7 @@ type MutableParams = Record<string, any>
 const { pickDirectory, pickScriptFile } = usePathPicker()
 
 const commandShellOptions = [
+  { label: '终端默认配置', value: 'terminal' },
   { label: 'PowerShell 7', value: 'pwsh' },
   { label: 'PowerShell', value: 'powershell' },
   { label: 'cmd', value: 'cmd' }
@@ -112,6 +113,30 @@ function updateStringListParam(key: string, value: string) {
 function updateScriptArgs(value: string) {
   updateStringListParam('scriptArgs', value)
 }
+
+function updateShowTerminal(value: boolean) {
+  if (value && (textParam('terminalHost') || 'systemTerminal') === 'systemTerminal' && textParam('shell') === 'powershell') {
+    patchParams({ showTerminal: value, shell: 'terminal' })
+    return
+  }
+  patchParams({ showTerminal: value })
+}
+
+function updateShell(value: string) {
+  if (Boolean(params.value.showTerminal) && (textParam('terminalHost') || 'systemTerminal') === 'systemTerminal' && value === 'powershell') {
+    patchParams({ shell: 'terminal' })
+    return
+  }
+  patchParams({ shell: value })
+}
+
+function updateTerminalHost(value: string) {
+  if (value === 'systemTerminal' && Boolean(params.value.showTerminal) && textParam('shell') === 'powershell') {
+    patchParams({ terminalHost: value, shell: 'terminal' })
+    return
+  }
+  patchParams({ terminalHost: value })
+}
 </script>
 
 <template>
@@ -192,12 +217,12 @@ function updateScriptArgs(value: string) {
         </NGi>
         <NGi>
           <NFormItem label="Shell">
-            <NSelect :value="textParam('shell')" :options="commandShellOptions" @update:value="(value: string) => patchParams({ shell: value })" />
+            <NSelect :value="textParam('shell')" :options="commandShellOptions" @update:value="updateShell" />
           </NFormItem>
         </NGi>
         <NGi>
           <NFormItem label="显示终端窗口">
-            <NSwitch :value="Boolean(params.showTerminal)" @update:value="(value: boolean) => patchParams({ showTerminal: value })" />
+            <NSwitch :value="Boolean(params.showTerminal)" @update:value="updateShowTerminal" />
           </NFormItem>
         </NGi>
         <NGi v-if="Boolean(params.showTerminal)">
@@ -205,7 +230,7 @@ function updateScriptArgs(value: string) {
             <NSelect
               :value="textParam('terminalHost') || 'systemTerminal'"
               :options="commandTerminalHostOptions"
-              @update:value="(value: string) => patchParams({ terminalHost: value })"
+              @update:value="updateTerminalHost"
             />
           </NFormItem>
         </NGi>

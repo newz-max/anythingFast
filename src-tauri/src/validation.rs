@@ -184,10 +184,22 @@ fn validate_run_command_action(action: &TaskAction, issues: &mut Vec<FieldIssue>
 
     let shell = string_param(action, "shell");
     if !is_supported_command_shell(shell) {
-        issues.push(issue("shell", "Shell 必须是 pwsh、powershell 或 cmd"));
+        issues.push(issue(
+            "shell",
+            "Shell 必须是 terminal、pwsh、powershell 或 cmd",
+        ));
     }
 
+    let show_terminal = action
+        .params
+        .get("showTerminal")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     let terminal_host = string_param(action, "terminalHost");
+    if shell == "terminal" && (!show_terminal || terminal_host == "direct") {
+        issues.push(issue("shell", "终端默认配置只能在显示系统终端时使用"));
+    }
+
     if !terminal_host.is_empty() && !is_supported_terminal_host(terminal_host) {
         issues.push(issue(
             "terminalHost",
@@ -353,7 +365,7 @@ fn is_powershell_script_path(path: &str) -> bool {
 }
 
 fn is_supported_command_shell(shell: &str) -> bool {
-    matches!(shell, "pwsh" | "powershell" | "cmd")
+    matches!(shell, "terminal" | "pwsh" | "powershell" | "cmd")
 }
 
 fn is_supported_terminal_host(value: &str) -> bool {
@@ -617,6 +629,47 @@ mod tests {
                 .iter()
                 .any(|issue| issue.field == "terminalHost")
         );
+    }
+
+    #[test]
+    fn validates_terminal_default_shell_only_for_system_terminal() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: None,
+            params: json!({
+                "source": "inline",
+                "command": "Write-Output 'ok'",
+                "workingDir": "D:\\Project",
+                "showTerminal": true,
+                "terminalHost": "systemTerminal",
+                "shell": "terminal"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: RiskLevel::Medium,
+        };
+
+        assert!(validate_action_model(&action).valid);
+
+        let hidden_action = TaskAction {
+            params: json!({
+                "source": "inline",
+                "command": "Write-Output 'ok'",
+                "workingDir": "D:\\Project",
+                "showTerminal": false,
+                "terminalHost": "systemTerminal",
+                "shell": "terminal"
+            }),
+            ..action.clone()
+        };
+        let result = validate_action_model(&hidden_action);
+
+        assert!(!result.valid);
+        assert!(result.issues.iter().any(|issue| issue.field == "shell"));
     }
 
     #[test]

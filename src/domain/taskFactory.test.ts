@@ -24,7 +24,7 @@ describe('taskFactory config defaults', () => {
     expect(config.settings.launchOnStartup).toBe(false)
   })
 
-  it('adds the default terminal host without changing an existing command shell', () => {
+  it('migrates visible system terminal PowerShell commands to terminal default shell', () => {
     const task: TaskItem = {
       id: 'task-1',
       name: '脚本',
@@ -65,6 +65,6 @@ describe('taskFactory config defaults', () => {
     const params = config.tasks[0].actions[0].params as CommandParams
 
     expect(params.terminalHost).toBe('systemTerminal')
-    expect(params.shell).toBe('powershell')
+    expect(params.shell).toBe('terminal')
   })
 })

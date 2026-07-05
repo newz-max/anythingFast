@@ -113,6 +113,7 @@ describe('ActionParamForm', () => {
     expect(updatedAction).not.toBe(sourceAction)
     expect(updatedAction.params).not.toBe(sourceAction.params)
     expect((updatedAction.params as CommandParams).showTerminal).toBe(true)
+    expect((updatedAction.params as CommandParams).shell).toBe('terminal')
   })
 
   it('shows and updates closeTerminalOnFinish only when terminal is shown', async () => {
@@ -163,6 +164,7 @@ describe('ActionParamForm', () => {
     const shellSelect = selects[1]
 
     expect(shellSelect.props('options')).toContainEqual({ label: 'PowerShell 7', value: 'pwsh' })
+    expect(shellSelect.props('options')).toContainEqual({ label: '终端默认配置', value: 'terminal' })
   })
 
   it('shows command shell selection for script commands', () => {
@@ -191,6 +193,7 @@ describe('ActionParamForm', () => {
 
     expect(shellSelect?.exists()).toBe(true)
     expect(shellSelect?.props('options')).toContainEqual({ label: 'PowerShell 7', value: 'pwsh' })
+    expect(shellSelect?.props('options')).toContainEqual({ label: '终端默认配置', value: 'terminal' })
   })
 
   it('shows and updates terminal host only when terminal is shown', async () => {

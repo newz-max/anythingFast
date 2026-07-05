@@ -97,6 +97,36 @@ describe('action type definitions', () => {
     })
   })
 
+  it('allows terminal default shell only for visible system terminal commands', () => {
+    const issues: FieldIssue[] = []
+    validateActionParamsByDefinition(
+      makeAction('runCommand', {
+        source: 'inline',
+        command: 'Write-Output ok',
+        workingDir: 'D:\\Project\\anythingFast',
+        showTerminal: true,
+        terminalHost: 'systemTerminal',
+        shell: 'terminal'
+      }),
+      issues
+    )
+    expect(issues).toEqual([])
+
+    const hiddenIssues: FieldIssue[] = []
+    validateActionParamsByDefinition(
+      makeAction('runCommand', {
+        source: 'inline',
+        command: 'Write-Output ok',
+        workingDir: 'D:\\Project\\anythingFast',
+        showTerminal: false,
+        terminalHost: 'systemTerminal',
+        shell: 'terminal'
+      }),
+      hiddenIssues
+    )
+    expect(hiddenIssues.map((issue) => issue.field)).toContain('shell')
+  })
+
   it('keeps command risk inference in the action definition', () => {
     expect(
       inferActionRiskByDefinition(

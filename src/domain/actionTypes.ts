@@ -59,7 +59,7 @@ export const actionTypeDefinitions: Record<ActionType, ActionTypeDefinition> = {
   },
   runCommand: {
     label: '执行命令',
-    description: '通过 PowerShell 7、PowerShell 或 cmd 执行本地命令，可选择终端宿主。',
+    description: '通过终端默认配置、PowerShell 7、PowerShell 或 cmd 执行本地命令。',
     createDefaultParams: () => ({
       source: 'inline',
       command: '',
@@ -120,7 +120,10 @@ export const actionTypeDefinitions: Record<ActionType, ActionTypeDefinition> = {
         issues.push({ field: 'workingDir', message: '工作目录不能为空' })
       }
       if (!isSupportedCommandShell(action.params.shell)) {
-        issues.push({ field: 'shell', message: 'Shell 必须是 PowerShell 7、PowerShell 或 cmd' })
+        issues.push({ field: 'shell', message: 'Shell 必须是终端默认配置、PowerShell 7、PowerShell 或 cmd' })
+      }
+      if (action.params.shell === 'terminal' && (!action.params.showTerminal || action.params.terminalHost === 'direct')) {
+        issues.push({ field: 'shell', message: '终端默认配置只能在显示系统终端时使用' })
       }
       if (!isSupportedTerminalHost(action.params.terminalHost)) {
         issues.push({ field: 'terminalHost', message: '终端宿主必须是系统终端或直接启动 Shell' })
@@ -211,7 +214,7 @@ function isPowerShellScriptPath(value: string) {
 }
 
 function isSupportedCommandShell(value: string) {
-  return value === 'pwsh' || value === 'powershell' || value === 'cmd'
+  return value === 'terminal' || value === 'pwsh' || value === 'powershell' || value === 'cmd'
 }
 
 function isSupportedTerminalHost(value: unknown) {

@@ -109,15 +109,21 @@ function normalizeActionParams(action: TaskAction): TaskAction['params'] {
     return action.params
   }
 
+  const showTerminal = action.params.showTerminal ?? false
+  const terminalHost = action.params.terminalHost || 'systemTerminal'
+  const shell = showTerminal && terminalHost === 'systemTerminal' && action.params.shell === 'powershell'
+    ? 'terminal'
+    : action.params.shell || 'powershell'
+
   return {
     source: action.params.source || 'inline',
     command: action.params.command || '',
     workingDir: action.params.workingDir || '',
     env: action.params.env || {},
-    showTerminal: action.params.showTerminal ?? false,
+    showTerminal,
     closeTerminalOnFinish: action.params.closeTerminalOnFinish ?? true,
-    terminalHost: action.params.terminalHost || 'systemTerminal',
-    shell: action.params.shell || 'powershell',
+    terminalHost,
+    shell,
     scriptPath: action.params.scriptPath || '',
     scriptArgs: action.params.scriptArgs || []
   }

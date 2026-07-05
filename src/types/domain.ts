@@ -2,7 +2,7 @@ export type RiskLevel = 'low' | 'medium' | 'high'
 
 export type ActionType = 'openProgram' | 'openUrl' | 'openFile' | 'openFolder' | 'runCommand' | 'delay'
 
-export type CommandShell = 'powershell' | 'pwsh' | 'cmd'
+export type CommandShell = 'terminal' | 'powershell' | 'pwsh' | 'cmd'
 export type CommandTerminalHost = 'systemTerminal' | 'direct'
 export type CommandSource = 'inline' | 'script'
 

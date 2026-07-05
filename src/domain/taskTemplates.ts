@@ -48,7 +48,7 @@ export const builtInTaskTemplates: TaskTemplate[] = [
       {
         type: 'runCommand',
         name: '执行命令',
-        params: { source: 'inline', command: '', workingDir: '', env: {}, showTerminal: true, closeTerminalOnFinish: true, terminalHost: 'systemTerminal', shell: 'pwsh', scriptPath: '', scriptArgs: [] },
+        params: { source: 'inline', command: '', workingDir: '', env: {}, showTerminal: true, closeTerminalOnFinish: true, terminalHost: 'systemTerminal', shell: 'terminal', scriptPath: '', scriptArgs: [] },
         enabled: true,
         continueOnError: false,
         riskLevel: 'medium'
