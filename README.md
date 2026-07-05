@@ -133,3 +133,7 @@ src-tauri/
 - 默认全局快捷键：`Alt+Space`
 - 命令动作 shell：`powershell` 或 `cmd`
 - 提交信息默认使用中文
+
+## 开源协议
+
+本项目使用 MIT License，详见 [LICENSE](./LICENSE)。
