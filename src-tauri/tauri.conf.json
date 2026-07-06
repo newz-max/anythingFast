@@ -64,7 +64,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFGNzQ4RTM0NTI0MDY4RTMKUldUamFFQlNOSTUwcnlrODdvUm45N0N6dU9KcGZpQmoyckVIbi9RVHhkaHYrWXlUSyszdi8vZ3cK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUyMDEwMTcwRDJGMUMzODkKUldTSncvSFNjQUVCNHQ0cEo5UHkwblZ0RnNiNXVEczVSTUhqUDJHdmw0R3VZMWFrdzBxTVpNRVoK",
       "endpoints": [
         "https://github.com/newz-max/anythingFast/releases/latest/download/latest.json"
       ]
