@@ -7,7 +7,8 @@ import { createActionDraft } from '@/domain/taskFactory'
 import { deriveActionRisk } from '@/domain/risk'
 import { validateActionLocal } from '@/domain/validation'
 import { clonePlainDto } from '@/utils/clonePlainDto'
-import { isCtrlShortcut } from '@/utils/keyboard'
+import { useKeybindings } from '@/composables/useKeybindings'
+import { keybindingMatchesCommand } from '@/domain/keybindings'
 import type { ActionType, TaskAction, TaskVariable } from '@/types/domain'
 
 export type ActionWizardMode = 'create' | 'edit'
@@ -27,12 +28,16 @@ const emit = defineEmits<{
 const currentStep = shallowRef(1)
 const draft = ref<TaskAction>(createActionDraft('openUrl'))
 const message = useMessage()
+const keybindings = useKeybindings()
 
 const title = computed(() => (props.mode === 'create' ? '新增动作' : '编辑动作'))
 const validation = computed(() => validateActionLocal(draft.value))
 const stepStatus = computed(() => (currentStep.value === 3 && !validation.value.valid ? 'error' : 'process'))
 
-onMounted(() => window.addEventListener('keydown', onEditorKeydown))
+onMounted(() => {
+  void keybindings.loadKeybindings()
+  window.addEventListener('keydown', onEditorKeydown)
+})
 onUnmounted(() => window.removeEventListener('keydown', onEditorKeydown))
 
 watch(
@@ -95,22 +100,22 @@ function normalizeRisk() {
 
 function onEditorKeydown(event: KeyboardEvent) {
   if (!props.show || event.defaultPrevented) return
-  if (isCtrlShortcut(event, 's')) {
+  if (keybindingMatchesCommand(event, 'actionEditor.save', keybindings.effective.value)) {
     event.preventDefault()
     save()
     return
   }
-  if (event.key === 'Escape') {
+  if (keybindingMatchesCommand(event, 'actionEditor.close', keybindings.effective.value)) {
     event.preventDefault()
     close()
     return
   }
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'ArrowLeft') {
+  if (keybindingMatchesCommand(event, 'actionEditor.previousStep', keybindings.effective.value)) {
     event.preventDefault()
     previousStep()
     return
   }
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'ArrowRight') {
+  if (keybindingMatchesCommand(event, 'actionEditor.nextStep', keybindings.effective.value)) {
     event.preventDefault()
     nextStep()
   }

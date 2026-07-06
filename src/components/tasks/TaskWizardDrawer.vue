@@ -5,9 +5,10 @@ import ActionWizardPanel, { type ActionWizardMode } from '@/components/tasks/Act
 import TaskWizardActionStep from '@/components/tasks/TaskWizardActionStep.vue'
 import TaskWizardBasicStep from '@/components/tasks/TaskWizardBasicStep.vue'
 import TaskWizardConfirmStep from '@/components/tasks/TaskWizardConfirmStep.vue'
+import { useKeybindings } from '@/composables/useKeybindings'
 import { useTaskWizardDraft, type TaskWizardMode } from '@/composables/useTaskWizardDraft'
 import { clonePlainDto } from '@/utils/clonePlainDto'
-import { isCtrlShortcut } from '@/utils/keyboard'
+import { keybindingMatchesCommand } from '@/domain/keybindings'
 import type { TaskAction, TaskItem, TaskTag } from '@/types/domain'
 
 const props = defineProps<{
@@ -34,6 +35,7 @@ const actionWizardVisible = shallowRef(false)
 const actionWizardMode = shallowRef<ActionWizardMode>('create')
 const editingAction = shallowRef<TaskAction | null>(null)
 const message = useMessage()
+const keybindings = useKeybindings()
 const modeRef = toRef(props, 'mode')
 const taskRef = toRef(props, 'task')
 const allTasksRef = toRef(props, 'allTasks')
@@ -48,7 +50,10 @@ const stepStatus = computed(() => (currentStep.value === 3 && validation.value?.
 const canGoNext = computed(() => Boolean(draft.value) && currentStep.value < 3)
 const canSave = computed(() => Boolean(draft.value))
 
-onMounted(() => window.addEventListener('keydown', onEditorKeydown))
+onMounted(() => {
+  void keybindings.loadKeybindings()
+  window.addEventListener('keydown', onEditorKeydown)
+})
 onUnmounted(() => window.removeEventListener('keydown', onEditorKeydown))
 
 watch(
@@ -133,22 +138,22 @@ function saveAction(action: TaskAction) {
 
 function onEditorKeydown(event: KeyboardEvent) {
   if (!props.show || actionWizardVisible.value || event.defaultPrevented) return
-  if (isCtrlShortcut(event, 's')) {
+  if (keybindingMatchesCommand(event, 'taskEditor.save', keybindings.effective.value)) {
     event.preventDefault()
     save()
     return
   }
-  if (event.key === 'Escape') {
+  if (keybindingMatchesCommand(event, 'taskEditor.close', keybindings.effective.value)) {
     event.preventDefault()
     close()
     return
   }
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'ArrowLeft') {
+  if (keybindingMatchesCommand(event, 'taskEditor.previousStep', keybindings.effective.value)) {
     event.preventDefault()
     previousStep()
     return
   }
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'ArrowRight') {
+  if (keybindingMatchesCommand(event, 'taskEditor.nextStep', keybindings.effective.value)) {
     event.preventDefault()
     nextStep()
   }

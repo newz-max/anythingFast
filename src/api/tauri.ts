@@ -6,6 +6,8 @@ import type {
   ExportBundleRequest,
   ImportPreview,
   ExecutionLogSummary,
+  KeybindingOverride,
+  KeybindingsLoadResult,
   PreviewAction,
   RiskAnalysis,
   ShortcutStatus,
@@ -53,5 +55,9 @@ export const tauriApi = {
   createTaskFromTemplate: (template: TaskTemplate) => invokeCommand<TaskItem>('create_task_from_template', { template }),
   loadExecutionLogs: (limit: number) => invokeCommand<ExecutionLogSummary[]>('load_execution_logs', { limit }),
   loadShortcutStatus: () => invokeCommand<ShortcutStatus>('load_shortcut_status'),
+  loadKeybindings: () => invokeCommand<KeybindingsLoadResult>('load_keybindings'),
+  saveKeybindings: (overrides: KeybindingOverride[]) => invokeCommand<KeybindingsLoadResult>('save_keybindings', { overrides }),
+  resetKeybindings: () => invokeCommand<KeybindingsLoadResult>('reset_keybindings'),
+  openKeybindingsFile: () => invokeCommand<void>('open_keybindings_file'),
   updateSettings: (settings: AppSettings) => invokeCommand<AppConfig>('update_settings', { settings })
 }

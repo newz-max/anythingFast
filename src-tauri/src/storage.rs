@@ -1,5 +1,5 @@
 use crate::diagnostics::dev_log_error;
-use crate::domain::{AppConfig, ExecutionLogSummary};
+use crate::domain::{AppConfig, ExecutionLogSummary, KeybindingOverride, KeybindingsLoadResult};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -7,6 +7,7 @@ use tauri::{AppHandle, Manager};
 use thiserror::Error;
 
 static CONFIG_WRITE_LOCK: Mutex<()> = Mutex::new(());
+static KEYBINDINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
 static LOG_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Error)]
@@ -49,6 +50,86 @@ pub fn save_config(app: &AppHandle, config: &AppConfig) -> StorageResult<()> {
     write_config_file(&path, config)
 }
 
+pub fn load_keybindings(app: &AppHandle) -> StorageResult<KeybindingsLoadResult> {
+    let path = keybindings_path(app)?;
+    read_keybindings_file(&path)
+}
+
+fn read_keybindings_file(path: &PathBuf) -> StorageResult<KeybindingsLoadResult> {
+    if !path.exists() {
+        return Ok(KeybindingsLoadResult {
+            overrides: Vec::new(),
+            path: path.to_string_lossy().to_string(),
+            warning: None,
+        });
+    }
+
+    let content = fs::read_to_string(&path)?;
+    if content.trim().is_empty() {
+        return Ok(KeybindingsLoadResult {
+            overrides: Vec::new(),
+            path: path.to_string_lossy().to_string(),
+            warning: None,
+        });
+    }
+
+    match serde_json::from_str::<Vec<KeybindingOverride>>(&content) {
+        Ok(overrides) => Ok(KeybindingsLoadResult {
+            overrides,
+            path: path.to_string_lossy().to_string(),
+            warning: None,
+        }),
+        Err(err) => Ok(KeybindingsLoadResult {
+            overrides: Vec::new(),
+            path: path.to_string_lossy().to_string(),
+            warning: Some(format!("keybindings.json 无法读取，已使用默认快捷键：{err}")),
+        }),
+    }
+}
+
+pub fn save_keybindings(
+    app: &AppHandle,
+    overrides: &[KeybindingOverride],
+) -> StorageResult<KeybindingsLoadResult> {
+    let _guard = KEYBINDINGS_WRITE_LOCK
+        .lock()
+        .map_err(|_| StorageError::Lock("keybindings"))?;
+    let path = keybindings_path(app)?;
+    write_keybindings_file(&path, overrides)?;
+    Ok(KeybindingsLoadResult {
+        overrides: overrides.to_vec(),
+        path: path.to_string_lossy().to_string(),
+        warning: None,
+    })
+}
+
+pub fn reset_keybindings(app: &AppHandle) -> StorageResult<KeybindingsLoadResult> {
+    let _guard = KEYBINDINGS_WRITE_LOCK
+        .lock()
+        .map_err(|_| StorageError::Lock("keybindings"))?;
+    let path = keybindings_path(app)?;
+    reset_keybindings_file(&path)
+}
+
+fn reset_keybindings_file(path: &PathBuf) -> StorageResult<KeybindingsLoadResult> {
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(KeybindingsLoadResult {
+        overrides: Vec::new(),
+        path: path.to_string_lossy().to_string(),
+        warning: None,
+    })
+}
+
+pub fn ensure_keybindings_file(app: &AppHandle) -> StorageResult<PathBuf> {
+    let path = keybindings_path(app)?;
+    if !path.exists() {
+        write_keybindings_file(&path, &[])?;
+    }
+    Ok(path)
+}
+
 pub fn update_task_run_metadata(
     app: &AppHandle,
     task_id: &str,
@@ -79,6 +160,18 @@ fn write_config_file(path: &PathBuf, config: &AppConfig) -> StorageResult<()> {
     ensure_parent(path)?;
     let temp_path = path.with_extension("json.tmp");
     let content = serde_json::to_string_pretty(config)?;
+    fs::write(&temp_path, content)?;
+    fs::rename(temp_path, path)?;
+    Ok(())
+}
+
+fn write_keybindings_file(
+    path: &PathBuf,
+    overrides: &[KeybindingOverride],
+) -> StorageResult<()> {
+    ensure_parent(path)?;
+    let temp_path = path.with_extension("json.tmp");
+    let content = serde_json::to_string_pretty(overrides)?;
     fs::write(&temp_path, content)?;
     fs::rename(temp_path, path)?;
     Ok(())
@@ -143,6 +236,14 @@ pub fn config_path(app: &AppHandle) -> StorageResult<PathBuf> {
         .app_data_dir()
         .map_err(|_| StorageError::AppDir)?;
     Ok(dir.join("config.json"))
+}
+
+pub fn keybindings_path(app: &AppHandle) -> StorageResult<PathBuf> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| StorageError::AppDir)?;
+    Ok(dir.join("keybindings.json"))
 }
 
 fn logs_path(app: &AppHandle) -> StorageResult<PathBuf> {
@@ -220,7 +321,13 @@ mod tests {
             path.with_extension("json.tmp"),
             PathBuf::from("config.json.tmp")
         );
+        let keybindings_path = PathBuf::from("keybindings.json");
+        assert_eq!(
+            keybindings_path.with_extension("json.tmp"),
+            PathBuf::from("keybindings.json.tmp")
+        );
         let _ = fs::remove_file("config.json.tmp");
+        let _ = fs::remove_file("keybindings.json.tmp");
     }
 
     #[test]
@@ -287,6 +394,70 @@ mod tests {
         assert_eq!(logs.len(), 2);
         assert!(logs.iter().any(|log| log.id == "log-1"));
         assert!(logs.iter().any(|log| log.id == "log-2"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn keybindings_roundtrip_json_shape() {
+        let dir = temp_storage_dir();
+        let path = dir.join("keybindings.json");
+        let overrides = vec![
+            KeybindingOverride {
+                command: "main.focusSearch".into(),
+                key: Some("Alt+F".into()),
+                disabled: false,
+            },
+            KeybindingOverride {
+                command: "main.addAction".into(),
+                key: None,
+                disabled: true,
+            },
+        ];
+
+        write_keybindings_file(&path, &overrides).expect("write keybindings");
+        let result = read_keybindings_file(&path).expect("read keybindings");
+
+        assert_eq!(result.overrides.len(), 2);
+        assert_eq!(result.overrides[0].command, "main.focusSearch");
+        assert_eq!(result.overrides[0].key.as_deref(), Some("Alt+F"));
+        assert!(result.overrides[1].disabled);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reset_keybindings_removes_override_file() {
+        let dir = temp_storage_dir();
+        let path = dir.join("keybindings.json");
+        write_keybindings_file(
+            &path,
+            &[KeybindingOverride {
+                command: "main.focusSearch".into(),
+                key: Some("Alt+F".into()),
+                disabled: false,
+            }],
+        )
+        .expect("write keybindings");
+
+        let result = reset_keybindings_file(&path).expect("reset keybindings");
+
+        assert!(result.overrides.is_empty());
+        assert!(!path.exists());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn invalid_keybindings_json_falls_back_to_defaults() {
+        let dir = temp_storage_dir();
+        let path = dir.join("keybindings.json");
+        fs::write(&path, "{invalid").expect("write invalid keybindings");
+
+        let result = read_keybindings_file(&path).expect("read invalid keybindings");
+
+        assert!(result.overrides.is_empty());
+        assert!(result.warning.unwrap().contains("已使用默认快捷键"));
 
         let _ = fs::remove_dir_all(dir);
     }

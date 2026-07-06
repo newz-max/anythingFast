@@ -1,8 +1,8 @@
 use crate::diagnostics::dev_log_error;
 use crate::domain::{
     AppConfig, AppSettings, ExecutionLogSummary, ExportBundleRequest, ImportPreview, PreviewAction,
-    RiskAnalysis, RiskLevel, ShortcutStatus, TaskAction, TaskExecutionSummary, TaskExportBundle,
-    TaskItem, ValidationResult,
+    KeybindingOverride, KeybindingsLoadResult, RiskAnalysis, RiskLevel, ShortcutStatus,
+    TaskAction, TaskExecutionSummary, TaskExportBundle, TaskItem, ValidationResult,
 };
 use crate::executor;
 use crate::import_export;
@@ -14,6 +14,7 @@ use crate::validation::{
 use crate::variables::{self, RuntimeVariableContext};
 use std::collections::HashMap;
 use tauri::AppHandle;
+use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command]
 pub fn load_config(app: AppHandle) -> Result<AppConfig, String> {
@@ -393,6 +394,34 @@ pub fn load_execution_logs(
 #[tauri::command]
 pub fn load_shortcut_status(app: AppHandle) -> ShortcutStatus {
     crate::shortcut_status(&app)
+}
+
+#[tauri::command]
+pub fn load_keybindings(app: AppHandle) -> Result<KeybindingsLoadResult, String> {
+    storage::load_keybindings(&app).map_err(|err| log_command_error("load_keybindings failed", err))
+}
+
+#[tauri::command]
+pub fn save_keybindings(
+    app: AppHandle,
+    overrides: Vec<KeybindingOverride>,
+) -> Result<KeybindingsLoadResult, String> {
+    storage::save_keybindings(&app, &overrides)
+        .map_err(|err| log_command_error("save_keybindings failed", err))
+}
+
+#[tauri::command]
+pub fn reset_keybindings(app: AppHandle) -> Result<KeybindingsLoadResult, String> {
+    storage::reset_keybindings(&app).map_err(|err| log_command_error("reset_keybindings failed", err))
+}
+
+#[tauri::command]
+pub fn open_keybindings_file(app: AppHandle) -> Result<(), String> {
+    let path = storage::ensure_keybindings_file(&app)
+        .map_err(|err| log_command_error("open_keybindings_file ensure file failed", err))?;
+    app.opener()
+        .open_path(path.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|err| log_command_error("open_keybindings_file opener failed", err))
 }
 
 #[tauri::command]

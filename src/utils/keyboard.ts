@@ -16,7 +16,3 @@ export function isEditableKeyboardTarget(target: EventTarget | null) {
   )
   return Boolean(editable)
 }
-
-export function isCtrlShortcut(event: KeyboardEvent, key: string) {
-  return (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === key.toLowerCase()
-}

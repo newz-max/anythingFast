@@ -309,6 +309,28 @@ describe('MainLayout window keyboard shortcuts', () => {
     expect(wrapper.find('.task-wizard-stub').text()).toContain('edit:2')
   })
 
+  it('uses customized main window keybindings', async () => {
+    localStorage.setItem('anything-fast-keybindings', JSON.stringify([{ command: 'main.runSelectedTask', key: 'Alt+R' }]))
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+
+    await pressKey('Enter', { ctrlKey: true })
+    expect(executeMock).not.toHaveBeenCalled()
+
+    await pressKey('r', { altKey: true })
+    expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-1' }))
+  })
+
+  it('does not trigger disabled main window keybindings', async () => {
+    localStorage.setItem('anything-fast-keybindings', JSON.stringify([{ command: 'main.focusSearch', disabled: true }]))
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+
+    await pressKey('/')
+
+    expect(focusSearchMock).not.toHaveBeenCalled()
+  })
+
   it('ignores main window shortcuts while the task editor is open', async () => {
     const mounted = await mountLayout()
     wrapper = mounted.wrapper

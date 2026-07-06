@@ -221,6 +221,20 @@ export interface ShortcutStatus {
   message?: string
 }
 
+export type KeybindingScope = 'main' | 'quick-search' | 'task-editor' | 'action-editor'
+
+export interface KeybindingOverride {
+  command: string
+  key?: string | null
+  disabled?: boolean
+}
+
+export interface KeybindingsLoadResult {
+  overrides: KeybindingOverride[]
+  path: string
+  warning?: string
+}
+
 export type AppTheme = 'light' | 'dark' | 'system'
 
 export interface AppConfig {

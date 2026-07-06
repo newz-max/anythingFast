@@ -227,6 +227,23 @@ pub struct ShortcutStatus {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KeybindingOverride {
+    pub command: String,
+    pub key: Option<String>,
+    #[serde(default)]
+    pub disabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeybindingsLoadResult {
+    pub overrides: Vec<KeybindingOverride>,
+    pub path: String,
+    pub warning: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AppTheme {

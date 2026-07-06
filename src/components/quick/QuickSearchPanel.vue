@@ -5,10 +5,12 @@ import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vu
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { useTaskSearch } from '@/composables/useTaskSearch'
 import { useTaskExecution } from '@/composables/useTaskExecution'
+import { useKeybindings } from '@/composables/useKeybindings'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
 import { logDevError } from '@/utils/errors'
 import { isEditableKeyboardTarget } from '@/utils/keyboard'
+import { keybindingMatchesCommand } from '@/domain/keybindings'
 import logoUrl from '@/assets/logo.png'
 import type { RiskLevel, TaskAction, TaskItem } from '@/types/domain'
 
@@ -19,6 +21,7 @@ const executionStore = useExecutionStore()
 const enabledTasks = computed(() => taskStore.tasks.filter((task) => task.enabled))
 const { query, results } = useTaskSearch(enabledTasks, { ranking: 'quickRecent' })
 const { execute } = useTaskExecution()
+const keybindings = useKeybindings()
 const selectedIndex = shallowRef(0)
 const inputRef = useTemplateRef<{ focus: () => void }>('searchInput')
 const searchBoxRef = useTemplateRef<HTMLElement>('searchBox')
@@ -41,6 +44,10 @@ const resultRows = computed(() =>
 )
 const selectedTask = computed(() => resultRows.value[selectedIndex.value]?.task || null)
 const resultCountLabel = computed(() => (taskStore.loading ? '加载中' : `${results.value.length} 个可执行事项`))
+const quickShortcutHint = computed(() => {
+  const key = (command: string) => keybindings.effective.value.find((item) => item.command === command)?.key || '已禁用'
+  return `${taskStore.settings.globalShortcut} 唤起 · ${key('quick.focusSearch')} 搜索 · ${key('quick.selectPreviousResult')}/${key('quick.selectNextResult')} 选择 · ${key('quick.executeSelected')} 执行 · ${key('quick.closePanel')} 关闭`
+})
 
 watch(
   () => resultRows.value.length,
@@ -51,6 +58,7 @@ watch(
 )
 
 onMounted(async () => {
+  void keybindings.loadKeybindings()
   try {
     await executionStore.setupListeners()
   } catch (err) {
@@ -69,26 +77,27 @@ onUnmounted(() => {
 })
 
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !isEditableKeyboardTarget(event.target)) {
+  if (keybindingMatchesCommand(event, 'quick.focusSearch', keybindings.effective.value) && !isEditableKeyboardTarget(event.target)) {
     event.preventDefault()
     focusSearchInput()
     return
   }
-  if (event.key === 'Escape') {
+  if (keybindingMatchesCommand(event, 'quick.closePanel', keybindings.effective.value)) {
+    event.preventDefault()
     void hideWindow()
     return
   }
-  if (event.key === 'ArrowDown') {
+  if (keybindingMatchesCommand(event, 'quick.selectNextResult', keybindings.effective.value)) {
     event.preventDefault()
     moveSelection(1)
     return
   }
-  if (event.key === 'ArrowUp') {
+  if (keybindingMatchesCommand(event, 'quick.selectPreviousResult', keybindings.effective.value)) {
     event.preventDefault()
     moveSelection(-1)
     return
   }
-  if (event.key === 'Enter' && selectedTask.value) {
+  if (keybindingMatchesCommand(event, 'quick.executeSelected', keybindings.effective.value) && selectedTask.value) {
     event.preventDefault()
     void execute(selectedTask.value)
   }
@@ -307,7 +316,7 @@ function resultOptionId(taskId: string) {
       </section>
 
       <footer class="status">
-        <span>Alt+Space 唤起 · / 搜索 · ↑↓ 选择 · Enter 执行 · Esc 关闭</span>
+        <span>{{ quickShortcutHint }}</span>
         <ExecutionStatusStrip
           v-if="executionStore.currentRun"
           class="quick-status-strip"

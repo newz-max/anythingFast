@@ -112,8 +112,8 @@ async function mountPanel(tasks = [makeTask(1), makeTask(2), makeTask(3)]) {
   return wrapper
 }
 
-async function pressKey(key: string, target: Window | HTMLElement = window) {
-  target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+async function pressKey(key: string, target: Window | HTMLElement = window, options: KeyboardEventInit = {}) {
+  target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options }))
   await nextTick()
   await nextTick()
 }
@@ -125,6 +125,7 @@ function resultItems(wrapper: VueWrapper) {
 describe('QuickSearchPanel keyboard navigation', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
+    localStorage.clear()
     executeMock.mockClear()
     hideWindowMock.mockClear()
     onFocusChangedMock.mockClear()
@@ -163,6 +164,26 @@ describe('QuickSearchPanel keyboard navigation', () => {
 
     expect(resultItems(wrapper)[0].classes()).toContain('active')
     expect(resultItems(wrapper)[0].attributes('aria-selected')).toBe('true')
+  })
+
+  it('uses customized quick search navigation keybindings', async () => {
+    localStorage.setItem('anything-fast-keybindings', JSON.stringify([{ command: 'quick.selectNextResult', key: 'Alt+J' }]))
+    const wrapper = await mountPanel()
+
+    await pressKey('ArrowDown')
+    expect(resultItems(wrapper)[0].classes()).toContain('active')
+
+    await pressKey('j', window, { altKey: true })
+    expect(resultItems(wrapper)[1].classes()).toContain('active')
+  })
+
+  it('does not trigger disabled quick search keybindings', async () => {
+    localStorage.setItem('anything-fast-keybindings', JSON.stringify([{ command: 'quick.executeSelected', disabled: true }]))
+    await mountPanel()
+
+    await pressKey('Enter')
+
+    expect(executeMock).not.toHaveBeenCalled()
   })
 
   it('clamps selection to the visible result range', async () => {

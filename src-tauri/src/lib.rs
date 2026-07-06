@@ -148,6 +148,10 @@ pub fn run() {
             create_task_from_template,
             load_execution_logs,
             load_shortcut_status,
+            load_keybindings,
+            save_keybindings,
+            reset_keybindings,
+            open_keybindings_file,
             update_settings
         ])
         .run(tauri::generate_context!())
