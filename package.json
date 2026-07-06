@@ -6,14 +6,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "node scripts/check-version.mjs && vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
+    "tauri:build": "node scripts/check-version.mjs && tauri build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "check:version": "node scripts/check-version.mjs",
+    "version": "node scripts/sync-version.mjs && node scripts/check-version.mjs && git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",
