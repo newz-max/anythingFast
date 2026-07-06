@@ -40,6 +40,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -59,6 +60,14 @@
       "wix": {
         "language": "zh-CN"
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFGNzQ4RTM0NTI0MDY4RTMKUldUamFFQlNOSTUwcnlrODdvUm45N0N6dU9KcGZpQmoyckVIbi9RVHhkaHYrWXlUSyszdi8vZ3cK",
+      "endpoints": [
+        "https://github.com/newz-max/anythingFast/releases/latest/download/latest.json"
+      ]
     }
   }
 }

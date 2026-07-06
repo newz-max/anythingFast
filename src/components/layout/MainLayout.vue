@@ -11,6 +11,7 @@ import ScheduleTriggerCard from '@/components/tasks/ScheduleTriggerCard.vue'
 import ExecutionProgress from '@/components/execution/ExecutionProgress.vue'
 import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vue'
 import KeybindingSettings from '@/components/settings/KeybindingSettings.vue'
+import UpdateSettings from '@/components/settings/UpdateSettings.vue'
 import logoUrl from '@/assets/logo.png'
 import { createTaskDraft, cloneTask } from '@/domain/taskFactory'
 import { createTaskFromTemplate, deriveTemplateRisk } from '@/domain/taskTemplates'
@@ -20,6 +21,7 @@ import { deriveActionExecutionStates, statusLabel } from '@/domain/executionPres
 import { deriveFlowExecutionStates, deriveFlowPreviewModel } from '@/domain/flowPreview'
 import { useTaskStore } from '@/stores/taskStore'
 import { useExecutionStore } from '@/stores/executionStore'
+import { useUpdateStore } from '@/stores/updateStore'
 import { useTaskExecution } from '@/composables/useTaskExecution'
 import { useKeybindings } from '@/composables/useKeybindings'
 import { tauriApi } from '@/api/tauri'
@@ -47,6 +49,7 @@ import type { TaskWizardMode } from '@/composables/useTaskWizardDraft'
 
 const taskStore = useTaskStore()
 const executionStore = useExecutionStore()
+const updateStore = useUpdateStore()
 const { execute, executeAction, running } = useTaskExecution()
 const keybindings = useKeybindings()
 const message = useMessage()
@@ -86,6 +89,7 @@ const taskListPanelRef = useTemplateRef<{
 }>('taskListPanel')
 let desktopMediaQuery: MediaQueryList | null = null
 let stackedLayoutMediaQuery: MediaQueryList | null = null
+let startupUpdateTimer: number | null = null
 
 const selectedTask = computed(() => taskStore.selectedTask)
 const visibleTasks = computed(() => getTasksForView(taskStore.tasks, activeTaskView.value, selectedTagId.value))
@@ -214,12 +218,16 @@ onMounted(async () => {
   } catch (err) {
     reportUiError('Load execution logs failed', err)
   }
+  setupStartupUpdateCheck()
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onMainWindowKeydown)
   desktopMediaQuery?.removeEventListener('change', handleDesktopBreakpointChange)
   stackedLayoutMediaQuery?.removeEventListener('change', handleStackedLayoutBreakpointChange)
+  if (startupUpdateTimer !== null) {
+    window.clearTimeout(startupUpdateTimer)
+  }
 })
 
 watch(
@@ -830,6 +838,15 @@ function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window
 }
 
+function setupStartupUpdateCheck() {
+  if (!isTauriRuntime()) return
+  if (startupUpdateTimer !== null) return
+  startupUpdateTimer = window.setTimeout(() => {
+    startupUpdateTimer = null
+    void updateStore.checkForUpdate('startup')
+  }, 3000)
+}
+
 async function minimizeWindow() {
   if (!isTauriRuntime()) return
   await getCurrentWindow().minimize()
@@ -1329,6 +1346,7 @@ async function resetLayoutScroll() {
         </NFormItem>
       </NForm>
       <KeybindingSettings :global-shortcut="settingsShortcutDraft" :task-shortcuts="taskShortcutValues" />
+      <UpdateSettings />
       <template #footer>
         <NSpace justify="end">
           <NButton @click="settingsModalVisible = false">取消</NButton>

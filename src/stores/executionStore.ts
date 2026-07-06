@@ -35,6 +35,8 @@ export const useExecutionStore = defineStore('execution', () => {
   const summariesByRunId = shallowRef<Record<string, TaskExecutionSummary>>({})
   const logs = shallowRef<ExecutionLogSummary[]>([])
   const error = shallowRef<string | null>(null)
+  const pendingRuntimeInputCount = shallowRef(0)
+  const pendingRiskConfirmationCount = shallowRef(0)
   let executionUnlisten: UnlistenFn | null = null
 
   const runs = computed(() => runOrder.value.map((runId) => runsById.value[runId]).filter(Boolean))
@@ -46,6 +48,9 @@ export const useExecutionStore = defineStore('execution', () => {
   const running = computed(() => activeRunIds.value.length > 0)
   const runningTaskId = computed(() => activeRuns.value.at(-1)?.taskId ?? null)
   const runningActionId = computed(() => activeRuns.value.at(-1)?.currentActionId ?? null)
+  const runtimeInputPending = computed(() => pendingRuntimeInputCount.value > 0)
+  const riskConfirmationPending = computed(() => pendingRiskConfirmationCount.value > 0)
+  const interactionPending = computed(() => runtimeInputPending.value || riskConfirmationPending.value)
 
   async function setupListeners() {
     if (!('__TAURI_INTERNALS__' in window)) return
@@ -288,6 +293,22 @@ export const useExecutionStore = defineStore('execution', () => {
     return [...summaries.value].reverse().find((summary) => summary.taskId === taskId) || null
   }
 
+  function beginRuntimeInput() {
+    pendingRuntimeInputCount.value += 1
+  }
+
+  function endRuntimeInput() {
+    pendingRuntimeInputCount.value = Math.max(0, pendingRuntimeInputCount.value - 1)
+  }
+
+  function beginRiskConfirmation() {
+    pendingRiskConfirmationCount.value += 1
+  }
+
+  function endRiskConfirmation() {
+    pendingRiskConfirmationCount.value = Math.max(0, pendingRiskConfirmationCount.value - 1)
+  }
+
   function assertTargetNotActive(targetKey: RunTargetKey, message: string) {
     if (isTargetActive(targetKey)) {
       throw new Error(message)
@@ -350,6 +371,11 @@ export const useExecutionStore = defineStore('execution', () => {
     runningTaskId,
     runningActionId,
     running,
+    pendingRuntimeInputCount,
+    pendingRiskConfirmationCount,
+    runtimeInputPending,
+    riskConfirmationPending,
+    interactionPending,
     events,
     logs,
     lastSummary,
@@ -369,7 +395,11 @@ export const useExecutionStore = defineStore('execution', () => {
     latestActiveRunForTask,
     eventsForRun,
     eventsForTask,
-    latestSummaryForTask
+    latestSummaryForTask,
+    beginRuntimeInput,
+    endRuntimeInput,
+    beginRiskConfirmation,
+    endRiskConfirmation
   }
 })
 

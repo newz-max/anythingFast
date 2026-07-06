@@ -101,7 +101,15 @@ export function useTaskExecution() {
   }
 
   function confirmRisk(task: TaskItem, reasons: string[], details: string[], action?: TaskAction) {
+    executionStore.beginRiskConfirmation()
     return new Promise<void>((resolve, reject) => {
+      let settled = false
+      const settle = (callback: () => void) => {
+        if (settled) return
+        settled = true
+        executionStore.endRiskConfirmation()
+        callback()
+      }
       dialog.warning({
         title: action ? '确认执行高风险动作' : '确认执行高风险事项',
         content: () => [
@@ -112,9 +120,9 @@ export function useTaskExecution() {
         ].join('\n'),
         positiveText: '确认执行',
         negativeText: '取消',
-        onPositiveClick: () => resolve(),
-        onNegativeClick: () => reject(new Error('cancelled')),
-        onClose: () => reject(new Error('cancelled'))
+        onPositiveClick: () => settle(resolve),
+        onNegativeClick: () => settle(() => reject(new Error('cancelled'))),
+        onClose: () => settle(() => reject(new Error('cancelled')))
       })
     })
   }
@@ -127,7 +135,15 @@ export function useTaskExecution() {
     }
 
     const values = reactive(defaultRuntimeVariableValues(variables))
+    executionStore.beginRuntimeInput()
     return new Promise((resolve, reject) => {
+      let settled = false
+      const settle = (callback: () => void) => {
+        if (settled) return
+        settled = true
+        executionStore.endRuntimeInput()
+        callback()
+      }
       dialog.info({
         title: '填写运行变量',
         content: () =>
@@ -164,11 +180,11 @@ export function useTaskExecution() {
             message.warning(`请填写变量：${missing.label || missing.key}`)
             return false
           }
-          resolve({ ...values })
+          settle(() => resolve({ ...values }))
           return true
         },
-        onNegativeClick: () => reject(new Error('cancelled')),
-        onClose: () => reject(new Error('cancelled'))
+        onNegativeClick: () => settle(() => reject(new Error('cancelled'))),
+        onClose: () => settle(() => reject(new Error('cancelled')))
       })
     })
   }
