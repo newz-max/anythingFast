@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import ActionParamForm from '@/components/tasks/ActionParamForm.vue'
 import { actionTypeOptions, describeAction, describeCondition, getActionTypeLabel } from '@/domain/actionPresentation'
@@ -7,6 +7,7 @@ import { createActionDraft } from '@/domain/taskFactory'
 import { deriveActionRisk } from '@/domain/risk'
 import { validateActionLocal } from '@/domain/validation'
 import { clonePlainDto } from '@/utils/clonePlainDto'
+import { isCtrlShortcut } from '@/utils/keyboard'
 import type { ActionType, TaskAction, TaskVariable } from '@/types/domain'
 
 export type ActionWizardMode = 'create' | 'edit'
@@ -30,6 +31,9 @@ const message = useMessage()
 const title = computed(() => (props.mode === 'create' ? '新增动作' : '编辑动作'))
 const validation = computed(() => validateActionLocal(draft.value))
 const stepStatus = computed(() => (currentStep.value === 3 && !validation.value.valid ? 'error' : 'process'))
+
+onMounted(() => window.addEventListener('keydown', onEditorKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onEditorKeydown))
 
 watch(
   () => props.show,
@@ -86,6 +90,29 @@ function normalizeRisk() {
   const nextRisk = deriveActionRisk(draft.value)
   if (draft.value.riskLevel !== nextRisk) {
     draft.value.riskLevel = nextRisk
+  }
+}
+
+function onEditorKeydown(event: KeyboardEvent) {
+  if (!props.show || event.defaultPrevented) return
+  if (isCtrlShortcut(event, 's')) {
+    event.preventDefault()
+    save()
+    return
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    close()
+    return
+  }
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'ArrowLeft') {
+    event.preventDefault()
+    previousStep()
+    return
+  }
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'ArrowRight') {
+    event.preventDefault()
+    nextStep()
   }
 }
 </script>

@@ -163,7 +163,9 @@ fn ensure_parent(path: &PathBuf) -> StorageResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ActionType, ExecutionScope, ExecutionStatus, RiskLevel, TaskItem, TaskTrigger};
+    use crate::domain::{
+        ActionType, ExecutionScope, ExecutionStatus, RiskLevel, TaskItem, TaskTrigger,
+    };
     use std::fs;
     use std::thread;
     use uuid::Uuid;
@@ -245,11 +247,19 @@ mod tests {
 
         let restored = read_config_file(&path).expect("read config");
         assert_eq!(
-            restored.tasks.iter().find(|task| task.id == "task-1").and_then(|task| task.last_run_at.clone()),
+            restored
+                .tasks
+                .iter()
+                .find(|task| task.id == "task-1")
+                .and_then(|task| task.last_run_at.clone()),
             Some("2026-07-01T00:00:01Z".into())
         );
         assert_eq!(
-            restored.tasks.iter().find(|task| task.id == "task-2").and_then(|task| task.last_run_at.clone()),
+            restored
+                .tasks
+                .iter()
+                .find(|task| task.id == "task-2")
+                .and_then(|task| task.last_run_at.clone()),
             Some("2026-07-01T00:00:02Z".into())
         );
 
@@ -263,8 +273,12 @@ mod tests {
 
         let first_path = path.clone();
         let second_path = path.clone();
-        let first = thread::spawn(move || append_log_file(&first_path, log("log-1", "task-1")).expect("append first log"));
-        let second = thread::spawn(move || append_log_file(&second_path, log("log-2", "task-2")).expect("append second log"));
+        let first = thread::spawn(move || {
+            append_log_file(&first_path, log("log-1", "task-1")).expect("append first log")
+        });
+        let second = thread::spawn(move || {
+            append_log_file(&second_path, log("log-2", "task-2")).expect("append second log")
+        });
 
         first.join().expect("join first");
         second.join().expect("join second");

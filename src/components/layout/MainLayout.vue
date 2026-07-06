@@ -24,6 +24,7 @@ import { tauriApi } from '@/api/tauri'
 import { autostartApi } from '@/api/autostart'
 import { listenShortcutStatusEvents } from '@/api/events'
 import { getErrorMessage, logDevError } from '@/utils/errors'
+import { isCtrlShortcut, isEditableKeyboardTarget } from '@/utils/keyboard'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import type {
   ActionType,
@@ -74,6 +75,11 @@ const isStackedLayout = shallowRef(false)
 const taskListExpanded = shallowRef(false)
 const layoutRef = useTemplateRef<HTMLElement>('layout')
 const contentRef = useTemplateRef<HTMLElement>('content')
+const taskListPanelRef = useTemplateRef<{
+  focusSearch: () => void
+  visibleTaskIds: () => string[]
+  scrollTaskIntoView: (taskId: string) => Promise<void>
+}>('taskListPanel')
 let desktopMediaQuery: MediaQueryList | null = null
 let stackedLayoutMediaQuery: MediaQueryList | null = null
 
@@ -169,6 +175,7 @@ const shortcutWarning = computed(() => {
 })
 
 onMounted(async () => {
+  window.addEventListener('keydown', onMainWindowKeydown)
   setupResponsiveScrollReset()
   shortcutDraft.value = taskStore.settings.globalShortcut
   settingsShortcutDraft.value = taskStore.settings.globalShortcut
@@ -192,6 +199,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onMainWindowKeydown)
   desktopMediaQuery?.removeEventListener('change', handleDesktopBreakpointChange)
   stackedLayoutMediaQuery?.removeEventListener('change', handleStackedLayoutBreakpointChange)
 })
@@ -268,6 +276,91 @@ function editSelectedTask(initialStep = 1) {
   wizardTask.value = selectedTask.value
   wizardInitialStep.value = initialStep
   wizardVisible.value = true
+}
+
+function onMainWindowKeydown(event: KeyboardEvent) {
+  if (event.defaultPrevented || isMainShortcutSuspended()) return
+
+  const editableTarget = isEditableKeyboardTarget(event.target)
+  if (event.key === '/' && !editableTarget && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault()
+    taskListPanelRef.value?.focusSearch()
+    return
+  }
+
+  if (editableTarget) return
+
+  if (event.key === 'ArrowDown' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault()
+    moveSelectedTask(1)
+    return
+  }
+  if (event.key === 'ArrowUp' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault()
+    moveSelectedTask(-1)
+    return
+  }
+  if (isCtrlShortcut(event, 'Enter')) {
+    event.preventDefault()
+    runSelectedTask()
+    return
+  }
+  if (isCtrlShortcut(event, 'n')) {
+    event.preventDefault()
+    createTask()
+    return
+  }
+  if (isCtrlShortcut(event, 'e')) {
+    event.preventDefault()
+    editSelectedTask()
+    return
+  }
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && (event.code === 'Backquote' || event.key === '`')) {
+    event.preventDefault()
+    toggleExecutionPanel()
+    return
+  }
+  if (event.key.toLowerCase() === 'f' && !event.ctrlKey && !event.metaKey && !event.altKey && selectedTask.value) {
+    event.preventDefault()
+    void toggleTaskFavorite(selectedTask.value.id)
+    return
+  }
+  if (event.key === '1' && !event.ctrlKey && !event.metaKey && !event.altKey && selectedTask.value) {
+    event.preventDefault()
+    activeActionView.value = 'list'
+    return
+  }
+  if (event.key === '2' && !event.ctrlKey && !event.metaKey && !event.altKey && selectedTask.value) {
+    event.preventDefault()
+    activeActionView.value = 'flow'
+    return
+  }
+  if (event.key.toLowerCase() === 'a' && !event.ctrlKey && !event.metaKey && !event.altKey && selectedTask.value) {
+    event.preventDefault()
+    editSelectedTask(2)
+  }
+}
+
+function isMainShortcutSuspended() {
+  return (
+    wizardVisible.value ||
+    tagModalVisible.value ||
+    helpModalVisible.value ||
+    settingsModalVisible.value ||
+    importPreviewVisible.value
+  )
+}
+
+function moveSelectedTask(delta: -1 | 1) {
+  if (showTemplateCenter.value) return
+  const taskIds = taskListPanelRef.value?.visibleTaskIds() ?? visibleTasks.value.map((task) => task.id)
+  if (taskIds.length === 0) return
+  const currentIndex = taskIds.findIndex((taskId) => taskId === taskStore.selectedTaskId)
+  const fallbackIndex = delta > 0 ? 0 : taskIds.length - 1
+  const nextIndex = currentIndex === -1 ? fallbackIndex : Math.min(Math.max(currentIndex + delta, 0), taskIds.length - 1)
+  const nextTaskId = taskIds[nextIndex]
+  taskStore.selectTask(nextTaskId)
+  void taskListPanelRef.value?.scrollTaskIntoView(nextTaskId)
 }
 
 function toggleSelectedTaskEnabled(enabled: boolean) {
@@ -910,6 +1003,7 @@ async function resetLayoutScroll() {
 
       <TaskListPanel
         v-if="!showTemplateCenter"
+        ref="taskListPanel"
         v-show="!shouldCollapseTaskList"
         id="task-list-content"
         :tasks="visibleTasks"

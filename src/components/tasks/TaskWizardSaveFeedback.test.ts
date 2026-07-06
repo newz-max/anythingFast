@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, nextTick } from 'vue'
 import ActionWizardPanel from '@/components/tasks/ActionWizardPanel.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
@@ -140,6 +140,13 @@ const taskWizardWithRealActionStubs = {
   })
 }
 
+const mountedWrappers: VueWrapper[] = []
+
+function trackWrapper<T extends VueWrapper>(wrapper: T) {
+  mountedWrappers.push(wrapper)
+  return wrapper
+}
+
 const missingActionSaveStubs = {
   ...taskWizardStubs,
   TaskWizardActionStep: defineComponent({
@@ -168,6 +175,12 @@ async function goToConfirmStep(wrapper: VueWrapper) {
   await findButton(wrapper, '下一步').trigger('click')
   await nextTick()
   await findButton(wrapper, '下一步').trigger('click')
+  await nextTick()
+}
+
+async function pressKey(key: string, options: KeyboardEventInit = {}) {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options }))
+  await nextTick()
   await nextTick()
 }
 
@@ -240,8 +253,12 @@ describe('wizard save feedback', () => {
     messageApi.warning.mockClear()
   })
 
+  afterEach(() => {
+    mountedWrappers.splice(0).forEach((wrapper) => wrapper.unmount())
+  })
+
   it('shows a warning when saving an invalid action', async () => {
-    const wrapper = mount(ActionWizardPanel, {
+    const wrapper = trackWrapper(mount(ActionWizardPanel, {
       props: {
         show: false,
         mode: 'edit',
@@ -250,7 +267,7 @@ describe('wizard save feedback', () => {
       global: {
         stubs: actionWizardStubs
       }
-    })
+    }))
 
     await wrapper.setProps({ show: true })
     await nextTick()
@@ -262,7 +279,7 @@ describe('wizard save feedback', () => {
   })
 
   it('shows a warning when saving an invalid task', async () => {
-    const wrapper = mount(TaskWizardDrawer, {
+    const wrapper = trackWrapper(mount(TaskWizardDrawer, {
       props: {
         show: true,
         mode: 'edit',
@@ -273,7 +290,7 @@ describe('wizard save feedback', () => {
       global: {
         stubs: taskWizardStubs
       }
-    })
+    }))
 
     await nextTick()
     await goToConfirmStep(wrapper)
@@ -293,7 +310,7 @@ describe('wizard save feedback', () => {
       continueOnError: false,
       riskLevel: 'low'
     }
-    const wrapper = mount(TaskWizardDrawer, {
+    const wrapper = trackWrapper(mount(TaskWizardDrawer, {
       props: {
         show: true,
         mode: 'edit',
@@ -304,7 +321,7 @@ describe('wizard save feedback', () => {
       global: {
         stubs: taskWizardStubs
       }
-    })
+    }))
 
     await nextTick()
     await goToConfirmStep(wrapper)
@@ -315,7 +332,7 @@ describe('wizard save feedback', () => {
   })
 
   it('saves an edited command action with terminal auto close disabled into the task draft', async () => {
-    const wrapper = mount(TaskWizardDrawer, {
+    const wrapper = trackWrapper(mount(TaskWizardDrawer, {
       props: {
         show: true,
         mode: 'edit',
@@ -326,7 +343,7 @@ describe('wizard save feedback', () => {
       global: {
         stubs: taskWizardWithRealActionStubs
       }
-    })
+    }))
 
     await nextTick()
     await findButton(wrapper, '下一步').trigger('click')
@@ -367,7 +384,7 @@ describe('wizard save feedback', () => {
   })
 
   it('keeps the action drawer open and shows an error when the edited action no longer exists', async () => {
-    const wrapper = mount(TaskWizardDrawer, {
+    const wrapper = trackWrapper(mount(TaskWizardDrawer, {
       props: {
         show: true,
         mode: 'edit',
@@ -378,7 +395,7 @@ describe('wizard save feedback', () => {
       global: {
         stubs: missingActionSaveStubs
       }
-    })
+    }))
 
     await nextTick()
     await findButton(wrapper, '下一步').trigger('click')
@@ -390,5 +407,86 @@ describe('wizard save feedback', () => {
 
     expect(messageApi.error).toHaveBeenCalledWith('动作保存失败：事项草稿不存在或动作已被移除')
     expect(wrapper.find('.action-wizard-stub').exists()).toBe(true)
+  })
+
+  it('supports task editor keyboard save, close, and step navigation', async () => {
+    const wrapper = trackWrapper(mount(TaskWizardDrawer, {
+      props: {
+        show: true,
+        mode: 'edit',
+        task: makeTask([{ id: 'action-1', type: 'delay', name: '等待', params: { durationMs: 1000 }, enabled: true, continueOnError: false, riskLevel: 'low' }]),
+        allTasks: [],
+        saving: false
+      },
+      global: {
+        stubs: taskWizardStubs
+      }
+    }))
+
+    await pressKey('ArrowRight', { ctrlKey: true })
+    expect(wrapper.find('.action-step').exists()).toBe(true)
+
+    await pressKey('ArrowLeft', { ctrlKey: true })
+    expect(wrapper.find('.basic-step').exists()).toBe(true)
+
+    await pressKey('ArrowRight', { ctrlKey: true })
+    await pressKey('ArrowRight', { ctrlKey: true })
+    await pressKey('s', { ctrlKey: true })
+    expect(wrapper.emitted('save')).toHaveLength(1)
+
+    await pressKey('Escape')
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('supports action editor keyboard save, close, and step navigation', async () => {
+    const wrapper = trackWrapper(mount(ActionWizardPanel, {
+      props: {
+        show: false,
+        mode: 'edit',
+        action: { id: 'action-1', type: 'delay', name: '等待', params: { durationMs: 1000 }, enabled: true, continueOnError: false, riskLevel: 'low' }
+      },
+      global: {
+        stubs: actionWizardStubs
+      }
+    }))
+    await wrapper.setProps({ show: true })
+    await nextTick()
+
+    await pressKey('ArrowRight', { ctrlKey: true })
+    await pressKey('ArrowLeft', { ctrlKey: true })
+    await pressKey('ArrowRight', { ctrlKey: true })
+    await pressKey('ArrowRight', { ctrlKey: true })
+    await pressKey('s', { ctrlKey: true })
+    expect(wrapper.emitted('save')).toHaveLength(1)
+
+    await pressKey('Escape')
+    expect(wrapper.emitted('update:show')?.at(-1)).toEqual([false])
+  })
+
+  it('lets the nested action editor handle Escape before the task editor', async () => {
+    const wrapper = trackWrapper(mount(TaskWizardDrawer, {
+      props: {
+        show: true,
+        mode: 'edit',
+        task: makeTask([makeCommandAction()], 'task-nested-shortcuts'),
+        allTasks: [],
+        saving: false
+      },
+      global: {
+        stubs: taskWizardWithRealActionStubs
+      }
+    }))
+
+    await nextTick()
+    await findButton(wrapper, '下一步').trigger('click')
+    await nextTick()
+    await wrapper.find('.edit-action').trigger('click')
+    await nextTick()
+
+    expect(wrapper.findComponent(ActionWizardPanel).props('show')).toBe(true)
+    await pressKey('Escape')
+
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(wrapper.findComponent(ActionWizardPanel).props('show')).toBe(false)
   })
 })

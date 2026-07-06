@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef, toRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, shallowRef, toRef, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import ActionWizardPanel, { type ActionWizardMode } from '@/components/tasks/ActionWizardPanel.vue'
 import TaskWizardActionStep from '@/components/tasks/TaskWizardActionStep.vue'
@@ -7,6 +7,7 @@ import TaskWizardBasicStep from '@/components/tasks/TaskWizardBasicStep.vue'
 import TaskWizardConfirmStep from '@/components/tasks/TaskWizardConfirmStep.vue'
 import { useTaskWizardDraft, type TaskWizardMode } from '@/composables/useTaskWizardDraft'
 import { clonePlainDto } from '@/utils/clonePlainDto'
+import { isCtrlShortcut } from '@/utils/keyboard'
 import type { TaskAction, TaskItem, TaskTag } from '@/types/domain'
 
 const props = defineProps<{
@@ -46,6 +47,9 @@ const title = computed(() => (props.mode === 'create' ? '新增事项' : '编辑
 const stepStatus = computed(() => (currentStep.value === 3 && validation.value?.valid === false ? 'error' : 'process'))
 const canGoNext = computed(() => Boolean(draft.value) && currentStep.value < 3)
 const canSave = computed(() => Boolean(draft.value))
+
+onMounted(() => window.addEventListener('keydown', onEditorKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onEditorKeydown))
 
 watch(
   () => props.show,
@@ -125,6 +129,29 @@ function saveAction(action: TaskAction) {
     return
   }
   message.success('已保存动作')
+}
+
+function onEditorKeydown(event: KeyboardEvent) {
+  if (!props.show || actionWizardVisible.value || event.defaultPrevented) return
+  if (isCtrlShortcut(event, 's')) {
+    event.preventDefault()
+    save()
+    return
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    close()
+    return
+  }
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'ArrowLeft') {
+    event.preventDefault()
+    previousStep()
+    return
+  }
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'ArrowRight') {
+    event.preventDefault()
+    nextStep()
+  }
 }
 </script>
 

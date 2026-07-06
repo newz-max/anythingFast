@@ -1,6 +1,6 @@
 use crate::domain::{
     ActionCondition, ActionType, AppConfig, FieldIssue, PreviousActionStatusConditionValue,
-    RiskLevel, ScheduleMode, ScheduleMisfirePolicy, TaskAction, TaskItem, TaskTrigger,
+    RiskLevel, ScheduleMisfirePolicy, ScheduleMode, TaskAction, TaskItem, TaskTrigger,
     ValidationResult,
 };
 use crate::risk::{derive_action_risk, derive_task_risk};
@@ -42,7 +42,8 @@ pub fn validate_config_model(config: &AppConfig) -> Vec<FieldIssue> {
                     if *enabled && normalized.is_empty() {
                         issues.push(issue("triggers", "快捷键不能为空"));
                     }
-                    if *enabled && normalized == normalize_shortcut(&config.settings.global_shortcut)
+                    if *enabled
+                        && normalized == normalize_shortcut(&config.settings.global_shortcut)
                     {
                         issues.push(issue("triggers", "事项快捷键不能与全局快捷键冲突"));
                     }
@@ -646,8 +647,16 @@ mod tests {
 
         let issues = validate_config_model(&config);
 
-        assert!(issues.iter().any(|issue| issue.field == "triggers.timeOfDay"));
-        assert!(issues.iter().any(|issue| issue.field == "triggers.weekdays"));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.field == "triggers.timeOfDay")
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.field == "triggers.weekdays")
+        );
     }
 
     #[test]

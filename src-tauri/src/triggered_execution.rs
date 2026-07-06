@@ -4,7 +4,7 @@ use crate::domain::{
     TaskExecutionSummary, TaskItem,
 };
 use crate::executor;
-use crate::risk::{analyze_task_risk, action_detail, derive_action_risk};
+use crate::risk::{action_detail, analyze_task_risk, derive_action_risk};
 use crate::storage;
 use crate::validation::validate_task_model;
 use crate::variables::{self, RuntimeVariableContext};
@@ -14,7 +14,10 @@ use std::collections::HashMap;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
-pub fn execute_unattended_task(app: &AppHandle, task_id: &str) -> Result<TaskExecutionSummary, String> {
+pub fn execute_unattended_task(
+    app: &AppHandle,
+    task_id: &str,
+) -> Result<TaskExecutionSummary, String> {
     let config = storage::load_config(app).map_err(|err| format!("读取配置失败：{err}"))?;
     let task = config
         .tasks
@@ -72,7 +75,10 @@ pub fn record_blocked_task_by_id(app: &AppHandle, task_id: &str, message: &str) 
             if let Some(task) = config.tasks.iter().find(|task| task.id == task_id) {
                 record_blocked_task(app, task, message);
             } else {
-                dev_log_error("Record blocked task failed", format!("task id not found: {task_id}"));
+                dev_log_error(
+                    "Record blocked task failed",
+                    format!("task id not found: {task_id}"),
+                );
             }
         }
         Err(err) => dev_log_error("Load config for blocked task failed", &err),
@@ -80,9 +86,10 @@ pub fn record_blocked_task_by_id(app: &AppHandle, task_id: &str, message: &str) 
 }
 
 pub(crate) fn task_requires_runtime_input(task: &TaskItem) -> bool {
-    task.variables
-        .iter()
-        .any(|variable| (variable.required || variable.default_value.is_empty()) && variable.default_value.is_empty())
+    task.variables.iter().any(|variable| {
+        (variable.required || variable.default_value.is_empty())
+            && variable.default_value.is_empty()
+    })
 }
 
 pub(crate) fn analyze_task_risk_for_unattended(
@@ -131,7 +138,9 @@ pub(crate) fn analyze_task_risk_for_unattended(
             .iter()
             .any(|reason| reason == "首次执行包含命令动作的事项")
         {
-            analysis.reasons.push("首次执行包含命令动作的事项".to_string());
+            analysis
+                .reasons
+                .push("首次执行包含命令动作的事项".to_string());
         }
     }
 
@@ -157,9 +166,30 @@ fn record_blocked_task(app: &AppHandle, task: &TaskItem, message: &str) {
     let run_id = Uuid::new_v4().to_string();
     let started_at = Utc::now().to_rfc3339();
     let finished_at = started_at.clone();
-    emit_event(app, &run_id, task, "started", None, Some("准备执行".to_string()));
-    emit_event(app, &run_id, task, "action-failed", Some(0), Some(message.to_string()));
-    emit_event(app, &run_id, task, "finished", None, Some(message.to_string()));
+    emit_event(
+        app,
+        &run_id,
+        task,
+        "started",
+        None,
+        Some("准备执行".to_string()),
+    );
+    emit_event(
+        app,
+        &run_id,
+        task,
+        "action-failed",
+        Some(0),
+        Some(message.to_string()),
+    );
+    emit_event(
+        app,
+        &run_id,
+        task,
+        "finished",
+        None,
+        Some(message.to_string()),
+    );
 
     let log = ExecutionLogSummary {
         id: Uuid::new_v4().to_string(),
@@ -277,7 +307,11 @@ mod tests {
         let risk = analyze_task_risk_for_unattended(&task, HashMap::new());
 
         assert!(risk.requires_confirmation);
-        assert!(risk.reasons.iter().any(|reason| reason == "命令动作包含变量引用"));
+        assert!(
+            risk.reasons
+                .iter()
+                .any(|reason| reason == "命令动作包含变量引用")
+        );
     }
 
     fn task_with_variables(variables: Vec<TaskVariable>) -> TaskItem {

@@ -86,14 +86,19 @@ pub fn run() {
                 })
                 .build(),
         )
-        .on_window_event(|window, event| {
-            if window.label() != "main" {
-                return;
+        .on_window_event(|window, event| match window.label() {
+            "main" => {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            "quick-panel" => {
+                if let WindowEvent::Focused(false) = event {
+                    let _ = window.hide();
+                }
             }
+            _ => {}
         })
         .setup(|app| {
             ensure_quick_panel(app.handle())?;
@@ -154,15 +159,23 @@ fn ensure_quick_panel(app: &tauri::AppHandle) -> tauri::Result<()> {
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(app, "quick-panel", WebviewUrl::App("/?window=quick".into()))
-        .title("快捷搜索")
-        .inner_size(720.0, 520.0)
-        .resizable(false)
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .visible(false)
-        .build()?;
+    let window =
+        WebviewWindowBuilder::new(app, "quick-panel", WebviewUrl::App("/?window=quick".into()))
+            .title("快捷搜索")
+            .inner_size(720.0, 520.0)
+            .resizable(false)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .visible(false)
+            .build()?;
+
+    let quick_panel = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::Focused(false) = event {
+            let _ = quick_panel.hide();
+        }
+    });
 
     Ok(())
 }

@@ -8,6 +8,7 @@ import { useTaskExecution } from '@/composables/useTaskExecution'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
 import { logDevError } from '@/utils/errors'
+import { isEditableKeyboardTarget } from '@/utils/keyboard'
 import logoUrl from '@/assets/logo.png'
 import type { RiskLevel, TaskAction, TaskItem } from '@/types/domain'
 
@@ -20,8 +21,10 @@ const { query, results } = useTaskSearch(enabledTasks, { ranking: 'quickRecent' 
 const { execute } = useTaskExecution()
 const selectedIndex = shallowRef(0)
 const inputRef = useTemplateRef<{ focus: () => void }>('searchInput')
+const searchBoxRef = useTemplateRef<HTMLElement>('searchBox')
 const resultsRef = useTemplateRef<HTMLElement>('results')
 const resultItemRefs = useTemplateRef<HTMLButtonElement[]>('resultItems')
+let unlistenFocusChanged: (() => void) | null = null
 
 const visibleResults = computed(() => results.value.slice(0, 8))
 const resultRows = computed(() =>
@@ -53,14 +56,24 @@ onMounted(async () => {
   } catch (err) {
     logDevError('Setup quick execution listener failed', err)
   }
+  void setupFocusLossHiding()
   await nextTick()
   inputRef.value?.focus()
   window.addEventListener('keydown', onKeydown)
 })
 
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+  unlistenFocusChanged?.()
+  unlistenFocusChanged = null
+})
 
 function onKeydown(event: KeyboardEvent) {
+  if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !isEditableKeyboardTarget(event.target)) {
+    event.preventDefault()
+    focusSearchInput()
+    return
+  }
   if (event.key === 'Escape') {
     void hideWindow()
     return
@@ -79,6 +92,12 @@ function onKeydown(event: KeyboardEvent) {
     event.preventDefault()
     void execute(selectedTask.value)
   }
+}
+
+function focusSearchInput() {
+  inputRef.value?.focus()
+  const input = searchBoxRef.value?.querySelector('input')
+  input?.select()
 }
 
 function resetSelection() {
@@ -114,6 +133,20 @@ function runTask(task: TaskItem) {
 async function hideWindow() {
   if ('__TAURI_INTERNALS__' in window) {
     await getCurrentWindow().hide()
+  }
+}
+
+async function setupFocusLossHiding() {
+  try {
+    unlistenFocusChanged = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+      if (!focused) {
+        void hideWindow()
+      }
+    })
+  } catch (err) {
+    if ('__TAURI_INTERNALS__' in window) {
+      logDevError('Setup quick focus listener failed', err)
+    }
   }
 }
 
@@ -201,7 +234,7 @@ function resultOptionId(taskId: string) {
         <span class="result-count" data-tauri-drag-region>{{ resultCountLabel }}</span>
       </header>
 
-      <section class="search-box">
+      <section ref="searchBox" class="search-box">
         <span class="search-icon" aria-hidden="true"></span>
         <NInput
           ref="searchInput"
@@ -274,7 +307,7 @@ function resultOptionId(taskId: string) {
       </section>
 
       <footer class="status">
-        <span>Alt+Space 唤起 · ↑↓ 选择 · Enter 执行 · Esc 关闭</span>
+        <span>Alt+Space 唤起 · / 搜索 · ↑↓ 选择 · Enter 执行 · Esc 关闭</span>
         <ExecutionStatusStrip
           v-if="executionStore.currentRun"
           class="quick-status-strip"

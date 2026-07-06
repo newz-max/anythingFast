@@ -47,19 +47,21 @@ pub fn start_scheduler(app: &AppHandle) -> Result<(), String> {
     }
 
     let app = app.clone();
-    thread::spawn(move || loop {
-        thread::sleep(StdDuration::from_secs(1));
-        let due = due_registrations(&app);
-        for decision in due {
-            match decision {
-                DueDecision::Run(registration) => spawn_scheduled_run(&app, registration),
-                DueDecision::SkipOverlap(registration) => {
-                    persist_schedule_metadata(&app, &registration, Utc::now());
-                    triggered_execution::record_blocked_task_by_id(
-                        &app,
-                        &registration.task_id,
-                        "上一次周期执行尚未结束，已跳过本次触发",
-                    );
+    thread::spawn(move || {
+        loop {
+            thread::sleep(StdDuration::from_secs(1));
+            let due = due_registrations(&app);
+            for decision in due {
+                match decision {
+                    DueDecision::Run(registration) => spawn_scheduled_run(&app, registration),
+                    DueDecision::SkipOverlap(registration) => {
+                        persist_schedule_metadata(&app, &registration, Utc::now());
+                        triggered_execution::record_blocked_task_by_id(
+                            &app,
+                            &registration.task_id,
+                            "上一次周期执行尚未结束，已跳过本次触发",
+                        );
+                    }
                 }
             }
         }
@@ -82,10 +84,7 @@ pub fn refresh_scheduled_triggers(app: &AppHandle, config: &AppConfig) -> Result
     Ok(())
 }
 
-fn scheduled_registrations(
-    config: &AppConfig,
-    now: DateTime<Utc>,
-) -> Vec<ScheduledRegistration> {
+fn scheduled_registrations(config: &AppConfig, now: DateTime<Utc>) -> Vec<ScheduledRegistration> {
     let mut registrations = Vec::new();
     for task in config.tasks.iter().filter(|task| task.enabled) {
         for (index, trigger) in task.triggers.iter().enumerate() {
@@ -147,7 +146,8 @@ fn spawn_scheduled_run(app: &AppHandle, registration: ScheduledRegistration) {
     persist_schedule_metadata(app, &registration, Utc::now());
     let app = app.clone();
     thread::spawn(move || {
-        if let Err(err) = triggered_execution::execute_unattended_task(&app, &registration.task_id) {
+        if let Err(err) = triggered_execution::execute_unattended_task(&app, &registration.task_id)
+        {
             dev_log_error(
                 "Execute scheduled task failed",
                 format!("task id: {}, error: {err}", registration.task_id),
@@ -159,7 +159,11 @@ fn spawn_scheduled_run(app: &AppHandle, registration: ScheduledRegistration) {
     });
 }
 
-fn persist_schedule_metadata(app: &AppHandle, registration: &ScheduledRegistration, fired_at: DateTime<Utc>) {
+fn persist_schedule_metadata(
+    app: &AppHandle,
+    registration: &ScheduledRegistration,
+    fired_at: DateTime<Utc>,
+) {
     let mut config = match storage::load_config(app) {
         Ok(config) => config,
         Err(err) => {
@@ -167,7 +171,11 @@ fn persist_schedule_metadata(app: &AppHandle, registration: &ScheduledRegistrati
             return;
         }
     };
-    let Some(task) = config.tasks.iter_mut().find(|task| task.id == registration.task_id) else {
+    let Some(task) = config
+        .tasks
+        .iter_mut()
+        .find(|task| task.id == registration.task_id)
+    else {
         return;
     };
     let Some(trigger) = task.triggers.get_mut(registration.trigger_index) else {
@@ -226,7 +234,9 @@ pub(crate) fn next_run_after(trigger: &TaskTrigger, after: DateTime<Utc>) -> Opt
 
     match mode {
         ScheduleMode::Interval => {
-            let minutes = i64::from(interval_minutes.unwrap_or(crate::validation::MIN_SCHEDULE_INTERVAL_MINUTES));
+            let minutes = i64::from(
+                interval_minutes.unwrap_or(crate::validation::MIN_SCHEDULE_INTERVAL_MINUTES),
+            );
             Some(after + Duration::minutes(minutes))
         }
         ScheduleMode::Daily => next_daily_after(after, time_of_day.as_deref()?),
@@ -247,7 +257,11 @@ fn next_daily_after(after: DateTime<Utc>, time_of_day: &str) -> Option<DateTime<
     None
 }
 
-fn next_weekly_after(after: DateTime<Utc>, time_of_day: &str, weekdays: &[u8]) -> Option<DateTime<Utc>> {
+fn next_weekly_after(
+    after: DateTime<Utc>,
+    time_of_day: &str,
+    weekdays: &[u8],
+) -> Option<DateTime<Utc>> {
     if weekdays.is_empty() {
         return None;
     }

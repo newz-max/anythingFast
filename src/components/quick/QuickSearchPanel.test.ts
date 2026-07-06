@@ -9,10 +9,14 @@ import type { AppConfig, TaskItem } from '@/types/domain'
 
 const executeMock = vi.hoisted(() => vi.fn())
 const hideWindowMock = vi.hoisted(() => vi.fn())
+const onFocusChangedMock = vi.hoisted(() => vi.fn())
+const unlistenFocusChangedMock = vi.hoisted(() => vi.fn())
+const focusChangedHandlers = vi.hoisted(() => [] as Array<(event: { payload: boolean }) => void>)
 
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
-    hide: hideWindowMock
+    hide: hideWindowMock,
+    onFocusChanged: onFocusChangedMock
   })
 }))
 
@@ -108,8 +112,8 @@ async function mountPanel(tasks = [makeTask(1), makeTask(2), makeTask(3)]) {
   return wrapper
 }
 
-async function pressKey(key: string) {
-  window.dispatchEvent(new KeyboardEvent('keydown', { key }))
+async function pressKey(key: string, target: Window | HTMLElement = window) {
+  target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
   await nextTick()
   await nextTick()
 }
@@ -123,6 +127,13 @@ describe('QuickSearchPanel keyboard navigation', () => {
     document.body.innerHTML = ''
     executeMock.mockClear()
     hideWindowMock.mockClear()
+    onFocusChangedMock.mockClear()
+    onFocusChangedMock.mockImplementation(async (handler: (event: { payload: boolean }) => void) => {
+      focusChangedHandlers.push(handler)
+      return unlistenFocusChangedMock
+    })
+    unlistenFocusChangedMock.mockClear()
+    focusChangedHandlers.splice(0)
     scrollIntoViewMock.mockClear()
     Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -132,6 +143,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
 
   afterEach(() => {
     mountedWrappers.splice(0).forEach((wrapper) => wrapper.unmount())
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
   })
 
   it('moves the active result with arrow keys and scrolls it into view', async () => {
@@ -191,5 +203,54 @@ describe('QuickSearchPanel keyboard navigation', () => {
     expect(executeMock).toHaveBeenCalledTimes(1)
     expect(executeMock.mock.calls[0][0].id).toBe('task-2')
     expect(resultItems(wrapper)[1].classes()).toContain('active')
+  })
+
+  it('focuses and selects the search input with slash from outside editable controls', async () => {
+    const wrapper = await mountPanel()
+    const input = wrapper.find('input').element as HTMLInputElement
+    await wrapper.find('.result-item').trigger('focus')
+    input.setSelectionRange(0, 0)
+
+    await pressKey('/')
+
+    expect(document.activeElement).toBe(input)
+    expect(input.selectionStart).toBe(0)
+    expect(input.selectionEnd).toBe(input.value.length)
+  })
+
+  it('keeps slash typing behavior inside the search input', async () => {
+    const wrapper = await mountPanel()
+    const input = wrapper.find('input').element as HTMLInputElement
+    input.focus()
+    const event = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true })
+
+    input.dispatchEvent(event)
+    await nextTick()
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(document.activeElement).toBe(input)
+  })
+
+  it('hides the quick window when the Tauri window loses focus', async () => {
+    await mountPanel()
+
+    expect(onFocusChangedMock).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {}
+    })
+    focusChangedHandlers[0]?.({ payload: false })
+    await nextTick()
+
+    expect(hideWindowMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('removes the Tauri focus listener on unmount', async () => {
+    const wrapper = await mountPanel()
+
+    wrapper.unmount()
+
+    expect(unlistenFocusChangedMock).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, toRef } from 'vue'
+import { computed, nextTick, toRef, useTemplateRef } from 'vue'
 import { NScrollbar } from 'naive-ui'
 import { useTaskSearch } from '@/composables/useTaskSearch'
 import type { TaskItem } from '@/types/domain'
@@ -21,9 +21,34 @@ const emit = defineEmits<{
 
 const tasksRef = toRef(props, 'tasks')
 const { query, category, results } = useTaskSearch(tasksRef)
+const searchBoxRef = useTemplateRef<HTMLElement>('searchBox')
+const taskItemRefs = useTemplateRef<HTMLButtonElement[]>('taskItems')
 
 const visibleCategories = computed(() => props.categories.filter((item) => item !== '全部'))
 const resultCount = computed(() => `共 ${results.value.length} 个事项`)
+
+function focusSearch() {
+  const input = searchBoxRef.value?.querySelector('input')
+  input?.focus()
+  input?.select()
+}
+
+function visibleTaskIds() {
+  return results.value.map((task) => task.id)
+}
+
+async function scrollTaskIntoView(taskId: string) {
+  await nextTick()
+  const index = results.value.findIndex((task) => task.id === taskId)
+  if (index < 0) return
+  taskItemRefs.value?.[index]?.scrollIntoView({ block: 'nearest' })
+}
+
+defineExpose({
+  focusSearch,
+  visibleTaskIds,
+  scrollTaskIntoView
+})
 
 function categoryTone(categoryName?: string) {
   const normalized = categoryName?.trim() || '未分类'
@@ -51,7 +76,7 @@ function formatTaskTime(task: TaskItem) {
 <template>
   <section class="task-list">
     <div class="search-row">
-      <div class="search-box">
+      <div ref="searchBox" class="search-box">
         <span class="search-icon" aria-hidden="true"></span>
         <NInput
           v-model:value="query"
@@ -105,6 +130,7 @@ function formatTaskTime(task: TaskItem) {
         <button
           v-for="task in results"
           :key="task.id"
+          ref="taskItems"
           class="task-item"
           :class="{ 'task-item-active': task.id === selectedTaskId, 'task-item-disabled': !task.enabled }"
           type="button"
