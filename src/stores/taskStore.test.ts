@@ -20,15 +20,37 @@ describe('taskStore templates', () => {
       actions: [
         {
           id: 'action-a',
-          type: 'openUrl',
-          name: '打开网页',
-          params: { url: 'https://example.com' },
+          type: 'runCommand',
+          name: '生成路径',
+          params: {
+            source: 'inline',
+            command: 'echo C:\\workspace\\result.txt',
+            workingDir: 'C:\\workspace',
+            env: {},
+            showTerminal: false,
+            closeTerminalOnFinish: true,
+            terminalHost: 'direct',
+            shell: 'powershell',
+            scriptPath: '',
+            scriptArgs: []
+          },
           enabled: true,
           continueOnError: false,
+          outputBinding: { stdoutVariable: 'generatedPath' },
+          riskLevel: 'medium'
+        },
+        {
+          id: 'action-b',
+          type: 'openFile',
+          name: '打开生成文件',
+          params: { path: '{{generatedPath}}' },
+          enabled: true,
+          continueOnError: false,
+          condition: { type: 'variableNotEmpty', variable: 'generatedPath' },
           riskLevel: 'low'
         }
       ],
-      riskLevel: 'low',
+      riskLevel: 'medium',
       enabled: true,
       favorite: false,
       tagIds: [],
@@ -41,8 +63,11 @@ describe('taskStore templates', () => {
 
     expect(store.savedTemplates).toHaveLength(1)
     expect(template.name).toBe(task.name)
-    expect(template.actions).toHaveLength(1)
+    expect(template.actions).toHaveLength(2)
     expect('id' in template.actions[0]).toBe(false)
+    expect('id' in template.actions[1]).toBe(false)
+    expect(template.actions[0].outputBinding).toEqual({ stdoutVariable: 'generatedPath' })
+    expect(template.actions[1].condition).toEqual({ type: 'variableNotEmpty', variable: 'generatedPath' })
     expect(template.description).toBe(task.description)
   })
 

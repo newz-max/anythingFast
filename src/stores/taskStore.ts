@@ -269,6 +269,8 @@ function actionWithoutId(action: TaskItem['actions'][number]): TaskTemplate['act
     enabled: action.enabled,
     timeoutMs: action.timeoutMs,
     continueOnError: action.continueOnError,
+    outputBinding: action.outputBinding,
+    condition: action.condition,
     riskLevel: action.riskLevel
   }
 }
