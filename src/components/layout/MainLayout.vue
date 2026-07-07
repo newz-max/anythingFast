@@ -25,17 +25,16 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { useUpdateStore } from '@/stores/updateStore'
 import { useTaskExecution } from '@/composables/useTaskExecution'
 import { useKeybindings } from '@/composables/useKeybindings'
+import { useTaskImportExport } from '@/composables/useTaskImportExport'
 import { tauriApi } from '@/api/tauri'
 import { autostartApi } from '@/api/autostart'
 import { listenShortcutStatusEvents } from '@/api/events'
 import { getErrorMessage, logDevError } from '@/utils/errors'
 import { isEditableKeyboardTarget } from '@/utils/keyboard'
 import { keybindingMatchesCommand, keybindingScopeLabels } from '@/domain/keybindings'
-import { open, save } from '@tauri-apps/plugin-dialog'
 import type {
   ActionType,
   AppTheme,
-  ImportPreview,
   ScheduleTaskTrigger,
   ShortcutStatus,
   ShortcutTaskTrigger,
@@ -54,6 +53,19 @@ const { execute, executeAction, running } = useTaskExecution()
 const keybindings = useKeybindings()
 const message = useMessage()
 const dialog = useDialog()
+const {
+  importPreviewVisible,
+  importPreview,
+  importConfirming,
+  openImportFile,
+  confirmImport,
+  exportTaskBundle,
+  exportSavedTemplates
+} = useTaskImportExport({
+  taskStore,
+  message,
+  reportUiError
+})
 const showLogs = shallowRef(false)
 const autoShowExecution = shallowRef(false)
 const shortcutDraft = shallowRef('')
@@ -74,10 +86,6 @@ const taskShortcutDraft = shallowRef('')
 const helpModalVisible = shallowRef(false)
 const settingsModalVisible = shallowRef(false)
 const shortcutStatus = shallowRef<ShortcutStatus | null>(null)
-const importPreviewVisible = shallowRef(false)
-const importPreview = shallowRef<ImportPreview | null>(null)
-const importFilePath = shallowRef('')
-const importConfirming = shallowRef(false)
 const isStackedLayout = shallowRef(false)
 const taskListExpanded = shallowRef(false)
 const layoutRef = useTemplateRef<HTMLElement>('layout')
@@ -519,77 +527,6 @@ async function handleShareSelect(key: string | number) {
   }
   if (key === 'import-json') {
     await openImportFile()
-  }
-}
-
-async function exportTaskBundle(taskIds: string[]) {
-  if (!isTauriRuntime()) {
-    message.warning('导出文件需要在桌面应用中使用')
-    return
-  }
-  if (taskIds.length === 0) {
-    message.warning('没有可导出的事项')
-    return
-  }
-  const targetPath = await save({
-    defaultPath: `anything-fast-${new Date().toISOString().slice(0, 10)}.json`,
-    filters: [{ name: 'JSON', extensions: ['json'] }]
-  })
-  if (!targetPath) return
-  await tauriApi.saveTaskBundleFile({ taskIds, templateIds: [] }, targetPath)
-  message.success('已导出 JSON')
-}
-
-async function exportSavedTemplates() {
-  if (!isTauriRuntime()) {
-    message.warning('导出文件需要在桌面应用中使用')
-    return
-  }
-  if (taskStore.savedTemplates.length === 0) {
-    message.warning('没有可导出的已保存模板')
-    return
-  }
-  const targetPath = await save({
-    defaultPath: `anything-fast-templates-${new Date().toISOString().slice(0, 10)}.json`,
-    filters: [{ name: 'JSON', extensions: ['json'] }]
-  })
-  if (!targetPath) return
-  await tauriApi.saveTaskBundleFile(
-    { taskIds: [], templateIds: taskStore.savedTemplates.map((template) => template.id) },
-    targetPath
-  )
-  message.success('已导出模板 JSON')
-}
-
-async function openImportFile() {
-  if (!isTauriRuntime()) {
-    message.warning('导入文件需要在桌面应用中使用')
-    return
-  }
-  const selected = await open({
-    multiple: false,
-    filters: [{ name: 'JSON', extensions: ['json'] }]
-  })
-  if (!selected || Array.isArray(selected)) return
-  importFilePath.value = selected
-  importPreview.value = await tauriApi.previewImportBundleFile(selected)
-  importPreviewVisible.value = true
-}
-
-async function confirmImport() {
-  if (!importFilePath.value) return
-  importConfirming.value = true
-  try {
-    const nextConfig = await tauriApi.confirmImportBundleFile(importFilePath.value)
-    taskStore.replaceConfig(nextConfig)
-    importPreviewVisible.value = false
-    importPreview.value = null
-    importFilePath.value = ''
-    message.success('已导入配置')
-  } catch (err) {
-    reportUiError('Confirm import failed', err)
-  } finally {
-    importConfirming.value = false
   }
 }
 
