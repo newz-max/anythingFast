@@ -1,23 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
-import { NDropdown, NModal, useDialog, useMessage } from 'naive-ui'
+import { NModal, useDialog, useMessage } from 'naive-ui'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { DropdownOption } from 'naive-ui'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
 import TemplateCenter from '@/components/tasks/TemplateCenter.vue'
 import TaskImportPreviewModal from '@/components/tasks/TaskImportPreviewModal.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
-import FlowPreviewGraph from '@/components/tasks/FlowPreviewGraph.vue'
-import ScheduleTriggerCard from '@/components/tasks/ScheduleTriggerCard.vue'
-import ExecutionProgress from '@/components/execution/ExecutionProgress.vue'
-import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vue'
+import TaskDetailPanel from '@/components/tasks/TaskDetailPanel.vue'
 import HelpModal from '@/components/settings/HelpModal.vue'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import logoUrl from '@/assets/logo.png'
 import { createTaskDraft, cloneTask } from '@/domain/taskFactory'
 import { createTaskFromTemplate } from '@/domain/taskTemplates'
 import { getTasksForView, type TaskView } from '@/domain/taskViews'
-import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { deriveActionExecutionStates, statusLabel } from '@/domain/executionPresentation'
 import { deriveFlowExecutionStates, deriveFlowPreviewModel } from '@/domain/flowPreview'
 import { useTaskStore } from '@/stores/taskStore'
@@ -33,7 +29,6 @@ import { getErrorMessage, logDevError } from '@/utils/errors'
 import { isEditableKeyboardTarget } from '@/utils/keyboard'
 import { keybindingMatchesCommand, keybindingScopeLabels } from '@/domain/keybindings'
 import type {
-  ActionType,
   AppTheme,
   ScheduleTaskTrigger,
   ShortcutStatus,
@@ -669,22 +664,6 @@ function runSelectedAction(action: TaskAction) {
   void executeAction(selectedTask.value, action)
 }
 
-function actionExecutionClass(action: TaskAction) {
-  const status = actionExecutionStates.value[action.id]?.status
-  return {
-    disabled: !action.enabled,
-    'action-running': status === 'running',
-    'action-success': status === 'success',
-    'action-failed': status === 'failed',
-    'action-skipped': status === 'skipped',
-    'action-cancelled': status === 'cancelled'
-  }
-}
-
-function actionExecutionState(action: TaskAction) {
-  return actionExecutionStates.value[action.id] || null
-}
-
 function isActionRunning(action: TaskAction) {
   if (!selectedTask.value) return false
   return Boolean(executionStore.activeRunForTarget(executionStore.actionRunTargetKey(selectedTask.value.id, action.id)))
@@ -703,18 +682,6 @@ function createFromTemplate(template: TaskTemplate) {
   wizardVisible.value = true
 }
 
-function actionIcon(type: ActionType) {
-  const icons: Record<ActionType, string> = {
-    openProgram: '</>',
-    openUrl: '◎',
-    openFile: '▤',
-    openFolder: '▰',
-    runCommand: '>_',
-    delay: '◷'
-  }
-  return icons[type]
-}
-
 function formatDateTime(value?: string) {
   if (!value) return '无'
   const date = new Date(value)
@@ -724,10 +691,6 @@ function formatDateTime(value?: string) {
 
 function pad(value: number) {
   return String(value).padStart(2, '0')
-}
-
-function actionTypeClass(action: TaskAction) {
-  return `action-icon-${action.type}`
 }
 
 function tagTone(index: number) {
@@ -989,7 +952,7 @@ async function resetLayoutScroll() {
     </section>
 
     <section class="workspace">
-      <section v-if="showTemplateCenter" class="template-intro detail-panel">
+      <section v-if="showTemplateCenter" class="template-intro">
         <div class="template-intro-copy">
           <span class="template-intro-icon" aria-hidden="true">▱</span>
           <h2>从模板创建事项</h2>
@@ -997,189 +960,54 @@ async function resetLayoutScroll() {
         </div>
       </section>
 
-      <section v-else-if="selectedTask" class="detail-panel">
-        <header class="detail-header">
-          <div class="detail-hero">
-            <div class="hero-icon" :class="selectedCategory">
-              <span>{{ selectedTask.name.slice(0, 1) || '事' }}</span>
-            </div>
-            <div class="hero-copy">
-              <div class="title-row">
-                <h2>{{ selectedTask.name || '未命名事项' }}</h2>
-                <button class="ghost-icon-button" type="button" aria-label="编辑事项" @click="editSelectedTask()">⌕</button>
-              </div>
-              <p>{{ selectedTask.description || '打开常用工具、项目文件夹和网页，快速进入工作状态' }}</p>
-              <span class="category-badge">{{ selectedCategory }}</span>
-              <div class="meta-line">
-                <span>创建于 {{ formattedCreatedAt }}</span>
-                <span>最后更新 {{ formattedUpdatedAt }}</span>
-                <span>关键词 {{ selectedKeywords }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="detail-actions">
-            <button class="run-button" type="button" :disabled="runningSelectedTask" @click="runSelectedTask">
-              <NSpin v-if="runningSelectedTask" size="small" />
-              <span v-else aria-hidden="true">▶</span>
-              {{ runButtonLabel }}
-            </button>
-            <NDropdown trigger="click" :options="shareOptions" @select="handleShareSelect">
-              <button class="icon-button" type="button" aria-label="分享">⌘</button>
-            </NDropdown>
-            <button
-              class="icon-button favorite-detail-button"
-              :class="{ active: selectedTask.favorite }"
-              type="button"
-              :aria-label="selectedTask.favorite ? '取消收藏' : '收藏'"
-              @click="toggleTaskFavorite(selectedTask.id)"
-            >
-              {{ selectedTask.favorite ? '★' : '☆' }}
-            </button>
-            <NDropdown trigger="click" :options="taskMenuOptions" @select="handleTaskMenuSelect">
-              <button class="icon-button" type="button" aria-label="更多">•••</button>
-            </NDropdown>
-          </div>
-        </header>
-
-        <ExecutionStatusStrip
-          v-if="selectedTaskStatusRun"
-          class="detail-status-strip"
-          :current-run="selectedTaskStatusRun"
-        />
-
-        <section class="actions-section">
-          <header class="section-title-row">
-            <div class="section-title">
-              <h3>{{ activeActionView === 'list' ? '动作列表' : '流程预览' }}</h3>
-              <span>{{ selectedActionCount }}</span>
-            </div>
-            <div class="action-view-controls">
-              <div class="view-switch" role="tablist" aria-label="动作视图">
-                <button
-                  class="view-switch-button"
-                  :class="{ active: activeActionView === 'list' }"
-                  type="button"
-                  role="tab"
-                  :aria-selected="activeActionView === 'list'"
-                  @click="activeActionView = 'list'"
-                >
-                  列表
-                </button>
-                <button
-                  class="view-switch-button"
-                  :class="{ active: activeActionView === 'flow' }"
-                  type="button"
-                  role="tab"
-                  :aria-selected="activeActionView === 'flow'"
-                  @click="activeActionView = 'flow'"
-                >
-                  流程
-                </button>
-              </div>
-              <button v-if="activeActionView === 'list'" class="add-action-button" type="button" @click="editSelectedTask(2)">
-                <span aria-hidden="true">＋</span>
-                添加动作
-              </button>
-            </div>
-          </header>
-
-          <FlowPreviewGraph v-if="activeActionView === 'flow'" :model="selectedFlowPreview" />
-
-          <div v-else-if="selectedTask.actions.length > 0" class="action-list">
-            <article
-              v-for="(action, index) in selectedTask.actions"
-              :key="action.id"
-              class="action-row"
-              :class="actionExecutionClass(action)"
-            >
-              <span class="drag-dots" aria-hidden="true">⠿</span>
-              <span class="action-index">{{ index + 1 }}</span>
-              <span class="action-icon" :class="actionTypeClass(action)">{{ actionIcon(action.type) }}</span>
-              <span class="action-name">{{ action.name || getActionTypeLabel(action.type) }}</span>
-              <span class="action-detail">{{ describeAction(action) }}</span>
-              <NTag
-                v-if="actionExecutionState(action)"
-                class="action-state-tag"
-                size="small"
-                :type="actionExecutionState(action)?.type"
-              >
-                {{ actionExecutionState(action)?.label }}
-              </NTag>
-              <button
-                class="action-play"
-                type="button"
-                :disabled="isActionRunning(action) || !selectedTask.enabled || !action.enabled"
-                aria-label="单动作运行"
-                @click="runSelectedAction(action)"
-              >
-                <NSpin v-if="isActionRunning(action)" size="small" />
-                <span v-else>▶</span>
-              </button>
-              <span class="row-more" aria-hidden="true">•••</span>
-            </article>
-          </div>
-
-          <NEmpty v-else class="empty-actions" description="还没有动作">
-            <template #extra>
-              <button class="add-action-button" type="button" @click="editSelectedTask(2)">添加动作</button>
-            </template>
-          </NEmpty>
-        </section>
-
-        <section class="trigger-section">
-          <h3>触发设置</h3>
-          <article class="trigger-card">
-            <span class="trigger-icon" aria-hidden="true">◷</span>
-            <span class="trigger-copy">
-              <strong>手动触发</strong>
-              <small>需要手动点击运行</small>
-            </span>
-            <span class="trigger-state">已启用</span>
-          </article>
-          <article class="trigger-card shortcut-trigger-card">
-            <span class="trigger-icon" aria-hidden="true">⌘</span>
-            <span class="trigger-copy">
-              <strong>事项快捷键</strong>
-              <small>{{ selectedShortcutTrigger ? selectedShortcutTrigger.shortcut : '未设置' }}</small>
-            </span>
-            <NInputGroup class="task-shortcut-group">
-              <NInput v-model:value="taskShortcutDraft" size="small" placeholder="例如 Ctrl+Alt+P" />
-              <NButton size="small" @click="saveTaskShortcutTrigger">保存</NButton>
-              <NButton size="small" secondary @click="clearTaskShortcutTrigger">移除</NButton>
-            </NInputGroup>
-          </article>
-          <ScheduleTriggerCard
-            :trigger="selectedScheduleTrigger"
-            @save="saveTaskScheduleTrigger"
-            @remove="clearTaskScheduleTrigger"
-          />
-        </section>
-
-        <section class="utility-strip">
-          <div class="shortcut-card">
-            <span>默认快捷键</span>
-            <NInputGroup class="shortcut-group">
-              <NInput v-model:value="shortcutDraft" size="small" placeholder="Alt+Space" />
-              <NButton size="small" @click="saveShortcut">保存</NButton>
-            </NInputGroup>
-            <p v-if="shortcutWarning" class="shortcut-warning">{{ shortcutWarning }}</p>
-          </div>
-          <button class="logs-button" type="button" @click="toggleExecutionPanel">
-            {{ logsButtonLabel }}
-          </button>
-          <NSwitch :value="selectedTask.enabled" @update:value="toggleSelectedTaskEnabled" />
-        </section>
-
-        <ExecutionProgress
-          v-if="showExecutionPanel"
-          class="logs"
-          :current-run="executionStore.currentRun"
-          :active-runs="executionStore.activeRuns"
-          :logs="executionStore.logs"
-          :events="executionStore.events"
-        />
-      </section>
+      <TaskDetailPanel
+        v-else-if="selectedTask"
+        :task="selectedTask"
+        :selected-category="selectedCategory"
+        :selected-keywords="selectedKeywords"
+        :formatted-created-at="formattedCreatedAt"
+        :formatted-updated-at="formattedUpdatedAt"
+        :action-count="selectedActionCount"
+        :action-view="activeActionView"
+        :flow-preview="selectedFlowPreview"
+        :action-execution-states="actionExecutionStates"
+        :task-status-run="selectedTaskStatusRun"
+        :current-run="executionStore.currentRun"
+        :active-runs="executionStore.activeRuns"
+        :logs="executionStore.logs"
+        :events="executionStore.events"
+        :running-task="runningSelectedTask"
+        :run-button-label="runButtonLabel"
+        :logs-button-label="logsButtonLabel"
+        :show-execution-panel="showExecutionPanel"
+        :shortcut-trigger="selectedShortcutTrigger"
+        :schedule-trigger="selectedScheduleTrigger"
+        :task-shortcut-draft="taskShortcutDraft"
+        :global-shortcut-draft="shortcutDraft"
+        :shortcut-warning="shortcutWarning"
+        :share-options="shareOptions"
+        :task-menu-options="taskMenuOptions"
+        :is-action-running="isActionRunning"
+        @run="runSelectedTask"
+        @run-action="runSelectedAction"
+        @edit="editSelectedTask"
+        @duplicate="duplicateTask(selectedTask)"
+        @delete="deleteTask(selectedTask)"
+        @save-template="saveSelectedTaskAsTemplate"
+        @toggle-favorite="toggleTaskFavorite(selectedTask.id)"
+        @toggle-enabled="toggleSelectedTaskEnabled"
+        @share-select="handleShareSelect"
+        @task-menu-select="handleTaskMenuSelect"
+        @update:action-view="activeActionView = $event"
+        @update:shortcut-draft="taskShortcutDraft = $event"
+        @update:global-shortcut-draft="shortcutDraft = $event"
+        @save-shortcut="saveTaskShortcutTrigger"
+        @clear-shortcut="clearTaskShortcutTrigger"
+        @save-schedule="saveTaskScheduleTrigger"
+        @clear-schedule="clearTaskScheduleTrigger"
+        @save-global-shortcut="saveShortcut"
+        @toggle-execution-panel="toggleExecutionPanel"
+      />
 
       <NEmpty v-else class="empty-state" description="还没有事项">
         <template #extra>
@@ -1277,23 +1105,18 @@ async function resetLayoutScroll() {
 }
 
 :global([data-app-theme="light"]) .middle-panel,
-:global([data-app-theme="light"]) .detail-panel {
+:global([data-app-theme="light"]) .template-intro {
   background:
     radial-gradient(circle at 38% -8%, rgba(116, 152, 220, 0.12), transparent 38%),
     rgba(255, 255, 255, 0.78);
 }
 
 :global([data-app-theme="light"]) .task-name,
-:global([data-app-theme="light"]) .section-title h3,
-:global([data-app-theme="light"]) .trigger-section h3,
-:global([data-app-theme="light"]) .title-row h2,
 :global([data-app-theme="light"]) .brand-title {
   color: #172033;
 }
 
-:global([data-app-theme="light"]) .task-item,
-:global([data-app-theme="light"]) .action-row,
-:global([data-app-theme="light"]) .trigger-card {
+:global([data-app-theme="light"]) .task-item {
   background: rgba(255, 255, 255, 0.72);
 }
 
@@ -1532,9 +1355,7 @@ async function resetLayoutScroll() {
 .brand-title,
 .brand-subtitle,
 .promo-card h2,
-.promo-card p,
-.section-title h3,
-.trigger-section h3 {
+.promo-card p {
   margin: 0;
 }
 
@@ -1783,10 +1604,7 @@ async function resetLayoutScroll() {
   margin-top: 28px;
 }
 
-.sidebar-footer button,
-.icon-button,
-.ghost-icon-button,
-.logs-button {
+.sidebar-footer button {
   border: 0;
   background: transparent;
   color: #8290b7;
@@ -1872,9 +1690,9 @@ async function resetLayoutScroll() {
   line-height: 1;
 }
 
-.detail-panel {
+.template-intro {
   display: grid;
-  align-content: start;
+  align-content: center;
   gap: 30px;
   min-width: 0;
   min-height: 0;
@@ -1887,10 +1705,6 @@ async function resetLayoutScroll() {
     rgba(14, 19, 37, 0.84);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 32px 80px rgba(0, 0, 0, 0.22);
   padding: 42px 36px 36px;
-}
-
-.template-intro {
-  align-content: center;
 }
 
 .template-intro-copy {
@@ -1929,450 +1743,7 @@ async function resetLayoutScroll() {
   line-height: 1.7;
 }
 
-.detail-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  min-width: 0;
-}
-
-.detail-hero {
-  display: flex;
-  flex: 1 1 420px;
-  min-width: 0;
-  gap: 26px;
-}
-
-.hero-icon {
-  display: grid;
-  width: 100px;
-  height: 100px;
-  flex: 0 0 100px;
-  place-items: center;
-  border: 1px solid rgba(81, 119, 255, 0.42);
-  border-radius: 22px;
-  background: linear-gradient(145deg, #2442a0, #162555);
-  color: #dce9ff;
-  font-size: 42px;
-  font-weight: 800;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 36px rgba(24, 52, 136, 0.24);
-}
-
-.hero-copy {
-  min-width: 0;
-  padding-top: 8px;
-}
-
-.title-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.title-row h2 {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  color: #f4f7ff;
-  font-size: 23px;
-  font-weight: 800;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ghost-icon-button {
-  font-size: 17px;
-}
-
-.hero-copy p {
-  display: -webkit-box;
-  margin: 16px 0 10px;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 14px;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.category-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-radius: 999px;
-  background: rgba(58, 139, 255, 0.13);
-  padding: 5px 10px;
-  color: #58a2ff;
-  font-size: 12px;
-}
-
-.category-badge::before {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  content: "";
-}
-
-.meta-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 24px;
-  margin-top: 20px;
-  color: #727e9f;
-  font-size: 12px;
-}
-
-.meta-line span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.detail-actions {
-  display: flex;
-  flex: 0 1 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 18px;
-  min-width: 0;
-  padding-top: 0;
-}
-
-.run-button,
-.add-action-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  border: 0;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #3a8bff, #4d4bff);
-  color: #fff;
-  cursor: pointer;
-  font-weight: 700;
-  box-shadow: 0 14px 32px rgba(53, 91, 255, 0.32);
-}
-
-.run-button {
-  width: 120px;
-  height: 43px;
-  font-size: 15px;
-}
-
-.run-button:disabled {
-  cursor: progress;
-  opacity: 0.68;
-}
-
-.icon-button {
-  width: 26px;
-  height: 34px;
-  color: #aeb9d8;
-  font-size: 18px;
-}
-
-.favorite-detail-button.active {
-  color: #ffd76a;
-}
-
-.actions-section {
-  display: grid;
-  gap: 18px;
-}
-
-.detail-status-strip {
-  width: 100%;
-}
-
-.section-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.section-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.section-title h3,
-.trigger-section h3 {
-  color: #f4f7ff;
-  font-size: 18px;
-  font-weight: 800;
-}
-
-.section-title span {
-  display: grid;
-  min-width: 34px;
-  height: 23px;
-  place-items: center;
-  border-radius: 999px;
-  background: rgba(94, 110, 148, 0.26);
-  color: #c0c9e6;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.action-view-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.view-switch {
-  display: inline-flex;
-  gap: 4px;
-  border: 1px solid rgba(82, 106, 171, 0.18);
-  border-radius: 10px;
-  background: rgba(27, 35, 55, 0.72);
-  padding: 4px;
-}
-
-.view-switch-button {
-  min-width: 56px;
-  height: 32px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #9aa7c9;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.view-switch-button.active {
-  background: rgba(65, 89, 175, 0.6);
-  color: #f4f7ff;
-}
-
-.add-action-button {
-  height: 40px;
-  padding: 0 18px;
-}
-
-.action-list {
-  display: grid;
-  gap: 7px;
-}
-
-.action-row {
-  display: grid;
-  grid-template-columns: 20px 24px 46px minmax(110px, 145px) minmax(0, 1fr) auto 42px 34px;
-  align-items: center;
-  gap: 14px;
-  min-height: 70px;
-  border: 1px solid rgba(82, 106, 171, 0.11);
-  border-radius: 10px;
-  background: rgba(27, 35, 55, 0.72);
-  padding: 0 18px;
-}
-
-.action-row.disabled {
-  opacity: 0.5;
-}
-
-.action-row.action-running {
-  border-color: rgba(77, 135, 255, 0.48);
-  background:
-    radial-gradient(circle at 100% 0%, rgba(77, 135, 255, 0.18), transparent 42%),
-    rgba(27, 35, 55, 0.78);
-}
-
-.action-row.action-success {
-  border-color: rgba(34, 197, 94, 0.28);
-}
-
-.action-row.action-failed {
-  border-color: rgba(239, 68, 68, 0.38);
-}
-
-.action-row.action-skipped,
-.action-row.action-cancelled {
-  border-color: rgba(245, 158, 11, 0.3);
-}
-
-.drag-dots,
-.action-index,
-.row-more {
-  color: #9aa7c9;
-  font-size: 15px;
-}
-
-.action-icon {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border-radius: 9px;
-  background: rgba(65, 89, 175, 0.42);
-  color: #92c2ff;
-  font-size: 18px;
-  font-weight: 800;
-}
-
-.action-icon-openUrl {
-  font-size: 26px;
-}
-
-.action-icon-openFolder,
-.action-icon-openFile {
-  color: #ffc65c;
-}
-
-.action-icon-runCommand {
-  color: #a794ff;
-}
-
-.action-name,
-.action-detail {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.action-name {
-  color: #f4f7ff;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.action-detail {
-  color: #b3bddb;
-  font-size: 14px;
-}
-
-.action-state-tag {
-  justify-self: end;
-  white-space: nowrap;
-}
-
-.action-play {
-  display: grid;
-  width: 31px;
-  height: 31px;
-  place-items: center;
-  border: 0;
-  border-radius: 9px;
-  background: rgba(63, 82, 159, 0.58);
-  color: #dce9ff;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.action-play:disabled {
-  cursor: not-allowed;
-  opacity: 0.62;
-}
-
-.trigger-section {
-  display: grid;
-  gap: 16px;
-}
-
-.trigger-card {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16px;
-  min-height: 94px;
-  border: 1px solid rgba(82, 106, 171, 0.14);
-  border-radius: 12px;
-  background:
-    radial-gradient(circle at 80% 20%, rgba(73, 67, 175, 0.24), transparent 42%),
-    rgba(27, 35, 55, 0.72);
-  padding: 0 20px;
-}
-
-.shortcut-trigger-card {
-  grid-template-columns: 48px minmax(0, 1fr) minmax(0, 420px);
-}
-
-.trigger-icon {
-  display: grid;
-  width: 48px;
-  height: 48px;
-  place-items: center;
-  border: 1px solid rgba(93, 117, 174, 0.42);
-  border-radius: 12px;
-  background: rgba(64, 81, 149, 0.52);
-  color: #dce9ff;
-  font-size: 24px;
-}
-
-.trigger-copy {
-  display: grid;
-  gap: 4px;
-}
-
-.trigger-copy strong {
-  color: #f4f7ff;
-  font-size: 15px;
-}
-
-.trigger-copy small,
-.trigger-state {
-  color: #8b96b8;
-}
-
-.trigger-state {
-  justify-self: end;
-  font-size: 12px;
-}
-
-.task-shortcut-group {
-  width: 100%;
-  min-width: 0;
-  justify-self: end;
-  max-width: 420px;
-}
-
-.utility-strip {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: end;
-  gap: 16px;
-  min-width: 0;
-}
-
-.shortcut-card {
-  display: grid;
-  gap: 8px;
-  color: #8b96b8;
-  font-size: 12px;
-}
-
-.shortcut-group {
-  width: 100%;
-  max-width: 320px;
-}
-
-.shortcut-warning {
-  max-width: 420px;
-  margin: 0;
-  color: #ffb15c;
-  line-height: 1.5;
-}
-
-.logs-button {
-  height: 34px;
-  border: 1px solid rgba(82, 106, 171, 0.24);
-  border-radius: 10px;
-  background: rgba(27, 35, 55, 0.52);
-  padding: 0 14px;
-  color: #f4f7ff;
-}
-
-.logs {
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.empty-state,
-.empty-actions {
+.empty-state {
   --n-text-color: #8b96b8 !important;
   --n-icon-color: #445071 !important;
 }
@@ -2468,109 +1839,9 @@ async function resetLayoutScroll() {
     border-radius: 24px 0 0 24px;
   }
 
-  .detail-panel {
+  .template-intro {
     gap: 24px;
     padding: 30px 22px;
-  }
-
-  .detail-header {
-    flex-wrap: wrap;
-    gap: 18px;
-  }
-
-  .detail-actions {
-    width: 100%;
-    gap: 12px;
-  }
-
-  .hero-icon {
-    width: 76px;
-    height: 76px;
-    flex-basis: 76px;
-    font-size: 32px;
-  }
-
-  .actions-section {
-    gap: 16px;
-    min-width: 0;
-  }
-
-  .section-title-row {
-    flex-wrap: wrap;
-    gap: 12px;
-    min-width: 0;
-  }
-
-  .section-title {
-    min-width: 0;
-  }
-
-  .add-action-button {
-    flex: 0 0 auto;
-  }
-
-  .action-view-controls {
-    flex-wrap: wrap;
-  }
-
-  .action-row {
-    grid-template-columns: 22px 38px minmax(0, 1fr) minmax(0, auto) 34px;
-    grid-template-areas:
-      "index icon name state play"
-      "index icon detail detail play";
-    gap: 6px 10px;
-    min-height: 78px;
-    padding: 12px 14px;
-  }
-
-  .drag-dots,
-  .row-more {
-    display: none;
-  }
-
-  .action-index {
-    grid-area: index;
-    align-self: center;
-  }
-
-  .action-icon {
-    grid-area: icon;
-  }
-
-  .action-name {
-    grid-area: name;
-    min-width: 0;
-  }
-
-  .action-detail {
-    grid-area: detail;
-    min-width: 0;
-  }
-
-  .action-state-tag {
-    grid-area: state;
-    max-width: 100%;
-  }
-
-  .action-play {
-    grid-area: play;
-  }
-
-  .shortcut-trigger-card,
-  .schedule-trigger-card,
-  .utility-strip {
-    grid-template-columns: 1fr;
-  }
-
-  .trigger-card {
-    align-items: start;
-    padding: 18px;
-  }
-
-  .task-shortcut-group,
-  .shortcut-group,
-  .shortcut-warning {
-    max-width: none;
   }
 }
 
@@ -2645,16 +1916,8 @@ async function resetLayoutScroll() {
   }
 
   .workspace,
-  .detail-panel {
+  .template-intro {
     overflow: visible;
-  }
-
-  .detail-hero {
-    flex-wrap: wrap;
-  }
-
-  .section-title-row {
-    flex-wrap: wrap;
   }
 }
 
@@ -2689,49 +1952,9 @@ async function resetLayoutScroll() {
     gap: 12px;
   }
 
-  .detail-panel {
+  .template-intro {
     border-radius: 18px;
     padding: 20px 16px;
-  }
-
-  .action-row {
-    grid-template-columns: 18px 34px minmax(0, 1fr) 34px;
-    grid-template-areas:
-      "index icon name play"
-      "index icon detail play"
-      ". . state state";
-  }
-
-  .drag-dots,
-  .row-more {
-    display: none;
-  }
-
-  .action-index {
-    display: block;
-  }
-
-  .action-detail {
-    grid-area: detail;
-  }
-
-  .action-state-tag {
-    grid-area: state;
-    justify-self: start;
-  }
-
-  .action-play {
-    grid-area: play;
-  }
-
-  .run-button,
-  .add-action-button {
-    width: 100%;
-  }
-
-  .detail-actions,
-  .section-title-row {
-    justify-content: stretch;
   }
 }
 </style>
