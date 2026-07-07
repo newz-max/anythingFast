@@ -1,10 +1,11 @@
 use crate::domain::{
     ActionCondition, ActionType, AppConfig, FieldIssue, PreviousActionStatusConditionValue,
-    RiskLevel, ScheduleMisfirePolicy, ScheduleMode, TaskAction, TaskItem, TaskTrigger,
-    ValidationResult,
+    RiskLevel, ScheduleMisfirePolicy, ScheduleMode, TaskAction, TaskItem, TaskTemplate,
+    TaskTemplateAction, TaskTrigger, ValidationResult,
 };
 use crate::risk::{derive_action_risk, derive_task_risk};
 use crate::variables::{
+    collect_action_string_values, collect_condition_string_values, extract_variable_references,
     is_valid_variable_key, validate_action_output_binding, validate_task_variables,
 };
 use std::collections::HashSet;
@@ -104,6 +105,11 @@ pub fn validate_task_model(task: &TaskItem, all_tasks: &[TaskItem]) -> Validatio
                 &action_issue.message,
             ));
         }
+        issues.extend(validate_action_variable_references(
+            action,
+            &variable_keys,
+            &format!("actions.{index}"),
+        ));
         if let Some(condition_variable) = condition_variable_key(&action.condition) {
             if !variable_keys.contains(condition_variable) {
                 issues.push(issue(
@@ -118,6 +124,80 @@ pub fn validate_task_model(task: &TaskItem, all_tasks: &[TaskItem]) -> Validatio
         valid: issues.is_empty(),
         issues,
         risk_level: Some(derive_task_risk(task)),
+    }
+}
+
+pub fn validate_template_model(template: &TaskTemplate) -> ValidationResult {
+    let mut issues = Vec::new();
+
+    if template.name.trim().is_empty() {
+        issues.push(issue("name", "模板名称不能为空"));
+    }
+
+    if template.actions.is_empty() {
+        issues.push(issue("actions", "模板至少需要一个动作"));
+    }
+
+    let variable_task = TaskItem {
+        id: template.id.clone(),
+        name: template.name.clone(),
+        category: template.category.clone(),
+        keywords: template.keywords.clone(),
+        description: template.description.clone(),
+        variables: template.variables.clone(),
+        actions: Vec::new(),
+        risk_level: RiskLevel::Low,
+        enabled: true,
+        favorite: false,
+        tag_ids: Vec::new(),
+        triggers: vec![TaskTrigger::Manual { enabled: true }],
+        last_run_at: None,
+        created_at: String::new(),
+        updated_at: String::new(),
+    };
+    issues.extend(validate_task_variables(&variable_task));
+
+    let mut variable_keys: HashSet<String> = template
+        .variables
+        .iter()
+        .map(|variable| variable.key.trim().to_string())
+        .collect();
+    for action in &template.actions {
+        if let Some(binding) = &action.output_binding {
+            add_binding_key(&mut variable_keys, &binding.stdout_variable);
+            add_binding_key(&mut variable_keys, &binding.stderr_variable);
+            add_binding_key(&mut variable_keys, &binding.exit_code_variable);
+        }
+    }
+
+    for (index, action) in template.actions.iter().enumerate() {
+        let task_action =
+            template_action_to_task_action(action, format!("template-action-{index}"));
+        for action_issue in validate_action_model(&task_action).issues {
+            issues.push(issue(
+                &format!("actions.{index}.{}", action_issue.field),
+                &action_issue.message,
+            ));
+        }
+        issues.extend(validate_action_variable_references(
+            &task_action,
+            &variable_keys,
+            &format!("actions.{index}"),
+        ));
+        if let Some(condition_variable) = condition_variable_key(&task_action.condition) {
+            if !variable_keys.contains(condition_variable) {
+                issues.push(issue(
+                    &format!("actions.{index}.condition.variable"),
+                    &format!("引用了未定义变量：{condition_variable}"),
+                ));
+            }
+        }
+    }
+
+    ValidationResult {
+        valid: issues.is_empty(),
+        issues,
+        risk_level: None,
     }
 }
 
@@ -295,6 +375,51 @@ fn add_binding_key(keys: &mut HashSet<String>, value: &Option<String>) {
     };
     if is_valid_variable_key(key) {
         keys.insert(key.to_string());
+    }
+}
+
+fn validate_action_variable_references(
+    action: &TaskAction,
+    variable_keys: &HashSet<String>,
+    field_prefix: &str,
+) -> Vec<FieldIssue> {
+    let mut issues = Vec::new();
+    let values = collect_action_string_values(action)
+        .into_iter()
+        .chain(collect_condition_string_values(&action.condition));
+    for (field, value) in values {
+        match extract_variable_references(&value) {
+            Ok(references) => {
+                for key in references {
+                    if !variable_keys.contains(&key) {
+                        issues.push(issue(
+                            &format!("{field_prefix}.{field}"),
+                            &format!("引用了未定义变量：{key}"),
+                        ));
+                    }
+                }
+            }
+            Err(_) => issues.push(issue(
+                &format!("{field_prefix}.{field}"),
+                "变量引用格式必须是 {{variable}}",
+            )),
+        }
+    }
+    issues
+}
+
+fn template_action_to_task_action(action: &TaskTemplateAction, id: String) -> TaskAction {
+    TaskAction {
+        id,
+        action_type: action.action_type.clone(),
+        name: action.name.clone(),
+        params: action.params.clone(),
+        enabled: action.enabled,
+        timeout_ms: action.timeout_ms,
+        continue_on_error: action.continue_on_error,
+        output_binding: action.output_binding.clone(),
+        condition: action.condition.clone(),
+        risk_level: action.risk_level.clone(),
     }
 }
 
@@ -1123,6 +1248,135 @@ mod tests {
         let result = validate_task_model(&task, &[]);
 
         assert!(result.valid);
+    }
+
+    #[test]
+    fn rejects_unknown_action_parameter_variable_reference() {
+        let task = TaskItem {
+            id: "task".into(),
+            name: "变量事项".into(),
+            category: None,
+            keywords: None,
+            description: None,
+            variables: Vec::new(),
+            actions: vec![TaskAction {
+                id: "a".into(),
+                action_type: ActionType::OpenFolder,
+                name: None,
+                params: json!({ "path": "{{missingDir}}" }),
+                enabled: true,
+                timeout_ms: None,
+                continue_on_error: None,
+                output_binding: None,
+                condition: None,
+                risk_level: RiskLevel::Low,
+            }],
+            risk_level: RiskLevel::Low,
+            enabled: true,
+            favorite: false,
+            tag_ids: Vec::new(),
+            triggers: vec![TaskTrigger::Manual { enabled: true }],
+            last_run_at: None,
+            created_at: "2026-07-01T00:00:00Z".into(),
+            updated_at: "2026-07-01T00:00:00Z".into(),
+        };
+
+        let result = validate_task_model(&task, &[]);
+
+        assert!(!result.valid);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.message == "引用了未定义变量：missingDir")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_action_parameter_variable_syntax() {
+        let task = TaskItem {
+            id: "task".into(),
+            name: "变量事项".into(),
+            category: None,
+            keywords: None,
+            description: None,
+            variables: Vec::new(),
+            actions: vec![TaskAction {
+                id: "a".into(),
+                action_type: ActionType::OpenFolder,
+                name: None,
+                params: json!({ "path": "{{bad" }),
+                enabled: true,
+                timeout_ms: None,
+                continue_on_error: None,
+                output_binding: None,
+                condition: None,
+                risk_level: RiskLevel::Low,
+            }],
+            risk_level: RiskLevel::Low,
+            enabled: true,
+            favorite: false,
+            tag_ids: Vec::new(),
+            triggers: vec![TaskTrigger::Manual { enabled: true }],
+            last_run_at: None,
+            created_at: "2026-07-01T00:00:00Z".into(),
+            updated_at: "2026-07-01T00:00:00Z".into(),
+        };
+
+        let result = validate_task_model(&task, &[]);
+
+        assert!(!result.valid);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.message == "变量引用格式必须是 {{variable}}")
+        );
+    }
+
+    #[test]
+    fn validates_template_variables_and_references() {
+        let template = crate::domain::TaskTemplate {
+            id: "template".into(),
+            name: "变量模板".into(),
+            category: None,
+            keywords: None,
+            description: None,
+            variables: vec![crate::domain::TaskVariable {
+                key: "1bad".into(),
+                label: String::new(),
+                default_value: String::new(),
+                required: false,
+                secret: false,
+            }],
+            actions: vec![crate::domain::TaskTemplateAction {
+                action_type: ActionType::OpenFolder,
+                name: None,
+                params: json!({ "path": "{{missingDir}}" }),
+                enabled: true,
+                timeout_ms: None,
+                continue_on_error: None,
+                output_binding: None,
+                condition: None,
+                risk_level: RiskLevel::Low,
+            }],
+        };
+
+        let result = validate_template_model(&template);
+
+        assert!(!result.valid);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.field == "variables.0.key")
+        );
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.message == "引用了未定义变量：missingDir")
+        );
     }
 
     fn temp_validation_dir() -> PathBuf {

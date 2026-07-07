@@ -101,6 +101,7 @@ export function normalizeTemplate(template: TaskTemplate): TaskTemplate {
     category: template.category?.trim() || '未分类',
     keywords: template.keywords || [],
     description: template.description || '',
+    variables: normalizeVariables(template.variables),
     actions
   }
 }

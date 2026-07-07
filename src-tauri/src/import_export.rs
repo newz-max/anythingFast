@@ -4,7 +4,9 @@ use crate::domain::{
     TaskAction, TaskExportBundle, TaskItem, TaskTemplate, TaskTemplateAction, TaskTrigger,
 };
 use crate::risk::{derive_action_risk, derive_task_risk};
-use crate::validation::{normalize_task, validate_config_model, validate_task_model};
+use crate::validation::{
+    normalize_task, validate_config_model, validate_task_model, validate_template_model,
+};
 use chrono::Utc;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -152,6 +154,12 @@ pub fn confirm_import(bundle_json: &str, config: &AppConfig) -> Result<AppConfig
             issues.extend(validation.issues);
         }
     }
+    for template in &next_config.templates {
+        let validation = validate_template_model(template);
+        if !validation.valid {
+            issues.extend(validation.issues);
+        }
+    }
     if !issues.is_empty() {
         return Err(issues
             .into_iter()
@@ -176,7 +184,7 @@ pub fn template_to_task(template: &TaskTemplate) -> TaskItem {
         category: template.category.clone(),
         keywords: template.keywords.clone(),
         description: template.description.clone(),
-        variables: Vec::new(),
+        variables: template.variables.clone(),
         actions,
         risk_level: RiskLevel::Low,
         enabled: true,
@@ -279,6 +287,10 @@ pub fn normalize_template(mut template: TaskTemplate) -> TaskTemplate {
     );
     template.keywords = Some(template.keywords.unwrap_or_default());
     template.description = Some(template.description.unwrap_or_default());
+    for variable in &mut template.variables {
+        variable.key = variable.key.trim().to_string();
+        variable.label = variable.label.trim().to_string();
+    }
     template.actions = template
         .actions
         .into_iter()
@@ -575,6 +587,34 @@ mod tests {
         }
     }
 
+    fn sample_template(id: &str) -> TaskTemplate {
+        TaskTemplate {
+            id: id.into(),
+            name: format!("模板 {id}"),
+            category: Some("工作".into()),
+            keywords: Some(vec!["template".into()]),
+            description: Some("模板描述".into()),
+            variables: vec![crate::domain::TaskVariable {
+                key: "projectUrl".into(),
+                label: "项目地址".into(),
+                default_value: "https://example.com".into(),
+                required: true,
+                secret: false,
+            }],
+            actions: vec![TaskTemplateAction {
+                action_type: ActionType::OpenUrl,
+                name: Some("打开项目".into()),
+                params: json!({ "url": "{{projectUrl}}" }),
+                enabled: true,
+                timeout_ms: None,
+                continue_on_error: None,
+                output_binding: None,
+                condition: None,
+                risk_level: RiskLevel::Low,
+            }],
+        }
+    }
+
     #[test]
     fn rejects_unsupported_schema_version() {
         let config = AppConfig::default();
@@ -692,6 +732,108 @@ mod tests {
                 ..
             } if time == "09:00"
         ));
+    }
+
+    #[test]
+    fn template_to_task_copies_template_variables() {
+        let template = sample_template("template-vars");
+
+        let task = template_to_task(&template);
+
+        assert_eq!(task.variables.len(), 1);
+        assert_eq!(task.variables[0].key, "projectUrl");
+        assert_eq!(task.variables[0].label, "项目地址");
+        assert_eq!(task.variables[0].default_value, "https://example.com");
+        assert!(task.variables[0].required);
+        assert!(!task.variables[0].secret);
+    }
+
+    #[test]
+    fn export_import_roundtrip_preserves_template_variables() {
+        let source_config = AppConfig {
+            templates: vec![sample_template("template-vars")],
+            ..AppConfig::default()
+        };
+
+        let bundle = create_export_bundle(
+            &source_config,
+            ExportBundleRequest {
+                task_ids: Vec::new(),
+                template_ids: vec!["template-vars".into()],
+            },
+        )
+        .unwrap();
+        let content = serde_json::to_string(&bundle).unwrap();
+        let imported = confirm_import(&content, &AppConfig::default()).unwrap();
+
+        assert_eq!(imported.templates.len(), 1);
+        assert_eq!(imported.templates[0].variables.len(), 1);
+        assert_eq!(imported.templates[0].variables[0].key, "projectUrl");
+        assert_eq!(imported.templates[0].variables[0].label, "项目地址");
+        assert_eq!(
+            imported.templates[0].variables[0].default_value,
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn legacy_template_without_variables_deserializes_to_empty_variables() {
+        let template: TaskTemplate = serde_json::from_value(json!({
+            "id": "template-legacy",
+            "name": "旧模板",
+            "actions": [{
+                "type": "openUrl",
+                "name": "打开网页",
+                "params": { "url": "https://example.com" },
+                "enabled": true,
+                "riskLevel": "low"
+            }]
+        }))
+        .expect("legacy template");
+
+        assert!(template.variables.is_empty());
+    }
+
+    #[test]
+    fn confirm_import_rejects_invalid_template_variables() {
+        let mut template = sample_template("template-invalid");
+        template.variables.push(crate::domain::TaskVariable {
+            key: "projectUrl".into(),
+            label: "重复".into(),
+            default_value: String::new(),
+            required: false,
+            secret: false,
+        });
+        let bundle = TaskExportBundle {
+            schema_version: BUNDLE_SCHEMA_VERSION,
+            exported_at: "2026-07-01T00:00:00Z".into(),
+            source_app: SOURCE_APP.into(),
+            tasks: Vec::new(),
+            templates: vec![template],
+        };
+        let content = serde_json::to_string(&bundle).unwrap();
+
+        let err = confirm_import(&content, &AppConfig::default()).unwrap_err();
+
+        assert!(err.contains("变量 key 不能重复"));
+    }
+
+    #[test]
+    fn confirm_import_rejects_unknown_template_action_reference() {
+        let mut template = sample_template("template-unknown");
+        template.variables.clear();
+        let bundle = TaskExportBundle {
+            schema_version: BUNDLE_SCHEMA_VERSION,
+            exported_at: "2026-07-01T00:00:00Z".into(),
+            source_app: SOURCE_APP.into(),
+            tasks: Vec::new(),
+            templates: vec![template],
+        };
+        let content = serde_json::to_string(&bundle).unwrap();
+
+        let err = confirm_import(&content, &AppConfig::default()).unwrap_err();
+
+        assert!(err.contains("引用了未定义变量：projectUrl"));
     }
 
     #[test]

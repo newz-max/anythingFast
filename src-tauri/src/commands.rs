@@ -1,8 +1,8 @@
 use crate::diagnostics::dev_log_error;
 use crate::domain::{
-    AppConfig, AppSettings, ExecutionLogSummary, ExportBundleRequest, ImportPreview, PreviewAction,
-    KeybindingOverride, KeybindingsLoadResult, RiskAnalysis, RiskLevel, ShortcutStatus,
-    TaskAction, TaskExecutionSummary, TaskExportBundle, TaskItem, ValidationResult,
+    AppConfig, AppSettings, ExecutionLogSummary, ExportBundleRequest, ImportPreview,
+    KeybindingOverride, KeybindingsLoadResult, PreviewAction, RiskAnalysis, RiskLevel,
+    ShortcutStatus, TaskAction, TaskExecutionSummary, TaskExportBundle, TaskItem, ValidationResult,
 };
 use crate::executor;
 use crate::import_export;
@@ -10,6 +10,7 @@ use crate::risk::{action_detail, analyze_task_risk, derive_action_risk};
 use crate::storage;
 use crate::validation::{
     normalize_task, validate_action_model, validate_config_model, validate_task_model,
+    validate_template_model,
 };
 use crate::variables::{self, RuntimeVariableContext};
 use std::collections::HashMap;
@@ -44,6 +45,12 @@ pub fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig, Strin
     issues.extend(validate_config_model(&normalized));
     for task in &normalized.tasks {
         let validation = validate_task_model(task, &original_tasks);
+        if !validation.valid {
+            issues.extend(validation.issues);
+        }
+    }
+    for template in &normalized.templates {
+        let validation = validate_template_model(template);
         if !validation.valid {
             issues.extend(validation.issues);
         }
@@ -412,7 +419,8 @@ pub fn save_keybindings(
 
 #[tauri::command]
 pub fn reset_keybindings(app: AppHandle) -> Result<KeybindingsLoadResult, String> {
-    storage::reset_keybindings(&app).map_err(|err| log_command_error("reset_keybindings failed", err))
+    storage::reset_keybindings(&app)
+        .map_err(|err| log_command_error("reset_keybindings failed", err))
 }
 
 #[tauri::command]

@@ -205,6 +205,8 @@ pub struct TaskTemplate {
     pub category: Option<String>,
     pub keywords: Option<Vec<String>>,
     pub description: Option<String>,
+    #[serde(default)]
+    pub variables: Vec<TaskVariable>,
     pub actions: Vec<TaskTemplateAction>,
 }
 

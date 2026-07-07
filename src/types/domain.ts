@@ -135,6 +135,7 @@ export interface TaskTemplate {
   category?: string
   keywords?: string[]
   description?: string
+  variables?: TaskVariable[]
   actions: Omit<TaskAction, 'id'>[]
 }
 

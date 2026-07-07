@@ -1,4 +1,6 @@
-use crate::domain::{ActionType, FieldIssue, TaskAction, TaskActionOutputBinding, TaskItem};
+use crate::domain::{
+    ActionCondition, ActionType, FieldIssue, TaskAction, TaskActionOutputBinding, TaskItem,
+};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
@@ -249,6 +251,74 @@ pub fn empty_runtime_values() -> HashMap<String, String> {
     HashMap::new()
 }
 
+pub fn collect_action_string_values(action: &TaskAction) -> Vec<(String, String)> {
+    let mut values = Vec::new();
+    match action.action_type {
+        ActionType::OpenProgram => {
+            collect_owned_string_param(&action.params, "path", &mut values);
+            collect_owned_string_param(&action.params, "workingDir", &mut values);
+            collect_owned_string_array_param(&action.params, "args", &mut values);
+        }
+        ActionType::OpenUrl => {
+            collect_owned_string_param(&action.params, "url", &mut values);
+            collect_owned_string_param(&action.params, "browser", &mut values);
+        }
+        ActionType::OpenFile | ActionType::OpenFolder => {
+            collect_owned_string_param(&action.params, "path", &mut values);
+        }
+        ActionType::RunCommand => {
+            collect_owned_string_param(&action.params, "command", &mut values);
+            collect_owned_string_param(&action.params, "workingDir", &mut values);
+            collect_owned_string_param(&action.params, "scriptPath", &mut values);
+            collect_owned_string_array_param(&action.params, "scriptArgs", &mut values);
+            collect_owned_env_values(&action.params, &mut values);
+        }
+        ActionType::Delay => {}
+    }
+    values
+}
+
+pub fn collect_condition_string_values(
+    condition: &Option<ActionCondition>,
+) -> Vec<(String, String)> {
+    let mut values = Vec::new();
+    match condition {
+        Some(ActionCondition::FileExists { path })
+        | Some(ActionCondition::FolderExists { path }) => {
+            values.push(("condition.path".to_string(), path.clone()));
+        }
+        Some(ActionCondition::VariableEquals { value, .. }) => {
+            values.push(("condition.value".to_string(), value.clone()));
+        }
+        Some(ActionCondition::Always)
+        | Some(ActionCondition::VariableNotEmpty { .. })
+        | Some(ActionCondition::PreviousActionStatus { .. })
+        | None => {}
+    }
+    values
+}
+
+pub fn extract_variable_references(value: &str) -> Result<Vec<String>, String> {
+    let mut refs = HashSet::new();
+    let mut rest = value;
+    while let Some(start) = rest.find("{{") {
+        let after_start = &rest[start + 2..];
+        let Some(end) = after_start.find("}}") else {
+            return Err(format!("变量引用语法无效：{value}"));
+        };
+        let key = after_start[..end].trim();
+        if !is_valid_variable_key(key) {
+            return Err(format!("变量引用 key 无效：{key}"));
+        }
+        refs.insert(key.to_string());
+        rest = &after_start[end + 2..];
+    }
+    if rest.contains("}}") {
+        return Err(format!("变量引用语法无效：{value}"));
+    }
+    Ok(refs.into_iter().collect())
+}
+
 fn resolve_string_param(
     params: &mut Value,
     key: &str,
@@ -355,6 +425,33 @@ fn collect_string_array_param<'a>(params: &'a Value, key: &str, values: &mut Vec
     if let Some(array) = params.get(key).and_then(|value| value.as_array()) {
         values.extend(array.iter().filter_map(|value| value.as_str()));
     }
+}
+
+fn collect_owned_string_param(params: &Value, key: &str, values: &mut Vec<(String, String)>) {
+    if let Some(value) = params.get(key).and_then(Value::as_str) {
+        values.push((key.to_string(), value.to_string()));
+    }
+}
+
+fn collect_owned_string_array_param(params: &Value, key: &str, values: &mut Vec<(String, String)>) {
+    if let Some(array) = params.get(key).and_then(Value::as_array) {
+        values.extend(array.iter().enumerate().filter_map(|(index, value)| {
+            value
+                .as_str()
+                .map(|text| (format!("{key}.{index}"), text.to_string()))
+        }));
+    }
+}
+
+fn collect_owned_env_values(params: &Value, values: &mut Vec<(String, String)>) {
+    let Some(env) = params.get("env").and_then(Value::as_object) else {
+        return;
+    };
+    values.extend(env.iter().filter_map(|(key, value)| {
+        value
+            .as_str()
+            .map(|text| (format!("env.{key}"), text.to_string()))
+    }));
 }
 
 fn join_issues(issues: Vec<FieldIssue>) -> String {

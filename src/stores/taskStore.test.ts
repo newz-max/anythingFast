@@ -17,6 +17,10 @@ describe('taskStore templates', () => {
       category: '工作',
       keywords: ['work'],
       description: '打开工作入口',
+      variables: [
+        { key: 'projectDir', label: '项目目录', defaultValue: 'C:\\workspace', required: true, secret: false },
+        { key: 'token', label: '令牌', defaultValue: 'secret-value', required: false, secret: true }
+      ],
       actions: [
         {
           id: 'action-a',
@@ -69,6 +73,7 @@ describe('taskStore templates', () => {
     expect(template.actions[0].outputBinding).toEqual({ stdoutVariable: 'generatedPath' })
     expect(template.actions[1].condition).toEqual({ type: 'variableNotEmpty', variable: 'generatedPath' })
     expect(template.description).toBe(task.description)
+    expect(template.variables).toEqual(task.variables)
   })
 
   it('persists scheduled triggers in browser fallback config', async () => {

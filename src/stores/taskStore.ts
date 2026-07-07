@@ -157,6 +157,7 @@ export const useTaskStore = defineStore('tasks', () => {
       category: task.category,
       keywords: task.keywords || [],
       description: task.description || '',
+      variables: task.variables || [],
       actions: task.actions.map((action) => {
         const templateAction = actionWithoutId(action)
         const normalized = {

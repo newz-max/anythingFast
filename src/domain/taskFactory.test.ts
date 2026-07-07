@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDefaultConfig, normalizeConfig } from '@/domain/taskFactory'
+import { createDefaultConfig, normalizeConfig, normalizeTemplate } from '@/domain/taskFactory'
 import type { CommandParams, TaskItem } from '@/types/domain'
 
 describe('taskFactory config defaults', () => {
@@ -112,6 +112,21 @@ describe('taskFactory config defaults', () => {
         nextRunAt: '2026-07-06T01:30:00Z',
         lastScheduledAt: undefined
       }
+    ])
+  })
+
+  it('normalizes template variables', () => {
+    const template = normalizeTemplate({
+      id: 'template-vars',
+      name: '变量模板',
+      variables: [
+        { key: ' projectDir ', label: ' 项目目录 ', defaultValue: 'D:\\Project', required: true, secret: true }
+      ],
+      actions: []
+    })
+
+    expect(template.variables).toEqual([
+      { key: 'projectDir', label: '项目目录', defaultValue: 'D:\\Project', required: true, secret: true }
     ])
   })
 })

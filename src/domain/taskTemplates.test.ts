@@ -26,6 +26,9 @@ describe('task templates', () => {
       category: '工作',
       keywords: ['advanced'],
       description: '保留输出绑定和条件',
+      variables: [
+        { key: 'generatedPath', label: '生成路径', defaultValue: '', required: false, secret: false }
+      ],
       actions: [
         {
           type: 'runCommand',
@@ -67,5 +70,6 @@ describe('task templates', () => {
     expect(task.actions[0].id).not.toBe(task.actions[1].id)
     expect(task.actions[0].outputBinding).toEqual({ stdoutVariable: 'generatedPath' })
     expect(task.actions[1].condition).toEqual({ type: 'variableNotEmpty', variable: 'generatedPath' })
+    expect(task.variables).toEqual(template.variables)
   })
 })

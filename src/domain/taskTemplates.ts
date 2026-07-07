@@ -10,6 +10,7 @@ export const builtInTaskTemplates: TaskTemplate[] = [
     category: '工作',
     keywords: ['dashboard', 'work'],
     description: '打开一个常用工作网页，适合作为 URL 动作模板。',
+    variables: [],
     actions: [
       {
         type: 'openUrl',
@@ -27,6 +28,7 @@ export const builtInTaskTemplates: TaskTemplate[] = [
     category: '学习',
     keywords: ['focus', 'delay'],
     description: '先等待一小段时间，再继续后续动作，可用于搭建专注流程。',
+    variables: [],
     actions: [
       {
         type: 'delay',
@@ -44,6 +46,7 @@ export const builtInTaskTemplates: TaskTemplate[] = [
     category: '工作',
     keywords: ['command', 'terminal'],
     description: '预置一个命令动作，保存前需要补齐命令和工作目录。',
+    variables: [],
     actions: [
       {
         type: 'runCommand',
@@ -66,6 +69,7 @@ export function createTaskFromTemplate(template: TaskTemplate): TaskItem {
     category: source.category || draft.category,
     keywords: source.keywords || [],
     description: source.description || '',
+    variables: source.variables || [],
     actions: source.actions.map((action) => ({
       ...action,
       id: `action-${crypto.randomUUID()}`
