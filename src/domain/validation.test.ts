@@ -323,6 +323,110 @@ describe('validation', () => {
     expect(result.valid).toBe(true)
   })
 
+  it('rejects references to future output bindings locally', () => {
+    const task: TaskItem = {
+      id: 'task-1',
+      name: '未来输出事项',
+      variables: [],
+      actions: [
+        {
+          id: 'action-1',
+          type: 'openFolder',
+          name: '打开目录',
+          params: { path: '{{generatedPath}}' },
+          enabled: true,
+          riskLevel: 'low'
+        },
+        {
+          id: 'action-2',
+          type: 'runCommand',
+          name: '生成路径',
+          params: { command: 'echo path', workingDir: 'D:\\Project', shell: 'powershell' },
+          enabled: true,
+          outputBinding: { stdoutVariable: 'generatedPath' },
+          riskLevel: 'medium'
+        }
+      ],
+      riskLevel: 'medium',
+      enabled: true,
+      favorite: false,
+      tagIds: [],
+      triggers: [{ type: 'manual', enabled: true }],
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z'
+    }
+
+    const result = validateTaskLocal(task)
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('引用了未定义变量：generatedPath')
+  })
+
+  it('rejects current action and disabled action output references locally', () => {
+    const task: TaskItem = {
+      id: 'task-1',
+      name: '不可用输出事项',
+      variables: [],
+      actions: [
+        {
+          id: 'action-1',
+          type: 'runCommand',
+          name: '自引用输出',
+          params: { command: 'echo {{selfOutput}}', workingDir: 'D:\\Project', shell: 'powershell' },
+          enabled: true,
+          outputBinding: { stdoutVariable: 'selfOutput' },
+          riskLevel: 'medium'
+        },
+        {
+          id: 'action-2',
+          type: 'runCommand',
+          name: '禁用输出',
+          params: { command: 'echo disabled', workingDir: 'D:\\Project', shell: 'powershell' },
+          enabled: false,
+          outputBinding: { stdoutVariable: 'disabledOutput' },
+          riskLevel: 'medium'
+        },
+        {
+          id: 'action-3',
+          type: 'openFolder',
+          name: '打开目录',
+          params: { path: '{{disabledOutput}}' },
+          enabled: true,
+          condition: { type: 'variableNotEmpty', variable: 'disabledOutput' },
+          riskLevel: 'low'
+        }
+      ],
+      riskLevel: 'medium',
+      enabled: true,
+      favorite: false,
+      tagIds: [],
+      triggers: [{ type: 'manual', enabled: true }],
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z'
+    }
+
+    const result = validateTaskLocal(task)
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.filter((issue) => issue.message === '引用了未定义变量：selfOutput')).toHaveLength(1)
+    expect(result.issues.filter((issue) => issue.message === '引用了未定义变量：disabledOutput')).toHaveLength(2)
+  })
+
+  it('validates invalid output binding keys for any action locally', () => {
+    const result = validateActionLocal({
+      id: 'action-1',
+      type: 'delay',
+      name: 'wait',
+      params: { durationMs: 1000 },
+      enabled: true,
+      outputBinding: { stdoutVariable: '1bad' },
+      riskLevel: 'low'
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.field)).toContain('outputBinding.stdoutVariable')
+  })
+
   it('allows placeholders in URL and command working directory before backend resolution', () => {
     const task: TaskItem = {
       id: 'task-1',

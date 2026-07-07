@@ -1,5 +1,6 @@
 import { createTaskDraft } from '@/domain/taskFactory'
 import { deriveActionRisk, maxRisk } from '@/domain/risk'
+import { inferMissingInputVariableKeys } from '@/domain/variables'
 import { clonePlainDto } from '@/utils/clonePlainDto'
 import type { RiskLevel, TaskItem, TaskTemplate } from '@/types/domain'
 
@@ -63,13 +64,21 @@ export const builtInTaskTemplates: TaskTemplate[] = [
 export function createTaskFromTemplate(template: TaskTemplate): TaskItem {
   const draft = createTaskDraft()
   const source = clonePlainDto(template)
+  const variables = source.variables || []
+  const generatedVariables = inferMissingInputVariableKeys(source.actions, variables).map((key) => ({
+    key,
+    label: key,
+    defaultValue: '',
+    required: true,
+    secret: false
+  }))
   return {
     ...draft,
     name: source.name,
     category: source.category || draft.category,
     keywords: source.keywords || [],
     description: source.description || '',
-    variables: source.variables || [],
+    variables: [...variables, ...generatedVariables],
     actions: source.actions.map((action) => ({
       ...action,
       id: `action-${crypto.randomUUID()}`

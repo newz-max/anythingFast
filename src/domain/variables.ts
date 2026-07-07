@@ -4,6 +4,20 @@ export const variableKeyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/
 const referencePattern = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g
 const mask = '••••'
 
+export interface VariableReference {
+  field: string
+  key: string
+  value?: string
+}
+
+export interface ActionVariableReferenceScan {
+  textReferences: VariableReference[]
+  conditionVariableKeys: VariableReference[]
+  outputBindingKeys: VariableReference[]
+}
+
+export type VariableScannableAction = Pick<TaskAction, 'type' | 'params' | 'enabled' | 'condition' | 'outputBinding'>
+
 export function isValidVariableKey(key: string) {
   return variableKeyPattern.test(key.trim())
 }
@@ -33,10 +47,10 @@ export function maskSecretVariableText(value: string, variables: TaskVariable[] 
       const reference = new RegExp(`\\{\\{\\s*${escapeRegExp(variable.key)}\\s*\\}\\}`, 'g')
       const maskedReference = text.replace(reference, mask)
       return variable.defaultValue ? maskedReference.split(variable.defaultValue).join(mask) : maskedReference
-    }, value)
+  }, value)
 }
 
-export function collectActionStringValues(action: TaskAction) {
+export function collectActionStringValues(action: VariableScannableAction) {
   const params = action.params as Record<string, unknown>
   const values: Array<{ field: string; value: string }> = []
   const add = (field: string) => {
@@ -92,7 +106,62 @@ export function collectConditionStringValues(condition: ActionCondition | null |
   return values
 }
 
-export function actionHasVariableReference(action: TaskAction) {
+export function collectConditionVariableKeys(condition: ActionCondition | null | undefined) {
+  const values: VariableReference[] = []
+  if (!condition) return values
+  if (condition.type === 'variableEquals' || condition.type === 'variableNotEmpty') {
+    values.push({ field: 'condition.variable', key: condition.variable.trim() })
+  }
+  return values
+}
+
+export function collectOutputBindingKeys(action: VariableScannableAction) {
+  if (!action.outputBinding) return []
+  const bindings = [
+    ['outputBinding.stdoutVariable', action.outputBinding.stdoutVariable],
+    ['outputBinding.stderrVariable', action.outputBinding.stderrVariable],
+    ['outputBinding.exitCodeVariable', action.outputBinding.exitCodeVariable]
+  ] as const
+  return bindings
+    .filter(([, key]) => typeof key === 'string' && key.trim())
+    .map(([field, key]) => ({ field, key: key!.trim() }))
+}
+
+export function scanActionVariableReferences(action: VariableScannableAction): ActionVariableReferenceScan {
+  const textReferences = [...collectActionStringValues(action), ...collectConditionStringValues(action.condition)]
+    .flatMap(({ field, value }) => extractVariableReferences(value).map((key) => ({ field, key, value })))
+
+  return {
+    textReferences,
+    conditionVariableKeys: collectConditionVariableKeys(action.condition),
+    outputBindingKeys: collectOutputBindingKeys(action)
+  }
+}
+
+export function inferMissingInputVariableKeys(actions: VariableScannableAction[], variables: TaskVariable[] = []) {
+  const availableKeys = new Set(variables.map((variable) => variable.key.trim()).filter(Boolean))
+  const missingKeys: string[] = []
+  const addMissing = (key: string) => {
+    if (!isValidVariableKey(key) || availableKeys.has(key)) return
+    availableKeys.add(key)
+    missingKeys.push(key)
+  }
+
+  actions.forEach((action) => {
+    const scan = scanActionVariableReferences(action)
+    scan.textReferences.forEach(({ key }) => addMissing(key))
+    scan.conditionVariableKeys.forEach(({ key }) => addMissing(key))
+    if (action.enabled && action.type === 'runCommand') {
+      scan.outputBindingKeys.forEach(({ key }) => {
+        if (isValidVariableKey(key)) availableKeys.add(key)
+      })
+    }
+  })
+
+  return missingKeys
+}
+
+export function actionHasVariableReference(action: VariableScannableAction) {
   return [...collectActionStringValues(action), ...collectConditionStringValues(action.condition)].some(({ value }) => hasVariableSyntax(value))
 }
 

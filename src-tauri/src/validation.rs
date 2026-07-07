@@ -5,8 +5,9 @@ use crate::domain::{
 };
 use crate::risk::{derive_action_risk, derive_task_risk};
 use crate::variables::{
-    collect_action_string_values, collect_condition_string_values, extract_variable_references,
-    is_valid_variable_key, validate_action_output_binding, validate_task_variables,
+    collect_action_string_values, collect_condition_string_values, collect_condition_variable_keys,
+    collect_output_binding_keys, extract_variable_references, is_valid_variable_key,
+    validate_action_output_binding, validate_task_variables,
 };
 use std::collections::HashSet;
 use std::path::Path;
@@ -90,13 +91,6 @@ pub fn validate_task_model(task: &TaskItem, all_tasks: &[TaskItem]) -> Validatio
         .iter()
         .map(|variable| variable.key.trim().to_string())
         .collect();
-    for action in &task.actions {
-        if let Some(binding) = &action.output_binding {
-            add_binding_key(&mut variable_keys, &binding.stdout_variable);
-            add_binding_key(&mut variable_keys, &binding.stderr_variable);
-            add_binding_key(&mut variable_keys, &binding.exit_code_variable);
-        }
-    }
 
     for (index, action) in task.actions.iter().enumerate() {
         for action_issue in validate_action_model(action).issues {
@@ -110,14 +104,7 @@ pub fn validate_task_model(task: &TaskItem, all_tasks: &[TaskItem]) -> Validatio
             &variable_keys,
             &format!("actions.{index}"),
         ));
-        if let Some(condition_variable) = condition_variable_key(&action.condition) {
-            if !variable_keys.contains(condition_variable) {
-                issues.push(issue(
-                    &format!("actions.{index}.condition.variable"),
-                    &format!("引用了未定义变量：{condition_variable}"),
-                ));
-            }
-        }
+        add_available_output_binding_keys(&mut variable_keys, action);
     }
 
     ValidationResult {
@@ -162,13 +149,6 @@ pub fn validate_template_model(template: &TaskTemplate) -> ValidationResult {
         .iter()
         .map(|variable| variable.key.trim().to_string())
         .collect();
-    for action in &template.actions {
-        if let Some(binding) = &action.output_binding {
-            add_binding_key(&mut variable_keys, &binding.stdout_variable);
-            add_binding_key(&mut variable_keys, &binding.stderr_variable);
-            add_binding_key(&mut variable_keys, &binding.exit_code_variable);
-        }
-    }
 
     for (index, action) in template.actions.iter().enumerate() {
         let task_action =
@@ -184,14 +164,7 @@ pub fn validate_template_model(template: &TaskTemplate) -> ValidationResult {
             &variable_keys,
             &format!("actions.{index}"),
         ));
-        if let Some(condition_variable) = condition_variable_key(&task_action.condition) {
-            if !variable_keys.contains(condition_variable) {
-                issues.push(issue(
-                    &format!("actions.{index}.condition.variable"),
-                    &format!("引用了未定义变量：{condition_variable}"),
-                ));
-            }
-        }
+        add_available_output_binding_keys(&mut variable_keys, &task_action);
     }
 
     ValidationResult {
@@ -357,27 +330,6 @@ fn validate_action_condition(condition: &Option<ActionCondition>) -> Vec<FieldIs
     issues
 }
 
-fn condition_variable_key(condition: &Option<ActionCondition>) -> Option<&str> {
-    match condition {
-        Some(ActionCondition::VariableEquals { variable, .. })
-        | Some(ActionCondition::VariableNotEmpty { variable }) => Some(variable.trim()),
-        _ => None,
-    }
-}
-
-fn add_binding_key(keys: &mut HashSet<String>, value: &Option<String>) {
-    let Some(key) = value
-        .as_deref()
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-    else {
-        return;
-    };
-    if is_valid_variable_key(key) {
-        keys.insert(key.to_string());
-    }
-}
-
 fn validate_action_variable_references(
     action: &TaskAction,
     variable_keys: &HashSet<String>,
@@ -405,7 +357,26 @@ fn validate_action_variable_references(
             )),
         }
     }
+    for reference in collect_condition_variable_keys(&action.condition) {
+        if is_valid_variable_key(&reference.key) && !variable_keys.contains(&reference.key) {
+            issues.push(issue(
+                &format!("{field_prefix}.{}", reference.field),
+                &format!("引用了未定义变量：{}", reference.key),
+            ));
+        }
+    }
     issues
+}
+
+fn add_available_output_binding_keys(keys: &mut HashSet<String>, action: &TaskAction) {
+    if !action.enabled || action.action_type != ActionType::RunCommand {
+        return;
+    }
+    for reference in collect_output_binding_keys(action) {
+        if is_valid_variable_key(&reference.key) {
+            keys.insert(reference.key);
+        }
+    }
 }
 
 fn template_action_to_task_action(action: &TaskTemplateAction, id: String) -> TaskAction {
@@ -1251,6 +1222,118 @@ mod tests {
     }
 
     #[test]
+    fn rejects_future_current_and_disabled_output_binding_references() {
+        let future_task = test_task_with_actions(vec![
+            folder_action("a", "{{generatedPath}}", None),
+            command_action("b", true, Some("generatedPath"), "echo path"),
+        ]);
+
+        let future_result = validate_task_model(&future_task, &[]);
+
+        assert!(!future_result.valid);
+        assert!(
+            future_result
+                .issues
+                .iter()
+                .any(|issue| issue.message == "引用了未定义变量：generatedPath")
+        );
+
+        let current_task = test_task_with_actions(vec![command_action(
+            "a",
+            true,
+            Some("selfOutput"),
+            "echo {{selfOutput}}",
+        )]);
+
+        let current_result = validate_task_model(&current_task, &[]);
+
+        assert!(!current_result.valid);
+        assert!(
+            current_result
+                .issues
+                .iter()
+                .any(|issue| issue.message == "引用了未定义变量：selfOutput")
+        );
+
+        let disabled_task = test_task_with_actions(vec![
+            command_action("a", false, Some("disabledOutput"), "echo disabled"),
+            folder_action(
+                "b",
+                "{{disabledOutput}}",
+                Some(ActionCondition::VariableNotEmpty {
+                    variable: "disabledOutput".into(),
+                }),
+            ),
+        ]);
+
+        let disabled_result = validate_task_model(&disabled_task, &[]);
+
+        assert!(!disabled_result.valid);
+        assert_eq!(
+            disabled_result
+                .issues
+                .iter()
+                .filter(|issue| issue.message == "引用了未定义变量：disabledOutput")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn validates_template_references_in_action_order() {
+        let template = crate::domain::TaskTemplate {
+            id: "template".into(),
+            name: "顺序模板".into(),
+            category: None,
+            keywords: None,
+            description: None,
+            variables: Vec::new(),
+            actions: vec![
+                crate::domain::TaskTemplateAction {
+                    action_type: ActionType::OpenFolder,
+                    name: None,
+                    params: json!({ "path": "{{generatedPath}}" }),
+                    enabled: true,
+                    timeout_ms: None,
+                    continue_on_error: None,
+                    output_binding: None,
+                    condition: None,
+                    risk_level: RiskLevel::Low,
+                },
+                crate::domain::TaskTemplateAction {
+                    action_type: ActionType::RunCommand,
+                    name: None,
+                    params: json!({
+                        "command": "echo path",
+                        "workingDir": "D:\\Project",
+                        "shell": "powershell"
+                    }),
+                    enabled: true,
+                    timeout_ms: None,
+                    continue_on_error: None,
+                    output_binding: Some(crate::domain::TaskActionOutputBinding {
+                        stdout_variable: Some("generatedPath".into()),
+                        stderr_variable: None,
+                        exit_code_variable: None,
+                    }),
+                    condition: None,
+                    risk_level: RiskLevel::Medium,
+                },
+            ],
+        };
+
+        let result = validate_template_model(&template);
+
+        assert!(!result.valid);
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.message == "引用了未定义变量：generatedPath")
+        );
+    }
+
+    #[test]
     fn rejects_unknown_action_parameter_variable_reference() {
         let task = TaskItem {
             id: "task".into(),
@@ -1377,6 +1460,69 @@ mod tests {
                 .iter()
                 .any(|issue| issue.message == "引用了未定义变量：missingDir")
         );
+    }
+
+    fn test_task_with_actions(actions: Vec<TaskAction>) -> TaskItem {
+        TaskItem {
+            id: "task".into(),
+            name: "变量事项".into(),
+            category: None,
+            keywords: None,
+            description: None,
+            variables: Vec::new(),
+            actions,
+            risk_level: RiskLevel::Medium,
+            enabled: true,
+            favorite: false,
+            tag_ids: Vec::new(),
+            triggers: vec![TaskTrigger::Manual { enabled: true }],
+            last_run_at: None,
+            created_at: "2026-07-01T00:00:00Z".into(),
+            updated_at: "2026-07-01T00:00:00Z".into(),
+        }
+    }
+
+    fn command_action(
+        id: &str,
+        enabled: bool,
+        stdout_variable: Option<&str>,
+        command: &str,
+    ) -> TaskAction {
+        TaskAction {
+            id: id.into(),
+            action_type: ActionType::RunCommand,
+            name: None,
+            params: json!({
+                "command": command,
+                "workingDir": "D:\\Project",
+                "shell": "powershell"
+            }),
+            enabled,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: stdout_variable.map(|key| crate::domain::TaskActionOutputBinding {
+                stdout_variable: Some(key.into()),
+                stderr_variable: None,
+                exit_code_variable: None,
+            }),
+            condition: None,
+            risk_level: RiskLevel::Medium,
+        }
+    }
+
+    fn folder_action(id: &str, path: &str, condition: Option<ActionCondition>) -> TaskAction {
+        TaskAction {
+            id: id.into(),
+            action_type: ActionType::OpenFolder,
+            name: None,
+            params: json!({ "path": path }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition,
+            risk_level: RiskLevel::Low,
+        }
     }
 
     fn temp_validation_dir() -> PathBuf {

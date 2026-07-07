@@ -1,5 +1,5 @@
 import type { ActionParams, ActionType, CommandParams, DelayParams, FieldIssue, OpenProgramParams, OpenUrlParams, PathParams, RiskLevel, TaskAction } from '@/types/domain'
-import { hasVariableSyntax, isValidVariableKey } from '@/domain/variables'
+import { hasVariableSyntax } from '@/domain/variables'
 
 export interface ActionTypeOption {
   label: string
@@ -128,7 +128,6 @@ export const actionTypeDefinitions: Record<ActionType, ActionTypeDefinition> = {
       if (!isSupportedTerminalHost(action.params.terminalHost)) {
         issues.push({ field: 'terminalHost', message: '终端宿主必须是系统终端或直接启动 Shell' })
       }
-      validateOutputBinding(action, issues)
     }
   },
   delay: {
@@ -181,20 +180,6 @@ function validatePathParams(action: TaskAction, issues: FieldIssue[]) {
   if (!('path' in action.params) || !action.params.path.trim()) {
     issues.push({ field: 'path', message: '路径不能为空' })
   }
-}
-
-function validateOutputBinding(action: TaskAction, issues: FieldIssue[]) {
-  if (!action.outputBinding) return
-  const bindings = [
-    ['outputBinding.stdoutVariable', action.outputBinding.stdoutVariable],
-    ['outputBinding.stderrVariable', action.outputBinding.stderrVariable],
-    ['outputBinding.exitCodeVariable', action.outputBinding.exitCodeVariable]
-  ] as const
-  bindings.forEach(([field, key]) => {
-    if (key && !isValidVariableKey(key)) {
-      issues.push({ field, message: '输出绑定变量 key 无效' })
-    }
-  })
 }
 
 function textParam(value: unknown) {

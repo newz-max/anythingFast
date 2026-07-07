@@ -2,7 +2,7 @@ import type { ActionCondition, FieldIssue, TaskAction, TaskItem, ValidationResul
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
 import { validateActionParamsByDefinition } from '@/domain/actionTypes'
 import { validateScheduleTrigger } from '@/domain/schedule'
-import { collectActionStringValues, collectConditionStringValues, extractVariableReferences, hasInvalidVariableSyntax, isValidVariableKey } from '@/domain/variables'
+import { collectActionStringValues, collectConditionStringValues, collectOutputBindingKeys, hasInvalidVariableSyntax, isValidVariableKey, scanActionVariableReferences } from '@/domain/variables'
 
 export function validateTaskLocal(task: TaskItem, allTasks: TaskItem[] = []): ValidationResult {
   const issues: FieldIssue[] = []
@@ -39,46 +39,21 @@ export function validateTaskLocal(task: TaskItem, allTasks: TaskItem[] = []): Va
       issues.push({ field: `variables.${index}.label`, message: '变量标签不能为空' })
     }
   })
-  task.actions.forEach((action) => {
-    if (!action.outputBinding) return
-    ;[
-      action.outputBinding.stdoutVariable,
-      action.outputBinding.stderrVariable,
-      action.outputBinding.exitCodeVariable
-    ].forEach((key) => {
-      if (key && isValidVariableKey(key)) {
-        variableKeys.add(key)
-      }
-    })
-  })
 
   task.actions.forEach((action, index) => {
     validateActionLocal(action).issues.forEach((issue) => {
       issues.push({ field: `actions.${index}.${issue.field}`, message: issue.message })
     })
-    collectActionStringValues(action).forEach(({ field, value }) => {
+    ;[...collectActionStringValues(action), ...collectConditionStringValues(action.condition)].forEach(({ field, value }) => {
       if (hasInvalidVariableSyntax(value)) {
         issues.push({ field: `actions.${index}.${field}`, message: '变量引用格式必须是 {{variable}}' })
       }
-      extractVariableReferences(value).forEach((key) => {
-        if (!variableKeys.has(key)) {
-          issues.push({ field: `actions.${index}.${field}`, message: `引用了未定义变量：${key}` })
-        }
-      })
     })
-    collectConditionStringValues(action.condition).forEach(({ field, value }) => {
-      if (hasInvalidVariableSyntax(value)) {
-        issues.push({ field: `actions.${index}.${field}`, message: '变量引用格式必须是 {{variable}}' })
-      }
-      extractVariableReferences(value).forEach((key) => {
-        if (!variableKeys.has(key)) {
-          issues.push({ field: `actions.${index}.${field}`, message: `引用了未定义变量：${key}` })
-        }
+    validateActionVariableReferences(action, variableKeys, `actions.${index}`, issues)
+    if (action.enabled && action.type === 'runCommand') {
+      scanActionVariableReferences(action).outputBindingKeys.forEach(({ key }) => {
+        if (isValidVariableKey(key)) variableKeys.add(key)
       })
-    })
-    const conditionVariable = conditionVariableKey(action.condition)
-    if (conditionVariable && !variableKeys.has(conditionVariable)) {
-      issues.push({ field: `actions.${index}.condition.variable`, message: `引用了未定义变量：${conditionVariable}` })
     }
   })
 
@@ -96,6 +71,7 @@ export function validateActionLocal(action: TaskAction): ValidationResult {
     issues.push({ field: 'timeoutMs', message: '超时时间必须大于 0' })
   }
   validateCondition(action.condition, issues)
+  validateOutputBinding(action, issues)
 
   validateActionParamsByDefinition(action, issues)
 
@@ -139,10 +115,24 @@ function validateCondition(condition: ActionCondition | null | undefined, issues
   }
 }
 
-function conditionVariableKey(condition: ActionCondition | null | undefined) {
-  if (!condition) return ''
-  if (condition.type === 'variableEquals' || condition.type === 'variableNotEmpty') {
-    return condition.variable.trim()
-  }
-  return ''
+function validateOutputBinding(action: TaskAction, issues: FieldIssue[]) {
+  collectOutputBindingKeys(action).forEach(({ field, key }) => {
+    if (!isValidVariableKey(key)) {
+      issues.push({ field, message: '输出绑定变量 key 无效' })
+    }
+  })
+}
+
+function validateActionVariableReferences(action: TaskAction, variableKeys: Set<string>, fieldPrefix: string, issues: FieldIssue[]) {
+  const scan = scanActionVariableReferences(action)
+  scan.textReferences.forEach(({ field, key }) => {
+    if (!variableKeys.has(key)) {
+      issues.push({ field: `${fieldPrefix}.${field}`, message: `引用了未定义变量：${key}` })
+    }
+  })
+  scan.conditionVariableKeys.forEach(({ field, key }) => {
+    if (isValidVariableKey(key) && !variableKeys.has(key)) {
+      issues.push({ field: `${fieldPrefix}.${field}`, message: `引用了未定义变量：${key}` })
+    }
+  })
 }

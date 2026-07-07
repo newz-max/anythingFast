@@ -2,11 +2,13 @@ use crate::domain::{
     ActionType, AppConfig, ExportBundleRequest, ImportConflictSummary, ImportPathHint,
     ImportPreview, ImportRiskSummary, ImportTaskPreview, ImportTemplatePreview, RiskLevel,
     TaskAction, TaskExportBundle, TaskItem, TaskTemplate, TaskTemplateAction, TaskTrigger,
+    TaskVariable,
 };
 use crate::risk::{derive_action_risk, derive_task_risk};
 use crate::validation::{
     normalize_task, validate_config_model, validate_task_model, validate_template_model,
 };
+use crate::variables::infer_missing_input_variable_keys;
 use chrono::Utc;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -178,13 +180,22 @@ pub fn template_to_task(template: &TaskTemplate) -> TaskItem {
         .iter()
         .map(|action| template_action_to_task_action(action, new_id("action")))
         .collect();
+    let mut variables = template.variables.clone();
+    let missing_variables = infer_missing_input_variable_keys(&actions, &variables);
+    variables.extend(missing_variables.into_iter().map(|key| TaskVariable {
+        key: key.clone(),
+        label: key,
+        default_value: String::new(),
+        required: true,
+        secret: false,
+    }));
     let task = TaskItem {
         id: new_id("task"),
         name: template.name.clone(),
         category: template.category.clone(),
         keywords: template.keywords.clone(),
         description: template.description.clone(),
-        variables: template.variables.clone(),
+        variables,
         actions,
         risk_level: RiskLevel::Low,
         enabled: true,
@@ -749,6 +760,57 @@ mod tests {
     }
 
     #[test]
+    fn template_to_task_generates_missing_input_variables_in_order() {
+        let mut template = sample_template("template-generated-vars");
+        template.variables.clear();
+        template.actions = vec![
+            TaskTemplateAction {
+                action_type: ActionType::RunCommand,
+                name: Some("生成路径".into()),
+                params: json!({
+                    "command": "echo path",
+                    "workingDir": "D:\\Project",
+                    "shell": "powershell"
+                }),
+                enabled: true,
+                timeout_ms: None,
+                continue_on_error: None,
+                output_binding: Some(crate::domain::TaskActionOutputBinding {
+                    stdout_variable: Some("generatedPath".into()),
+                    stderr_variable: None,
+                    exit_code_variable: None,
+                }),
+                condition: None,
+                risk_level: RiskLevel::Medium,
+            },
+            TaskTemplateAction {
+                action_type: ActionType::OpenFolder,
+                name: Some("打开目录".into()),
+                params: json!({ "path": "{{generatedPath}}\\{{manualSuffix}}\\{{firstInput}}" }),
+                enabled: true,
+                timeout_ms: None,
+                continue_on_error: None,
+                output_binding: None,
+                condition: Some(crate::domain::ActionCondition::VariableNotEmpty {
+                    variable: "statusInput".into(),
+                }),
+                risk_level: RiskLevel::Low,
+            },
+        ];
+
+        let task = template_to_task(&template);
+
+        assert_eq!(
+            task.variables
+                .iter()
+                .map(|variable| variable.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["manualSuffix", "firstInput", "statusInput"]
+        );
+        assert!(task.variables.iter().all(|variable| variable.required));
+    }
+
+    #[test]
     fn export_import_roundtrip_preserves_template_variables() {
         let source_config = AppConfig {
             templates: vec![sample_template("template-vars")],
@@ -834,6 +896,109 @@ mod tests {
         let err = confirm_import(&content, &AppConfig::default()).unwrap_err();
 
         assert!(err.contains("引用了未定义变量：projectUrl"));
+    }
+
+    #[test]
+    fn confirm_import_rejects_task_reference_to_future_output() {
+        let task = TaskItem {
+            actions: vec![
+                TaskAction {
+                    id: "open".into(),
+                    action_type: ActionType::OpenFolder,
+                    name: Some("打开目录".into()),
+                    params: json!({ "path": "{{generatedPath}}" }),
+                    enabled: true,
+                    timeout_ms: None,
+                    continue_on_error: None,
+                    output_binding: None,
+                    condition: None,
+                    risk_level: RiskLevel::Low,
+                },
+                TaskAction {
+                    id: "command".into(),
+                    action_type: ActionType::RunCommand,
+                    name: Some("生成路径".into()),
+                    params: json!({
+                        "command": "echo path",
+                        "workingDir": "D:\\Project",
+                        "shell": "powershell"
+                    }),
+                    enabled: true,
+                    timeout_ms: None,
+                    continue_on_error: None,
+                    output_binding: Some(crate::domain::TaskActionOutputBinding {
+                        stdout_variable: Some("generatedPath".into()),
+                        stderr_variable: None,
+                        exit_code_variable: None,
+                    }),
+                    condition: None,
+                    risk_level: RiskLevel::Medium,
+                },
+            ],
+            ..sample_url_task("task-future", "seed", "https://example.com")
+        };
+        let bundle = TaskExportBundle {
+            schema_version: BUNDLE_SCHEMA_VERSION,
+            exported_at: "2026-07-01T00:00:00Z".into(),
+            source_app: SOURCE_APP.into(),
+            tasks: vec![task],
+            templates: Vec::new(),
+        };
+        let content = serde_json::to_string(&bundle).unwrap();
+
+        let err = confirm_import(&content, &AppConfig::default()).unwrap_err();
+
+        assert!(err.contains("引用了未定义变量：generatedPath"));
+    }
+
+    #[test]
+    fn confirm_import_rejects_template_reference_to_disabled_output() {
+        let mut template = sample_template("template-disabled-output");
+        template.variables.clear();
+        template.actions = vec![
+            TaskTemplateAction {
+                action_type: ActionType::RunCommand,
+                name: Some("禁用输出".into()),
+                params: json!({
+                    "command": "echo path",
+                    "workingDir": "D:\\Project",
+                    "shell": "powershell"
+                }),
+                enabled: false,
+                timeout_ms: None,
+                continue_on_error: None,
+                output_binding: Some(crate::domain::TaskActionOutputBinding {
+                    stdout_variable: Some("disabledPath".into()),
+                    stderr_variable: None,
+                    exit_code_variable: None,
+                }),
+                condition: None,
+                risk_level: RiskLevel::Medium,
+            },
+            TaskTemplateAction {
+                action_type: ActionType::OpenFolder,
+                name: Some("打开目录".into()),
+                params: json!({ "path": "{{disabledPath}}" }),
+                enabled: true,
+                timeout_ms: None,
+                continue_on_error: None,
+                output_binding: None,
+                condition: None,
+                risk_level: RiskLevel::Low,
+            },
+        ];
+        let bundle = TaskExportBundle {
+            schema_version: BUNDLE_SCHEMA_VERSION,
+            exported_at: "2026-07-01T00:00:00Z".into(),
+            source_app: SOURCE_APP.into(),
+            tasks: Vec::new(),
+            templates: vec![template],
+        };
+        let content = serde_json::to_string(&bundle).unwrap();
+
+        let err = confirm_import(&content, &AppConfig::default()).unwrap_err();
+
+        assert!(err.contains("引用了未定义变量：disabledPath"));
     }
 
     #[test]
