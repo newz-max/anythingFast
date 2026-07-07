@@ -222,6 +222,12 @@ export interface ShortcutStatus {
   message?: string
 }
 
+export interface UpdateProxyResolution {
+  proxyUrl?: string | null
+  source: string
+  status: string
+}
+
 export type KeybindingScope = 'main' | 'quick-search' | 'task-editor' | 'action-editor'
 
 export interface KeybindingOverride {

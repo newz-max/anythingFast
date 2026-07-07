@@ -229,6 +229,14 @@ pub struct ShortcutStatus {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProxyResolution {
+    pub proxy_url: Option<String>,
+    pub source: String,
+    pub status: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct KeybindingOverride {

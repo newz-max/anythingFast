@@ -16,6 +16,7 @@ import type {
   TaskExecutionSummary,
   TaskItem,
   TaskTemplate,
+  UpdateProxyResolution,
   ValidationResult
 } from '@/types/domain'
 
@@ -59,5 +60,6 @@ export const tauriApi = {
   saveKeybindings: (overrides: KeybindingOverride[]) => invokeCommand<KeybindingsLoadResult>('save_keybindings', { overrides }),
   resetKeybindings: () => invokeCommand<KeybindingsLoadResult>('reset_keybindings'),
   openKeybindingsFile: () => invokeCommand<void>('open_keybindings_file'),
+  resolveUpdateProxy: () => invokeCommand<UpdateProxyResolution>('resolve_update_proxy'),
   updateSettings: (settings: AppSettings) => invokeCommand<AppConfig>('update_settings', { settings })
 }

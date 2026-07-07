@@ -28,4 +28,20 @@ describe('tauriApi', () => {
       })
     )
   })
+
+  it('invokes the update proxy resolver command', async () => {
+    invokeMock.mockResolvedValueOnce({
+      proxyUrl: 'http://127.0.0.1:7890/',
+      source: 'windowsUserProxy',
+      status: 'resolved'
+    })
+
+    await expect(tauriApi.resolveUpdateProxy()).resolves.toEqual({
+      proxyUrl: 'http://127.0.0.1:7890/',
+      source: 'windowsUserProxy',
+      status: 'resolved'
+    })
+
+    expect(invokeMock).toHaveBeenCalledWith('resolve_update_proxy', undefined)
+  })
 })

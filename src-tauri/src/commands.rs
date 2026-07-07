@@ -2,7 +2,8 @@ use crate::diagnostics::dev_log_error;
 use crate::domain::{
     AppConfig, AppSettings, ExecutionLogSummary, ExportBundleRequest, ImportPreview,
     KeybindingOverride, KeybindingsLoadResult, PreviewAction, RiskAnalysis, RiskLevel,
-    ShortcutStatus, TaskAction, TaskExecutionSummary, TaskExportBundle, TaskItem, ValidationResult,
+    ShortcutStatus, TaskAction, TaskExecutionSummary, TaskExportBundle, TaskItem,
+    UpdateProxyResolution, ValidationResult,
 };
 use crate::executor;
 use crate::import_export;
@@ -430,6 +431,11 @@ pub fn open_keybindings_file(app: AppHandle) -> Result<(), String> {
     app.opener()
         .open_path(path.to_string_lossy().to_string(), None::<&str>)
         .map_err(|err| log_command_error("open_keybindings_file opener failed", err))
+}
+
+#[tauri::command]
+pub fn resolve_update_proxy() -> UpdateProxyResolution {
+    crate::updater_proxy::resolve_update_proxy()
 }
 
 #[tauri::command]

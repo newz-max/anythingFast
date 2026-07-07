@@ -7,6 +7,7 @@ mod risk;
 pub(crate) mod scheduler;
 mod storage;
 pub(crate) mod triggered_execution;
+mod updater_proxy;
 mod validation;
 mod variables;
 
@@ -154,6 +155,7 @@ pub fn run() {
             save_keybindings,
             reset_keybindings,
             open_keybindings_file,
+            resolve_update_proxy,
             update_settings
         ])
         .run(tauri::generate_context!())
