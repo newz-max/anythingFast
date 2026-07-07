@@ -2,6 +2,7 @@ import { shallowRef, type Ref } from 'vue'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import type { MessageApi } from 'naive-ui'
 import { tauriApi } from '@/api/tauri'
+import { isTauriRuntime as defaultIsTauriRuntime } from '@/utils/tauriRuntime'
 import type { useTaskStore } from '@/stores/taskStore'
 import type { ImportPreview } from '@/types/domain'
 
@@ -29,10 +30,6 @@ export interface TaskImportExportDeps {
   openDialog?: typeof open
   saveDialog?: typeof save
   isTauriRuntime?: () => boolean
-}
-
-function defaultIsTauriRuntime() {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
 export function useTaskImportExport(

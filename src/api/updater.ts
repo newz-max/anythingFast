@@ -1,30 +1,29 @@
 import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
+import { assertTauriRuntime } from '@/utils/tauriRuntime'
 
 export type AppUpdate = Update
 export type AppUpdateDownloadEvent = DownloadEvent
 
-function assertTauriRuntime() {
-  if (!('__TAURI_INTERNALS__' in window)) {
-    throw new Error('浏览器预览环境不能检查或安装更新，请使用 Tauri 运行。')
-  }
+function assertUpdaterRuntime() {
+  assertTauriRuntime('浏览器预览环境不能检查或安装更新，请使用 Tauri 运行。')
 }
 
 export const updaterApi = {
   async checkForUpdate() {
-    assertTauriRuntime()
+    assertUpdaterRuntime()
     return check()
   },
   async downloadUpdate(update: AppUpdate, onEvent: (event: AppUpdateDownloadEvent) => void) {
-    assertTauriRuntime()
+    assertUpdaterRuntime()
     await update.download(onEvent)
   },
   async installUpdate(update: AppUpdate) {
-    assertTauriRuntime()
+    assertUpdaterRuntime()
     await update.install()
   },
   async relaunchApp() {
-    assertTauriRuntime()
+    assertUpdaterRuntime()
     await relaunch()
   }
 }

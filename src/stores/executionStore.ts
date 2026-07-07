@@ -6,6 +6,7 @@ import type { RuntimeVariableValues } from '@/api/tauri'
 import { listenExecutionEvents } from '@/api/events'
 import { tauriApi } from '@/api/tauri'
 import { getErrorMessage, logDevError } from '@/utils/errors'
+import { isTauriRuntime } from '@/utils/tauriRuntime'
 import type { ActionType, ExecutionLogSummary, ExecutionScope, ExecutionStatus, TaskExecutionSummary } from '@/types/domain'
 
 export type RunTargetKey = `task:${string}` | `action:${string}:${string}`
@@ -53,7 +54,7 @@ export const useExecutionStore = defineStore('execution', () => {
   const interactionPending = computed(() => runtimeInputPending.value || riskConfirmationPending.value)
 
   async function setupListeners() {
-    if (!('__TAURI_INTERNALS__' in window)) return
+    if (!isTauriRuntime()) return
     if (executionUnlisten) return
     try {
       executionUnlisten = await listenExecutionEvents(applyExecutionEvent)
@@ -87,7 +88,7 @@ export const useExecutionStore = defineStore('execution', () => {
     upsertRun({ ...pendingRun, runId: pendingRunId, targetKey })
 
     try {
-      if (!('__TAURI_INTERNALS__' in window)) {
+      if (!isTauriRuntime()) {
         throw new Error('浏览器预览环境不能执行本地动作，请使用 Tauri 运行。')
       }
       const summary = await dispatch()
@@ -103,7 +104,7 @@ export const useExecutionStore = defineStore('execution', () => {
   }
 
   async function loadLogs(limit = 20) {
-    if (!('__TAURI_INTERNALS__' in window)) {
+    if (!isTauriRuntime()) {
       logs.value = []
       return
     }

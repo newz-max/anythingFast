@@ -1,14 +1,13 @@
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
-
-const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+import { isTauriRuntime } from '@/utils/tauriRuntime'
 
 export const autostartApi = {
   async isEnabled() {
-    return isTauri() ? await isEnabled() : false
+    return isTauriRuntime() ? await isEnabled() : false
   },
 
   async setEnabled(enabled: boolean) {
-    if (!isTauri()) return
+    if (!isTauriRuntime()) return
     if (enabled) {
       await enable()
       return

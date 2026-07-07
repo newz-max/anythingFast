@@ -5,9 +5,8 @@ import { builtInTaskTemplates } from '@/domain/taskTemplates'
 import { createDefaultConfig, normalizeConfig, normalizeTemplate } from '@/domain/taskFactory'
 import { deriveActionRisk, deriveTaskRisk } from '@/domain/risk'
 import { getErrorMessage, logDevError } from '@/utils/errors'
+import { isTauriRuntime } from '@/utils/tauriRuntime'
 import type { AppConfig, AppSettings, TaskItem, TaskTag, TaskTemplate } from '@/types/domain'
-
-const isTauri = () => Boolean('__TAURI_INTERNALS__' in window)
 
 export const useTaskStore = defineStore('tasks', () => {
   const config = shallowRef<AppConfig>(createDefaultConfig())
@@ -31,7 +30,7 @@ export const useTaskStore = defineStore('tasks', () => {
     loading.value = true
     error.value = null
     try {
-      config.value = normalizeConfig(isTauri() ? await tauriApi.loadConfig() : loadBrowserConfig())
+      config.value = normalizeConfig(isTauriRuntime() ? await tauriApi.loadConfig() : loadBrowserConfig())
       selectedTaskId.value = config.value.tasks[0]?.id || null
     } catch (err) {
       logDevError('Load task config failed', err)
@@ -57,7 +56,7 @@ export const useTaskStore = defineStore('tasks', () => {
         })),
         templates: config.value.templates.map(normalizeTemplate)
       }
-      config.value = normalizeConfig(isTauri() ? await tauriApi.saveConfig(nextConfig) : saveBrowserConfig(nextConfig))
+      config.value = normalizeConfig(isTauriRuntime() ? await tauriApi.saveConfig(nextConfig) : saveBrowserConfig(nextConfig))
     } catch (err) {
       logDevError('Persist task config failed', err)
       error.value = getErrorMessage(err)
@@ -201,7 +200,7 @@ export const useTaskStore = defineStore('tasks', () => {
   async function updateSettings(settingsPatch: AppSettings) {
     const nextSettings = { ...settings.value, ...settingsPatch }
     try {
-      config.value = isTauri()
+      config.value = isTauriRuntime()
         ? await tauriApi.updateSettings(nextSettings)
         : saveBrowserConfig({ ...config.value, settings: nextSettings })
     } catch (err) {

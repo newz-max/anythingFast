@@ -2,9 +2,8 @@ import { onMounted, onUnmounted } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { keybindingMatchesCommand, type EffectiveKeybinding } from '@/domain/keybindings'
 import { isEditableKeyboardTarget } from '@/utils/keyboard'
+import type { ActionView } from '@/domain/actionView'
 import type { TaskItem } from '@/types/domain'
-
-type ActionView = 'list' | 'flow'
 
 interface MainWindowTaskListPanelApi {
   focusSearch: () => void

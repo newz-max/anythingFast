@@ -5,44 +5,22 @@ import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vu
 import FlowPreviewGraph from '@/components/tasks/FlowPreviewGraph.vue'
 import TaskActionList from '@/components/tasks/TaskActionList.vue'
 import TaskTriggerSettings from '@/components/tasks/TaskTriggerSettings.vue'
-import type { ExecutionEventPayload } from '@/api/events'
-import type { ActionExecutionDisplay } from '@/domain/executionPresentation'
+import type { ActionView } from '@/domain/actionView'
 import type { FlowPreviewModel } from '@/domain/flowPreview'
-import type { ExecutionRunSnapshot } from '@/stores/executionStore'
+import type { TaskDetailExecutionView, TaskDetailMetaView, TaskDetailTriggerView } from '@/composables/useSelectedTaskDetailPanel'
 import type {
-  ExecutionLogSummary,
   ScheduleTaskTrigger,
-  ShortcutTaskTrigger,
   TaskAction,
   TaskItem
 } from '@/types/domain'
 
-type ActionView = 'list' | 'flow'
-
 const props = defineProps<{
   task: TaskItem
-  selectedCategory: string
-  selectedKeywords: string
-  formattedCreatedAt: string
-  formattedUpdatedAt: string
-  actionCount: number
+  meta: TaskDetailMetaView
   actionView: ActionView
   flowPreview: FlowPreviewModel
-  actionExecutionStates: Record<string, ActionExecutionDisplay>
-  taskStatusRun: ExecutionRunSnapshot | null
-  currentRun: ExecutionRunSnapshot | null
-  activeRuns: ExecutionRunSnapshot[]
-  logs: ExecutionLogSummary[]
-  events: ExecutionEventPayload[]
-  runningTask: boolean
-  runButtonLabel: string
-  logsButtonLabel: string
-  showExecutionPanel: boolean
-  shortcutTrigger: ShortcutTaskTrigger | null
-  scheduleTrigger: ScheduleTaskTrigger | null
-  taskShortcutDraft: string
-  globalShortcutDraft: string
-  shortcutWarning: string
+  execution: TaskDetailExecutionView
+  triggers: TaskDetailTriggerView
   shareOptions: DropdownOption[]
   taskMenuOptions: DropdownOption[]
   isActionRunning: (action: TaskAction) => boolean
@@ -83,7 +61,7 @@ function handleShareSelect(key: string | number) {
   <section class="detail-panel">
     <header class="detail-header">
       <div class="detail-hero">
-        <div class="hero-icon" :class="props.selectedCategory">
+        <div class="hero-icon" :class="props.meta.selectedCategory">
           <span>{{ props.task.name.slice(0, 1) || '事' }}</span>
         </div>
         <div class="hero-copy">
@@ -92,20 +70,20 @@ function handleShareSelect(key: string | number) {
             <button class="ghost-icon-button" type="button" aria-label="编辑事项" @click="emit('edit')">⌕</button>
           </div>
           <p>{{ props.task.description || '打开常用工具、项目文件夹和网页，快速进入工作状态' }}</p>
-          <span class="category-badge">{{ props.selectedCategory }}</span>
+          <span class="category-badge">{{ props.meta.selectedCategory }}</span>
           <div class="meta-line">
-            <span>创建于 {{ props.formattedCreatedAt }}</span>
-            <span>最后更新 {{ props.formattedUpdatedAt }}</span>
-            <span>关键词 {{ props.selectedKeywords }}</span>
+            <span>创建于 {{ props.meta.formattedCreatedAt }}</span>
+            <span>最后更新 {{ props.meta.formattedUpdatedAt }}</span>
+            <span>关键词 {{ props.meta.selectedKeywords }}</span>
           </div>
         </div>
       </div>
 
       <div class="detail-actions">
-        <button class="run-button" type="button" :disabled="props.runningTask" @click="emit('run')">
-          <NSpin v-if="props.runningTask" size="small" />
+        <button class="run-button" type="button" :disabled="props.execution.runningTask" @click="emit('run')">
+          <NSpin v-if="props.execution.runningTask" size="small" />
           <span v-else aria-hidden="true">▶</span>
-          {{ props.runButtonLabel }}
+          {{ props.execution.runButtonLabel }}
         </button>
         <NDropdown trigger="click" :options="props.shareOptions" @select="handleShareSelect">
           <button class="icon-button" type="button" aria-label="分享">⌘</button>
@@ -126,16 +104,16 @@ function handleShareSelect(key: string | number) {
     </header>
 
     <ExecutionStatusStrip
-      v-if="props.taskStatusRun"
+      v-if="props.execution.taskStatusRun"
       class="detail-status-strip"
-      :current-run="props.taskStatusRun"
+      :current-run="props.execution.taskStatusRun"
     />
 
     <section class="actions-section">
       <header class="section-title-row">
         <div class="section-title">
           <h3>{{ props.actionView === 'list' ? '动作列表' : '流程预览' }}</h3>
-          <span>{{ props.actionCount }}</span>
+          <span>{{ props.meta.actionCount }}</span>
         </div>
         <div class="action-view-controls">
           <div class="view-switch" role="tablist" aria-label="动作视图">
@@ -171,7 +149,7 @@ function handleShareSelect(key: string | number) {
       <TaskActionList
         v-else
         :task="props.task"
-        :action-execution-states="props.actionExecutionStates"
+        :action-execution-states="props.execution.actionExecutionStates"
         :is-action-running="props.isActionRunning"
         @run-action="emit('run-action', $event)"
         @add-action="emit('edit', 2)"
@@ -179,9 +157,9 @@ function handleShareSelect(key: string | number) {
     </section>
 
     <TaskTriggerSettings
-      :shortcut-trigger="props.shortcutTrigger"
-      :schedule-trigger="props.scheduleTrigger"
-      :shortcut-draft="props.taskShortcutDraft"
+      :shortcut-trigger="props.triggers.shortcutTrigger"
+      :schedule-trigger="props.triggers.scheduleTrigger"
+      :shortcut-draft="props.triggers.taskShortcutDraft"
       @update:shortcut-draft="emit('update:shortcutDraft', $event)"
       @save-shortcut="emit('save-shortcut')"
       @clear-shortcut="emit('clear-shortcut')"
@@ -194,28 +172,28 @@ function handleShareSelect(key: string | number) {
         <span>默认快捷键</span>
         <NInputGroup class="shortcut-group">
           <NInput
-            :value="props.globalShortcutDraft"
+            :value="props.triggers.globalShortcutDraft"
             size="small"
             placeholder="Alt+Space"
             @update:value="emit('update:globalShortcutDraft', $event)"
           />
           <NButton size="small" @click="emit('save-global-shortcut')">保存</NButton>
         </NInputGroup>
-        <p v-if="props.shortcutWarning" class="shortcut-warning">{{ props.shortcutWarning }}</p>
+        <p v-if="props.triggers.shortcutWarning" class="shortcut-warning">{{ props.triggers.shortcutWarning }}</p>
       </div>
       <button class="logs-button" type="button" @click="emit('toggle-execution-panel')">
-        {{ props.logsButtonLabel }}
+        {{ props.execution.logsButtonLabel }}
       </button>
       <NSwitch :value="props.task.enabled" @update:value="emit('toggle-enabled', $event)" />
     </section>
 
     <ExecutionProgress
-      v-if="props.showExecutionPanel"
+      v-if="props.execution.showExecutionPanel"
       class="logs"
-      :current-run="props.currentRun"
-      :active-runs="props.activeRuns"
-      :logs="props.logs"
-      :events="props.events"
+      :current-run="props.execution.currentRun"
+      :active-runs="props.execution.activeRuns"
+      :logs="props.execution.logs"
+      :events="props.execution.events"
     />
   </section>
 </template>

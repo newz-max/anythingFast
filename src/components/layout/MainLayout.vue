@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { useDialog, useMessage } from 'naive-ui'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { DropdownOption } from 'naive-ui'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTitlebar from '@/components/layout/AppTitlebar.vue'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
@@ -17,8 +15,7 @@ import logoUrl from '@/assets/logo.png'
 import { createTaskDraft, cloneTask } from '@/domain/taskFactory'
 import { createTaskFromTemplate } from '@/domain/taskTemplates'
 import { getTasksForView, type TaskView } from '@/domain/taskViews'
-import { statusLabel } from '@/domain/executionPresentation'
-import { deriveFlowPreviewModel } from '@/domain/flowPreview'
+import type { ActionView } from '@/domain/actionView'
 import { useTaskStore } from '@/stores/taskStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useUpdateStore } from '@/stores/updateStore'
@@ -28,19 +25,20 @@ import { useTaskImportExport } from '@/composables/useTaskImportExport'
 import { useResponsiveMainLayout } from '@/composables/useResponsiveMainLayout'
 import { useMainWindowShortcuts } from '@/composables/useMainWindowShortcuts'
 import { useTaskExecutionPanel } from '@/composables/useTaskExecutionPanel'
-import { tauriApi } from '@/api/tauri'
-import { autostartApi } from '@/api/autostart'
-import { listenShortcutStatusEvents } from '@/api/events'
+import { useTaskSharing } from '@/composables/useTaskSharing'
+import { useTagManagement } from '@/composables/useTagManagement'
+import { useGlobalSettingsFlow } from '@/composables/useGlobalSettingsFlow'
+import { useSelectedTaskDetailPanel } from '@/composables/useSelectedTaskDetailPanel'
+import { useWindowControls } from '@/composables/useWindowControls'
+import { useShortcutStatus } from '@/composables/useShortcutStatus'
+import { useStartupUpdateCheck } from '@/composables/useStartupUpdateCheck'
 import { getErrorMessage, logDevError } from '@/utils/errors'
 import { keybindingScopeLabels } from '@/domain/keybindings'
 import type {
-  AppTheme,
   ScheduleTaskTrigger,
-  ShortcutStatus,
   ShortcutTaskTrigger,
   TaskAction,
   TaskItem,
-  TaskTag,
   TaskTemplate,
   TaskTrigger
 } from '@/types/domain'
@@ -53,6 +51,12 @@ const { execute, executeAction, running } = useTaskExecution()
 const keybindings = useKeybindings()
 const message = useMessage()
 const dialog = useDialog()
+const {
+  shortcutWarning,
+  setupShortcutStatus,
+  refreshShortcutStatus,
+  refreshShortcutStatusQuiet
+} = useShortcutStatus({ message })
 const {
   importPreviewVisible,
   importPreview,
@@ -67,23 +71,15 @@ const {
   reportUiError
 })
 const shortcutDraft = shallowRef('')
-const settingsShortcutDraft = shallowRef('')
-const themeDraft = shallowRef<AppTheme>('dark')
-const launchOnStartupDraft = shallowRef(false)
 const wizardVisible = shallowRef(false)
 const wizardMode = shallowRef<TaskWizardMode>('create')
 const wizardTask = shallowRef<TaskItem | null>(null)
 const wizardInitialStep = shallowRef(1)
 const activeTaskView = shallowRef<TaskView>('all')
-const activeActionView = shallowRef<'list' | 'flow'>('list')
+const activeActionView = shallowRef<ActionView>('list')
 const selectedTagId = shallowRef<string | null>(null)
-const tagModalVisible = shallowRef(false)
-const tagDraftName = shallowRef('')
-const editingTag = shallowRef<TaskTag | null>(null)
 const taskShortcutDraft = shallowRef('')
 const helpModalVisible = shallowRef(false)
-const settingsModalVisible = shallowRef(false)
-const shortcutStatus = shallowRef<ShortcutStatus | null>(null)
 const layoutRef = useTemplateRef<HTMLElement>('layout')
 const contentRef = useTemplateRef<HTMLElement>('content')
 const taskListPanelRef = useTemplateRef<{
@@ -91,7 +87,6 @@ const taskListPanelRef = useTemplateRef<{
   visibleTaskIds: () => string[]
   scrollTaskIntoView: (taskId: string) => Promise<void>
 }>('taskListPanel')
-let startupUpdateTimer: number | null = null
 
 const selectedTask = computed(() => taskStore.selectedTask)
 const visibleTasks = computed(() => getTasksForView(taskStore.tasks, activeTaskView.value, selectedTagId.value))
@@ -113,19 +108,6 @@ const mainLayoutClasses = computed(() => ({
   'stacked-task-list-expanded': shouldShowTaskListToggle.value && taskListExpanded.value,
   'stacked-task-list-collapsed': shouldCollapseTaskList.value
 }))
-const selectedActionCount = computed(() => selectedTask.value?.actions.filter((action) => action.enabled).length ?? 0)
-const selectedKeywords = computed(() => selectedTask.value?.keywords?.join('、') || '无')
-const selectedCategory = computed(() => selectedTask.value?.category || '未分类')
-const formattedCreatedAt = computed(() => formatDateTime(selectedTask.value?.createdAt))
-const formattedUpdatedAt = computed(() => formatDateTime(selectedTask.value?.updatedAt))
-const selectedShortcutTrigger = computed(
-  () =>
-    selectedTask.value?.triggers.find((trigger): trigger is ShortcutTaskTrigger => trigger.type === 'shortcut') || null
-)
-const selectedScheduleTrigger = computed(
-  () =>
-    selectedTask.value?.triggers.find((trigger): trigger is ScheduleTaskTrigger => trigger.type === 'schedule') || null
-)
 const taskShortcutValues = computed(() =>
   taskStore.tasks
     .flatMap((task) => task.triggers)
@@ -140,26 +122,6 @@ const navigationItems = computed(() => [
   { key: 'recent' as const, icon: '◷', label: '最近运行', count: recentCount.value, active: activeTaskView.value === 'recent', disabled: false },
   { key: 'templates' as const, icon: '▱', label: '模板中心', count: taskStore.templates.length, active: activeTaskView.value === 'templates', disabled: false }
 ])
-const taskMenuOptions: DropdownOption[] = [
-  { label: '编辑', key: 'edit' },
-  { label: '复制', key: 'duplicate' },
-  { label: '保存为模板', key: 'save-template' },
-  { type: 'divider', key: 'divider' },
-  { label: '删除', key: 'delete' }
-]
-const shareOptions: DropdownOption[] = [
-  { label: '复制事项摘要', key: 'copy-summary' },
-  { label: '复制事项配置 JSON', key: 'copy-json' },
-  { label: '导出当前事项 JSON', key: 'export-current' },
-  { label: '导出当前列表 JSON', key: 'export-visible' },
-  { label: '导入配置 JSON', key: 'import-json' }
-]
-const themeOptions: Array<{ label: string; value: AppTheme }> = [
-  { label: '跟随系统', value: 'system' },
-  { label: '浅色', value: 'light' },
-  { label: '深色', value: 'dark' }
-]
-const tagItems = computed(() => taskStore.tags.map((tag, index) => ({ ...tag, tone: tagTone(index) })))
 const {
   showExecutionPanel,
   selectedTaskStatusRun,
@@ -170,25 +132,75 @@ const {
   selectedTask,
   executionStore
 })
-const selectedFlowPreview = computed(() => {
-  if (!selectedTask.value) return { nodes: [], edges: [] }
-  return deriveFlowPreviewModel(selectedTask.value, flowExecutionStates.value)
+const { minimizeWindow, toggleMaximizeWindow, closeWindow } = useWindowControls()
+useStartupUpdateCheck({ updateStore })
+const {
+  settingsShortcutDraft,
+  themeDraft,
+  launchOnStartupDraft,
+  settingsModalVisible,
+  themeOptions,
+  syncSettingsDrafts,
+  openSettings,
+  saveSettings,
+  cycleTheme
+} = useGlobalSettingsFlow({
+  taskStore,
+  keybindings,
+  shortcutDraft,
+  message,
+  refreshShortcutStatus,
+  refreshShortcutStatusQuiet,
+  reportUiError
 })
-const runningSelectedTask = computed(() => Boolean(selectedTask.value && executionStore.activeRunForTarget(executionStore.taskRunTargetKey(selectedTask.value.id))))
-const runButtonLabel = computed(() => {
-  const run = selectedTask.value ? executionStore.activeRunForTarget(executionStore.taskRunTargetKey(selectedTask.value.id)) : null
-  if (run) return run.status ? statusLabel(run.status) : '执行中'
-  return '运行'
+const {
+  tagItems,
+  tagModalVisible,
+  tagDraftName,
+  editingTag,
+  selectTag,
+  openCreateTag,
+  openRenameTag,
+  saveTag,
+  confirmDeleteTag
+} = useTagManagement({
+  taskStore,
+  activeTaskView,
+  selectedTagId,
+  getVisibleTasks: () => visibleTasks.value,
+  message,
+  dialog,
+  reportUiError
 })
-const logsButtonLabel = computed(() => {
-  if (showExecutionPanel.value) return '隐藏执行日志'
-  if (running.value) return '查看执行进度'
-  return '执行日志'
+const { shareOptions, handleShareSelect } = useTaskSharing({
+  selectedTask,
+  getVisibleTasks: () => visibleTasks.value,
+  exportTaskBundle,
+  openImportFile,
+  message
 })
-const shortcutWarning = computed(() => {
-  const status = shortcutStatus.value
-  if (!status || status.registered) return ''
-  return status.message || `全局快捷键 ${status.shortcut} 当前不可用`
+const {
+  meta: detailMeta,
+  flowPreview: selectedFlowPreview,
+  execution: detailExecution,
+  triggers: detailTriggers,
+  taskMenuOptions,
+  handleTaskMenuSelect
+} = useSelectedTaskDetailPanel({
+  selectedTask,
+  taskShortcutDraft,
+  globalShortcutDraft: shortcutDraft,
+  shortcutWarning,
+  showExecutionPanel,
+  selectedTaskStatusRun,
+  actionExecutionStates,
+  flowExecutionStates,
+  executionStore,
+  running,
+  editSelectedTask,
+  duplicateTask,
+  saveSelectedTaskAsTemplate,
+  deleteTask
 })
 const keybindingHelpGroups = computed(() =>
   Object.entries(keybindingScopeLabels).map(([scope, label]) => ({
@@ -221,9 +233,7 @@ useMainWindowShortcuts({
 
 onMounted(async () => {
   shortcutDraft.value = taskStore.settings.globalShortcut
-  settingsShortcutDraft.value = taskStore.settings.globalShortcut
-  themeDraft.value = taskStore.settings.theme
-  launchOnStartupDraft.value = taskStore.settings.launchOnStartup
+  syncSettingsDrafts()
   void keybindings.loadKeybindings()
   try {
     await executionStore.setupListeners()
@@ -239,13 +249,6 @@ onMounted(async () => {
     await executionStore.loadLogs()
   } catch (err) {
     reportUiError('Load execution logs failed', err)
-  }
-  setupStartupUpdateCheck()
-})
-
-onUnmounted(() => {
-  if (startupUpdateTimer !== null) {
-    window.clearTimeout(startupUpdateTimer)
   }
 })
 
@@ -343,17 +346,6 @@ function setTaskView(view: TaskView) {
   }
 }
 
-function selectTag(tagId: string | null) {
-  selectedTagId.value = selectedTagId.value === tagId ? null : tagId
-  if (activeTaskView.value === 'templates') {
-    activeTaskView.value = 'all'
-  }
-  const nextTasks = visibleTasks.value
-  if (!nextTasks.some((task) => task.id === taskStore.selectedTaskId)) {
-    taskStore.selectTask(nextTasks[0]?.id || null)
-  }
-}
-
 async function toggleTaskFavorite(taskId: string) {
   await taskStore.toggleFavorite(taskId)
   const task = taskStore.tasks.find((item) => item.id === taskId)
@@ -363,100 +355,6 @@ async function toggleTaskFavorite(taskId: string) {
     if (!nextTasks.some((item) => item.id === taskStore.selectedTaskId)) {
       taskStore.selectTask(nextTasks[0]?.id || null)
     }
-  }
-}
-
-function openCreateTag() {
-  editingTag.value = null
-  tagDraftName.value = ''
-  tagModalVisible.value = true
-}
-
-function openRenameTag(tag: TaskTag) {
-  editingTag.value = tag
-  tagDraftName.value = tag.name
-  tagModalVisible.value = true
-}
-
-async function saveTag() {
-  try {
-    if (editingTag.value) {
-      await taskStore.renameTag(editingTag.value.id, tagDraftName.value)
-      message.success('已更新标签')
-    } else {
-      await taskStore.createTag(tagDraftName.value)
-      message.success('已新增标签')
-    }
-    tagModalVisible.value = false
-  } catch (err) {
-    reportUiError('Save tag failed', err, { tagId: editingTag.value?.id })
-  }
-}
-
-function confirmDeleteTag(tag: TaskTag) {
-  dialog.warning({
-    title: '删除标签',
-    content: `确认删除“${tag.name}”？标签会从已关联事项中移除，事项不会被删除。`,
-    positiveText: '删除',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      await taskStore.deleteTag(tag.id)
-      if (selectedTagId.value === tag.id) selectedTagId.value = null
-      message.success('已删除标签')
-    }
-  })
-}
-
-function handleTaskMenuSelect(key: string | number) {
-  if (!selectedTask.value) return
-  if (key === 'edit') {
-    editSelectedTask()
-    return
-  }
-  if (key === 'duplicate') {
-    void duplicateTask(selectedTask.value)
-    return
-  }
-  if (key === 'save-template') {
-    void saveSelectedTaskAsTemplate()
-    return
-  }
-  if (key === 'delete') {
-    deleteTask(selectedTask.value)
-  }
-}
-
-async function handleShareSelect(key: string | number) {
-  if (!selectedTask.value) return
-  if (key === 'copy-summary') {
-    await copyText(createTaskSummary(selectedTask.value))
-    message.success('已复制事项摘要')
-    return
-  }
-  if (key === 'copy-json') {
-    const bundle = isTauriRuntime()
-      ? await tauriApi.exportTaskBundle({ taskIds: [selectedTask.value.id], templateIds: [] })
-      : {
-          schemaVersion: 1,
-          exportedAt: new Date().toISOString(),
-          sourceApp: 'anything-fast',
-          tasks: [selectedTask.value],
-          templates: []
-        }
-    await copyText(JSON.stringify(bundle, null, 2))
-    message.success('已复制事项配置 JSON')
-    return
-  }
-  if (key === 'export-current') {
-    await exportTaskBundle([selectedTask.value.id])
-    return
-  }
-  if (key === 'export-visible') {
-    await exportTaskBundle(visibleTasks.value.map((task) => task.id))
-    return
-  }
-  if (key === 'import-json') {
-    await openImportFile()
   }
 }
 
@@ -480,63 +378,6 @@ async function saveShortcut() {
     await refreshShortcutStatusQuiet('Refresh shortcut status after failed global shortcut save')
     reportUiError('Save global shortcut failed', err, { shortcut: shortcutDraft.value })
   }
-}
-
-async function openSettings() {
-  settingsShortcutDraft.value = taskStore.settings.globalShortcut
-  themeDraft.value = taskStore.settings.theme
-  launchOnStartupDraft.value = taskStore.settings.launchOnStartup
-  settingsModalVisible.value = true
-  await keybindings.loadKeybindings()
-  try {
-    launchOnStartupDraft.value = await autostartApi.isEnabled()
-  } catch (err) {
-    launchOnStartupDraft.value = taskStore.settings.launchOnStartup
-    reportUiError('Load autostart status failed', err)
-  }
-}
-
-async function saveSettings() {
-  const previousLaunchOnStartup = taskStore.settings.launchOnStartup
-  const nextLaunchOnStartup = launchOnStartupDraft.value
-  try {
-    await autostartApi.setEnabled(nextLaunchOnStartup)
-    await taskStore.updateSettings({
-      ...taskStore.settings,
-      globalShortcut: settingsShortcutDraft.value.trim() || 'Alt+Space',
-      theme: themeDraft.value,
-      launchOnStartup: nextLaunchOnStartup
-    })
-    shortcutDraft.value = taskStore.settings.globalShortcut
-    await refreshShortcutStatus()
-    settingsModalVisible.value = false
-    message.success('设置已保存')
-  } catch (err) {
-    settingsShortcutDraft.value = taskStore.settings.globalShortcut
-    themeDraft.value = taskStore.settings.theme
-    launchOnStartupDraft.value = taskStore.settings.launchOnStartup
-    if (nextLaunchOnStartup !== previousLaunchOnStartup) {
-      try {
-        await autostartApi.setEnabled(previousLaunchOnStartup)
-      } catch (rollbackErr) {
-        logDevError('Rollback autostart status failed', rollbackErr, { previousLaunchOnStartup })
-      }
-    }
-    await refreshShortcutStatusQuiet('Refresh shortcut status after failed settings save')
-    reportUiError('Save settings failed', err, {
-      shortcut: settingsShortcutDraft.value,
-      theme: themeDraft.value,
-      launchOnStartup: nextLaunchOnStartup
-    })
-  }
-}
-
-async function cycleTheme() {
-  const order: AppTheme[] = ['system', 'light', 'dark']
-  const nextTheme = order[(order.indexOf(taskStore.settings.theme) + 1) % order.length]
-  await taskStore.updateSettings({ ...taskStore.settings, theme: nextTheme })
-  themeDraft.value = nextTheme
-  message.success(`主题已切换为${themeLabel(nextTheme)}`)
 }
 
 async function saveTaskShortcutTrigger() {
@@ -611,96 +452,9 @@ function createFromTemplate(template: TaskTemplate) {
   wizardVisible.value = true
 }
 
-function formatDateTime(value?: string) {
-  if (!value) return '无'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-function pad(value: number) {
-  return String(value).padStart(2, '0')
-}
-
-function tagTone(index: number) {
-  return ['blue', 'green', 'amber', 'purple'][index % 4]
-}
-
-function createTaskSummary(task: TaskItem) {
-  return [
-    `事项：${task.name}`,
-    `分类：${task.category || '未分类'}`,
-    `描述：${task.description || '无'}`,
-    `动作数：${task.actions.length}`,
-    `风险等级：${task.riskLevel}`
-  ].join('\n')
-}
-
-async function copyText(text: string) {
-  await navigator.clipboard.writeText(text)
-}
-
-function themeLabel(theme: AppTheme) {
-  if (theme === 'light') return '浅色'
-  if (theme === 'dark') return '深色'
-  return '跟随系统'
-}
-
 function reportUiError(context: string, err: unknown, extra?: Record<string, unknown>) {
   logDevError(context, err, extra)
   message.error(getErrorMessage(err))
-}
-
-function isTauriRuntime() {
-  return '__TAURI_INTERNALS__' in window
-}
-
-function setupStartupUpdateCheck() {
-  if (!isTauriRuntime()) return
-  if (startupUpdateTimer !== null) return
-  startupUpdateTimer = window.setTimeout(() => {
-    startupUpdateTimer = null
-    void updateStore.checkForUpdate('startup')
-  }, 3000)
-}
-
-async function minimizeWindow() {
-  if (!isTauriRuntime()) return
-  await getCurrentWindow().minimize()
-}
-
-async function toggleMaximizeWindow() {
-  if (!isTauriRuntime()) return
-  await getCurrentWindow().toggleMaximize()
-}
-
-async function closeWindow() {
-  if (!isTauriRuntime()) return
-  await getCurrentWindow().close()
-}
-
-async function setupShortcutStatus() {
-  if (!isTauriRuntime()) return
-  await listenShortcutStatusEvents((status) => {
-    shortcutStatus.value = status
-    if (!status.registered && status.message) {
-      message.warning(status.message)
-    }
-  })
-  await refreshShortcutStatus()
-}
-
-async function refreshShortcutStatus() {
-  if (!isTauriRuntime()) return
-  shortcutStatus.value = await tauriApi.loadShortcutStatus()
-}
-
-async function refreshShortcutStatusQuiet(context: string) {
-  try {
-    await refreshShortcutStatus()
-  } catch (err) {
-    logDevError(context, err)
-  }
 }
 
 </script>
@@ -791,28 +545,11 @@ async function refreshShortcutStatusQuiet(context: string) {
         <TaskDetailPanel
           v-else-if="selectedTask"
           :task="selectedTask"
-          :selected-category="selectedCategory"
-          :selected-keywords="selectedKeywords"
-          :formatted-created-at="formattedCreatedAt"
-          :formatted-updated-at="formattedUpdatedAt"
-          :action-count="selectedActionCount"
+          :meta="detailMeta"
           :action-view="activeActionView"
           :flow-preview="selectedFlowPreview"
-          :action-execution-states="actionExecutionStates"
-          :task-status-run="selectedTaskStatusRun"
-          :current-run="executionStore.currentRun"
-          :active-runs="executionStore.activeRuns"
-          :logs="executionStore.logs"
-          :events="executionStore.events"
-          :running-task="runningSelectedTask"
-          :run-button-label="runButtonLabel"
-          :logs-button-label="logsButtonLabel"
-          :show-execution-panel="showExecutionPanel"
-          :shortcut-trigger="selectedShortcutTrigger"
-          :schedule-trigger="selectedScheduleTrigger"
-          :task-shortcut-draft="taskShortcutDraft"
-          :global-shortcut-draft="shortcutDraft"
-          :shortcut-warning="shortcutWarning"
+          :execution="detailExecution"
+          :triggers="detailTriggers"
           :share-options="shareOptions"
           :task-menu-options="taskMenuOptions"
           :is-action-running="isActionRunning"

@@ -10,6 +10,7 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
 import { logDevError } from '@/utils/errors'
 import { isEditableKeyboardTarget } from '@/utils/keyboard'
+import { isTauriRuntime } from '@/utils/tauriRuntime'
 import { keybindingMatchesCommand } from '@/domain/keybindings'
 import logoUrl from '@/assets/logo.png'
 import type { RiskLevel, TaskAction, TaskItem } from '@/types/domain'
@@ -140,7 +141,7 @@ function runTask(task: TaskItem) {
 }
 
 async function hideWindow() {
-  if ('__TAURI_INTERNALS__' in window) {
+  if (isTauriRuntime()) {
     await getCurrentWindow().hide()
   }
 }
@@ -153,7 +154,7 @@ async function setupFocusLossHiding() {
       }
     })
   } catch (err) {
-    if ('__TAURI_INTERNALS__' in window) {
+    if (isTauriRuntime()) {
       logDevError('Setup quick focus listener failed', err)
     }
   }

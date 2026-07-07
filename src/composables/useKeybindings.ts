@@ -12,10 +12,10 @@ import {
   type KeybindingCommand
 } from '@/domain/keybindings'
 import { getErrorMessage, logDevError } from '@/utils/errors'
+import { isTauriRuntime } from '@/utils/tauriRuntime'
 import type { KeybindingOverride } from '@/types/domain'
 
 const STORAGE_KEY = 'anything-fast-keybindings'
-const isTauri = () => Boolean('__TAURI_INTERNALS__' in window)
 
 const overrides = shallowRef<KeybindingOverride[]>([])
 const warning = shallowRef('')
@@ -38,7 +38,7 @@ export function useKeybindings() {
     if (loading.value) return
     loading.value = true
     try {
-      if (isTauri()) {
+      if (isTauriRuntime()) {
         const result = await tauriApi.loadKeybindings()
         overrides.value = result.overrides
         warning.value = result.warning || ''
@@ -68,7 +68,7 @@ export function useKeybindings() {
     const normalized = normalizeOverrides(nextOverrides)
     saving.value = true
     try {
-      if (isTauri()) {
+      if (isTauriRuntime()) {
         const result = await tauriApi.saveKeybindings(normalized)
         overrides.value = result.overrides
         warning.value = result.warning || ''
@@ -105,7 +105,7 @@ export function useKeybindings() {
   async function resetAll() {
     saving.value = true
     try {
-      if (isTauri()) {
+      if (isTauriRuntime()) {
         const result = await tauriApi.resetKeybindings()
         overrides.value = result.overrides
         warning.value = result.warning || ''
@@ -122,7 +122,7 @@ export function useKeybindings() {
   }
 
   async function openFile() {
-    if (isTauri()) {
+    if (isTauriRuntime()) {
       await tauriApi.openKeybindingsFile()
     }
   }
