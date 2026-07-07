@@ -9,7 +9,13 @@ if (-not (Test-Path -LiteralPath 'package.json' -PathType Leaf)) {
 }
 
 Write-Host 'Starting desktop build...'
-yarn tauri:build
+yarn check:version
+
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+yarn tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
