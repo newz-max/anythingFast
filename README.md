@@ -31,6 +31,17 @@ Windows 本地优先的预设入口管理器，用于把程序、URL、文件、
 - 高风险动作二次确认
 - 本地 JSON 持久化配置
 
+## 功能文档导航
+
+| 文档 | 内容 |
+| --- | --- |
+| [快速上手](./docs/getting-started.md) | 核心概念、主窗口、快捷搜索面板和创建第一个事项的流程 |
+| [动作配置](./docs/actions.md) | 动作类型、执行顺序、条件、超时、失败后继续和流程预览 |
+| [运行变量](./docs/runtime-variables.md) | 变量 Key、默认值、必填、敏感变量、`{{ variableKey }}` 引用和命令输出绑定 |
+| [触发器与快捷键](./docs/triggers-and-shortcuts.md) | 手动触发、全局唤起、事项快捷键、软件内快捷键和周期触发 |
+| [执行、风险与日志](./docs/execution-risk-and-logs.md) | 手动/无人值守执行、高风险确认、命令输出和执行日志 |
+| [导入、导出与模板](./docs/import-export-templates.md) | JSON 导入导出、模板、导入预览、ID 冲突和路径提示 |
+
 ## 快捷键
 
 - 默认全局快捷键：`Alt+Space`，用于唤起或隐藏快捷搜索面板。
