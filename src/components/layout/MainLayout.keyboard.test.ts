@@ -43,6 +43,13 @@ vi.mock('@/composables/useTaskExecution', async () => {
   }
 })
 
+vi.mock('@/api/autostart', () => ({
+  autostartApi: {
+    isEnabled: vi.fn().mockResolvedValue(false),
+    setEnabled: vi.fn().mockResolvedValue(undefined)
+  }
+}))
+
 vi.mock('naive-ui', async (importOriginal) => {
   const actual = await importOriginal<typeof import('naive-ui')>()
   return {
@@ -93,6 +100,16 @@ const stubs = {
   ExecutionStatusStrip: defineComponent({
     name: 'ExecutionStatusStrip',
     template: '<section />'
+  }),
+  HelpModal: defineComponent({
+    name: 'HelpModal',
+    props: ['show'],
+    template: '<section v-if="show" class="help-modal-stub" />'
+  }),
+  SettingsModal: defineComponent({
+    name: 'SettingsModal',
+    props: ['show'],
+    template: '<section v-if="show" class="settings-modal-stub" />'
   }),
   NDropdown: defineComponent({
     name: 'NDropdown',
@@ -341,5 +358,34 @@ describe('MainLayout window keyboard shortcuts', () => {
 
     expect(focusSearchMock).not.toHaveBeenCalled()
     expect(mounted.taskStore.selectedTaskId).toBe('task-1')
+  })
+
+  it('ignores main window shortcuts while help or settings modals are open', async () => {
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+
+    await wrapper.find('button[aria-label="帮助"]').trigger('click')
+    expect(wrapper.find('.help-modal-stub').exists()).toBe(true)
+
+    await pressKey('/')
+    await pressKey('ArrowDown')
+
+    expect(focusSearchMock).not.toHaveBeenCalled()
+    expect(mounted.taskStore.selectedTaskId).toBe('task-1')
+
+    wrapper.unmount()
+    const settingsMount = await mountLayout()
+    wrapper = settingsMount.wrapper
+
+    await wrapper.find('button[aria-label="设置"]').trigger('click')
+    await Promise.resolve()
+    await nextTick()
+    expect(wrapper.find('.settings-modal-stub').exists()).toBe(true)
+
+    await pressKey('/')
+    await pressKey('ArrowDown')
+
+    expect(focusSearchMock).not.toHaveBeenCalled()
+    expect(settingsMount.taskStore.selectedTaskId).toBe('task-1')
   })
 })
