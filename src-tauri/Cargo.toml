@@ -1,6 +1,6 @@
 [package]
 name = "anything-fast"
-version = "0.4.0"
+version = "0.5.0"
 description = "事项入口管理器"
 authors = ["anythingFast"]
 edition = "2024"
