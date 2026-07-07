@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { useDialog, useMessage } from 'naive-ui'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { DropdownOption } from 'naive-ui'
@@ -17,20 +17,22 @@ import logoUrl from '@/assets/logo.png'
 import { createTaskDraft, cloneTask } from '@/domain/taskFactory'
 import { createTaskFromTemplate } from '@/domain/taskTemplates'
 import { getTasksForView, type TaskView } from '@/domain/taskViews'
-import { deriveActionExecutionStates, statusLabel } from '@/domain/executionPresentation'
-import { deriveFlowExecutionStates, deriveFlowPreviewModel } from '@/domain/flowPreview'
+import { statusLabel } from '@/domain/executionPresentation'
+import { deriveFlowPreviewModel } from '@/domain/flowPreview'
 import { useTaskStore } from '@/stores/taskStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useUpdateStore } from '@/stores/updateStore'
 import { useTaskExecution } from '@/composables/useTaskExecution'
 import { useKeybindings } from '@/composables/useKeybindings'
 import { useTaskImportExport } from '@/composables/useTaskImportExport'
+import { useResponsiveMainLayout } from '@/composables/useResponsiveMainLayout'
+import { useMainWindowShortcuts } from '@/composables/useMainWindowShortcuts'
+import { useTaskExecutionPanel } from '@/composables/useTaskExecutionPanel'
 import { tauriApi } from '@/api/tauri'
 import { autostartApi } from '@/api/autostart'
 import { listenShortcutStatusEvents } from '@/api/events'
 import { getErrorMessage, logDevError } from '@/utils/errors'
-import { isEditableKeyboardTarget } from '@/utils/keyboard'
-import { keybindingMatchesCommand, keybindingScopeLabels } from '@/domain/keybindings'
+import { keybindingScopeLabels } from '@/domain/keybindings'
 import type {
   AppTheme,
   ScheduleTaskTrigger,
@@ -64,8 +66,6 @@ const {
   message,
   reportUiError
 })
-const showLogs = shallowRef(false)
-const autoShowExecution = shallowRef(false)
 const shortcutDraft = shallowRef('')
 const settingsShortcutDraft = shallowRef('')
 const themeDraft = shallowRef<AppTheme>('dark')
@@ -84,8 +84,6 @@ const taskShortcutDraft = shallowRef('')
 const helpModalVisible = shallowRef(false)
 const settingsModalVisible = shallowRef(false)
 const shortcutStatus = shallowRef<ShortcutStatus | null>(null)
-const isStackedLayout = shallowRef(false)
-const taskListExpanded = shallowRef(false)
 const layoutRef = useTemplateRef<HTMLElement>('layout')
 const contentRef = useTemplateRef<HTMLElement>('content')
 const taskListPanelRef = useTemplateRef<{
@@ -93,21 +91,28 @@ const taskListPanelRef = useTemplateRef<{
   visibleTaskIds: () => string[]
   scrollTaskIntoView: (taskId: string) => Promise<void>
 }>('taskListPanel')
-let desktopMediaQuery: MediaQueryList | null = null
-let stackedLayoutMediaQuery: MediaQueryList | null = null
 let startupUpdateTimer: number | null = null
 
 const selectedTask = computed(() => taskStore.selectedTask)
 const visibleTasks = computed(() => getTasksForView(taskStore.tasks, activeTaskView.value, selectedTagId.value))
 const showTemplateCenter = computed(() => activeTaskView.value === 'templates')
-const shouldShowTaskListToggle = computed(() => isStackedLayout.value && !showTemplateCenter.value)
-const shouldCollapseTaskList = computed(() => shouldShowTaskListToggle.value && !taskListExpanded.value)
+const {
+  isStackedLayout,
+  taskListExpanded,
+  shouldShowTaskListToggle,
+  shouldCollapseTaskList,
+  taskListToggleLabel,
+  toggleTaskListPanel
+} = useResponsiveMainLayout({
+  showTemplateCenter,
+  layoutRef,
+  contentRef
+})
 const mainLayoutClasses = computed(() => ({
   'stacked-task-list': shouldShowTaskListToggle.value,
   'stacked-task-list-expanded': shouldShowTaskListToggle.value && taskListExpanded.value,
   'stacked-task-list-collapsed': shouldCollapseTaskList.value
 }))
-const taskListToggleLabel = computed(() => (taskListExpanded.value ? '收起事项列表' : '展开事项列表'))
 const selectedActionCount = computed(() => selectedTask.value?.actions.filter((action) => action.enabled).length ?? 0)
 const selectedKeywords = computed(() => selectedTask.value?.keywords?.join('、') || '无')
 const selectedCategory = computed(() => selectedTask.value?.category || '未分类')
@@ -155,22 +160,15 @@ const themeOptions: Array<{ label: string; value: AppTheme }> = [
   { label: '深色', value: 'dark' }
 ]
 const tagItems = computed(() => taskStore.tags.map((tag, index) => ({ ...tag, tone: tagTone(index) })))
-const showExecutionPanel = computed(() => showLogs.value || autoShowExecution.value)
-const selectedTaskActiveRun = computed(() => selectedTask.value ? executionStore.latestActiveRunForTask(selectedTask.value.id) : null)
-const selectedTaskActiveRuns = computed(() => selectedTask.value ? executionStore.activeRuns.filter((run) => run.taskId === selectedTask.value?.id) : [])
-const selectedTaskLatestRun = computed(() => selectedTask.value ? executionStore.latestRunForTask(selectedTask.value.id) : null)
-const selectedTaskStatusRun = computed(() => selectedTaskActiveRun.value || selectedTaskLatestRun.value)
-const selectedTaskEvents = computed(() => selectedTask.value ? executionStore.eventsForTask(selectedTask.value.id) : [])
-const selectedTaskLatestSummary = computed(() => selectedTask.value ? executionStore.latestSummaryForTask(selectedTask.value.id) : null)
-const actionExecutionStates = computed(() => deriveActionExecutionStates(selectedTaskEvents.value, selectedTaskActiveRuns.value))
-const flowExecutionStates = computed(() => {
-  if (!selectedTask.value) return {}
-  return deriveFlowExecutionStates({
-    taskId: selectedTask.value.id,
-    events: selectedTaskEvents.value,
-    currentRuns: selectedTaskActiveRuns.value,
-    latestSummary: selectedTaskLatestSummary.value
-  })
+const {
+  showExecutionPanel,
+  selectedTaskStatusRun,
+  actionExecutionStates,
+  flowExecutionStates,
+  toggleExecutionPanel
+} = useTaskExecutionPanel({
+  selectedTask,
+  executionStore
 })
 const selectedFlowPreview = computed(() => {
   if (!selectedTask.value) return { nodes: [], edges: [] }
@@ -200,9 +198,28 @@ const keybindingHelpGroups = computed(() =>
   }))
 )
 
+useMainWindowShortcuts({
+  keybindings,
+  isDisabled: isMainShortcutSuspended,
+  isTemplateCenter: showTemplateCenter,
+  selectedTask,
+  selectedTaskId: computed(() => taskStore.selectedTaskId),
+  taskListPanelRef,
+  getVisibleTaskIds: () => visibleTasks.value.map((task) => task.id),
+  selectTask: taskStore.selectTask,
+  runSelectedTask,
+  createTask,
+  editSelectedTask,
+  toggleSelectedTaskFavorite: () => {
+    if (selectedTask.value) void toggleTaskFavorite(selectedTask.value.id)
+  },
+  toggleExecutionPanel,
+  setActionView: (view) => {
+    activeActionView.value = view
+  }
+})
+
 onMounted(async () => {
-  window.addEventListener('keydown', onMainWindowKeydown)
-  setupResponsiveScrollReset()
   shortcutDraft.value = taskStore.settings.globalShortcut
   settingsShortcutDraft.value = taskStore.settings.globalShortcut
   themeDraft.value = taskStore.settings.theme
@@ -227,9 +244,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', onMainWindowKeydown)
-  desktopMediaQuery?.removeEventListener('change', handleDesktopBreakpointChange)
-  stackedLayoutMediaQuery?.removeEventListener('change', handleStackedLayoutBreakpointChange)
   if (startupUpdateTimer !== null) {
     window.clearTimeout(startupUpdateTimer)
   }
@@ -242,13 +256,6 @@ watch(
     taskShortcutDraft.value = shortcutTrigger?.shortcut || ''
   },
   { immediate: true }
-)
-
-watch(
-  () => executionStore.currentRun,
-  (run) => {
-    if (run) autoShowExecution.value = true
-  }
 )
 
 function createTask() {
@@ -309,69 +316,6 @@ function editSelectedTask(initialStep = 1) {
   wizardVisible.value = true
 }
 
-function onMainWindowKeydown(event: KeyboardEvent) {
-  if (event.defaultPrevented || isMainShortcutSuspended()) return
-
-  const editableTarget = isEditableKeyboardTarget(event.target)
-  if (keybindingMatchesCommand(event, 'main.focusSearch', keybindings.effective.value) && !editableTarget) {
-    event.preventDefault()
-    taskListPanelRef.value?.focusSearch()
-    return
-  }
-
-  if (editableTarget) return
-
-  if (keybindingMatchesCommand(event, 'main.selectNextTask', keybindings.effective.value)) {
-    event.preventDefault()
-    moveSelectedTask(1)
-    return
-  }
-  if (keybindingMatchesCommand(event, 'main.selectPreviousTask', keybindings.effective.value)) {
-    event.preventDefault()
-    moveSelectedTask(-1)
-    return
-  }
-  if (keybindingMatchesCommand(event, 'main.runSelectedTask', keybindings.effective.value)) {
-    event.preventDefault()
-    runSelectedTask()
-    return
-  }
-  if (keybindingMatchesCommand(event, 'main.createTask', keybindings.effective.value)) {
-    event.preventDefault()
-    createTask()
-    return
-  }
-  if (keybindingMatchesCommand(event, 'main.editSelectedTask', keybindings.effective.value)) {
-    event.preventDefault()
-    editSelectedTask()
-    return
-  }
-  if (keybindingMatchesCommand(event, 'main.toggleExecutionLogs', keybindings.effective.value)) {
-    event.preventDefault()
-    toggleExecutionPanel()
-    return
-  }
-  if (keybindingMatchesCommand(event, 'main.toggleFavorite', keybindings.effective.value) && selectedTask.value) {
-    event.preventDefault()
-    void toggleTaskFavorite(selectedTask.value.id)
-    return
-  }
-  if (keybindingMatchesCommand(event, 'main.showActionList', keybindings.effective.value) && selectedTask.value) {
-    event.preventDefault()
-    activeActionView.value = 'list'
-    return
-  }
-  if (keybindingMatchesCommand(event, 'main.showFlowPreview', keybindings.effective.value) && selectedTask.value) {
-    event.preventDefault()
-    activeActionView.value = 'flow'
-    return
-  }
-  if (keybindingMatchesCommand(event, 'main.addAction', keybindings.effective.value) && selectedTask.value) {
-    event.preventDefault()
-    editSelectedTask(2)
-  }
-}
-
 function isMainShortcutSuspended() {
   return (
     wizardVisible.value ||
@@ -380,18 +324,6 @@ function isMainShortcutSuspended() {
     settingsModalVisible.value ||
     importPreviewVisible.value
   )
-}
-
-function moveSelectedTask(delta: -1 | 1) {
-  if (showTemplateCenter.value) return
-  const taskIds = taskListPanelRef.value?.visibleTaskIds() ?? visibleTasks.value.map((task) => task.id)
-  if (taskIds.length === 0) return
-  const currentIndex = taskIds.findIndex((taskId) => taskId === taskStore.selectedTaskId)
-  const fallbackIndex = delta > 0 ? 0 : taskIds.length - 1
-  const nextIndex = currentIndex === -1 ? fallbackIndex : Math.min(Math.max(currentIndex + delta, 0), taskIds.length - 1)
-  const nextTaskId = taskIds[nextIndex]
-  taskStore.selectTask(nextTaskId)
-  void taskListPanelRef.value?.scrollTaskIntoView(nextTaskId)
 }
 
 function toggleSelectedTaskEnabled(enabled: boolean) {
@@ -672,12 +604,6 @@ function isActionRunning(action: TaskAction) {
   return Boolean(executionStore.activeRunForTarget(executionStore.actionRunTargetKey(selectedTask.value.id, action.id)))
 }
 
-function toggleExecutionPanel() {
-  const nextVisible = !showExecutionPanel.value
-  showLogs.value = nextVisible
-  autoShowExecution.value = nextVisible
-}
-
 function createFromTemplate(template: TaskTemplate) {
   wizardMode.value = 'create'
   wizardTask.value = createTaskFromTemplate(template)
@@ -777,41 +703,6 @@ async function refreshShortcutStatusQuiet(context: string) {
   }
 }
 
-function setupResponsiveScrollReset() {
-  desktopMediaQuery = window.matchMedia('(min-width: 961px)')
-  desktopMediaQuery.addEventListener('change', handleDesktopBreakpointChange)
-  stackedLayoutMediaQuery = window.matchMedia('(max-width: 960px)')
-  syncStackedLayout(stackedLayoutMediaQuery.matches)
-  stackedLayoutMediaQuery.addEventListener('change', handleStackedLayoutBreakpointChange)
-}
-
-function handleDesktopBreakpointChange(event: MediaQueryListEvent) {
-  if (!event.matches) return
-  void resetLayoutScroll()
-}
-
-function handleStackedLayoutBreakpointChange(event: MediaQueryListEvent) {
-  syncStackedLayout(event.matches)
-  void resetLayoutScroll()
-}
-
-function syncStackedLayout(matches: boolean) {
-  isStackedLayout.value = matches
-  taskListExpanded.value = false
-}
-
-function toggleTaskListPanel() {
-  taskListExpanded.value = !taskListExpanded.value
-  void resetLayoutScroll()
-}
-
-async function resetLayoutScroll() {
-  await nextTick()
-  layoutRef.value?.scrollTo({ top: 0, left: 0 })
-  contentRef.value?.scrollTo({ top: 0, left: 0 })
-  document.documentElement.scrollTop = 0
-  document.body.scrollTop = 0
-}
 </script>
 
 <template>
