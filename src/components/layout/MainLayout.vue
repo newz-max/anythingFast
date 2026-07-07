@@ -4,6 +4,7 @@ import { NDropdown, NModal, useDialog, useMessage } from 'naive-ui'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { DropdownOption } from 'naive-ui'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
+import TemplateCenter from '@/components/tasks/TemplateCenter.vue'
 import TaskImportPreviewModal from '@/components/tasks/TaskImportPreviewModal.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
 import FlowPreviewGraph from '@/components/tasks/FlowPreviewGraph.vue'
@@ -14,7 +15,7 @@ import KeybindingSettings from '@/components/settings/KeybindingSettings.vue'
 import UpdateSettings from '@/components/settings/UpdateSettings.vue'
 import logoUrl from '@/assets/logo.png'
 import { createTaskDraft, cloneTask } from '@/domain/taskFactory'
-import { createTaskFromTemplate, deriveTemplateRisk } from '@/domain/taskTemplates'
+import { createTaskFromTemplate } from '@/domain/taskTemplates'
 import { getTasksForView, type TaskView } from '@/domain/taskViews'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { deriveActionExecutionStates, statusLabel } from '@/domain/executionPresentation'
@@ -42,8 +43,7 @@ import type {
   TaskItem,
   TaskTag,
   TaskTemplate,
-  TaskTrigger,
-  RiskLevel
+  TaskTrigger
 } from '@/types/domain'
 import type { TaskWizardMode } from '@/composables/useTaskWizardDraft'
 
@@ -102,7 +102,6 @@ const mainLayoutClasses = computed(() => ({
   'stacked-task-list-collapsed': shouldCollapseTaskList.value
 }))
 const taskListToggleLabel = computed(() => (taskListExpanded.value ? '收起事项列表' : '展开事项列表'))
-const templateCountLabel = computed(() => `${taskStore.templates.length} 个模板`)
 const selectedActionCount = computed(() => selectedTask.value?.actions.filter((action) => action.enabled).length ?? 0)
 const selectedKeywords = computed(() => selectedTask.value?.keywords?.join('、') || '无')
 const selectedCategory = computed(() => selectedTask.value?.category || '未分类')
@@ -767,17 +766,6 @@ function createFromTemplate(template: TaskTemplate) {
   wizardVisible.value = true
 }
 
-function templateMeta(template: TaskTemplate) {
-  const types = Array.from(new Set(template.actions.map((action) => action.type))).map(getActionTypeLabel)
-  return `${template.category || '未分类'} · ${template.actions.length} 个动作 · ${types.join('、') || '无动作'} · ${riskLabel(deriveTemplateRisk(template))}`
-}
-
-function riskLabel(risk: RiskLevel) {
-  if (risk === 'high') return '高风险'
-  if (risk === 'medium') return '中风险'
-  return '低风险'
-}
-
 function actionIcon(type: ActionType) {
   const icons: Record<ActionType, string> = {
     openProgram: '</>',
@@ -1053,27 +1041,14 @@ async function resetLayoutScroll() {
         @toggle-favorite="toggleTaskFavorite"
       />
 
-      <section v-else class="template-center" aria-label="模板中心">
-        <header class="template-header">
-          <span>模板中心</span>
-          <small>{{ templateCountLabel }}</small>
-          <div class="template-header-actions">
-            <button class="template-use-button" type="button" @click="openImportFile">导入配置</button>
-            <button class="template-use-button" type="button" @click="exportSavedTemplates">导出模板</button>
-          </div>
-        </header>
-        <div class="template-list">
-          <article v-for="template in taskStore.templates" :key="template.id" class="template-card">
-            <div class="template-card-main">
-              <strong>{{ template.name }}</strong>
-              <span>{{ template.description }}</span>
-              <small>{{ templateMeta(template) }}</small>
-            </div>
-            <button class="template-use-button" type="button" @click="createFromTemplate(template)">使用</button>
-          </article>
-          <NEmpty v-if="taskStore.templates.length === 0" description="没有可用模板" />
-        </div>
-      </section>
+      <TemplateCenter
+        v-else
+        :templates="taskStore.templates"
+        :saved-template-count="taskStore.savedTemplates.length"
+        @use="createFromTemplate"
+        @import="openImportFile"
+        @export="exportSavedTemplates"
+      />
     </section>
 
     <section class="workspace">
@@ -1406,16 +1381,13 @@ async function resetLayoutScroll() {
 :global([data-app-theme="light"]) .section-title h3,
 :global([data-app-theme="light"]) .trigger-section h3,
 :global([data-app-theme="light"]) .title-row h2,
-:global([data-app-theme="light"]) .template-card-main strong,
-:global([data-app-theme="light"]) .template-header span,
 :global([data-app-theme="light"]) .brand-title {
   color: #172033;
 }
 
 :global([data-app-theme="light"]) .task-item,
 :global([data-app-theme="light"]) .action-row,
-:global([data-app-theme="light"]) .trigger-card,
-:global([data-app-theme="light"]) .template-card {
+:global([data-app-theme="light"]) .trigger-card {
   background: rgba(255, 255, 255, 0.72);
 }
 
@@ -1942,85 +1914,6 @@ async function resetLayoutScroll() {
   background:
     radial-gradient(circle at 38% -8%, rgba(71, 82, 140, 0.2), transparent 38%),
     rgba(13, 18, 35, 0.68);
-}
-
-.template-center {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 18px;
-  min-height: 0;
-}
-
-.template-header {
-  display: grid;
-  gap: 6px;
-  padding: 4px 2px 0;
-}
-
-.template-header-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.template-header span {
-  color: #f4f7ff;
-  font-size: 18px;
-  font-weight: 800;
-}
-
-.template-header small {
-  color: #8b96b8;
-  font-size: 12px;
-}
-
-.template-list {
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.template-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  border: 1px solid rgba(82, 106, 171, 0.18);
-  border-radius: 12px;
-  background: rgba(27, 35, 55, 0.68);
-  padding: 16px;
-}
-
-.template-card-main {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-}
-
-.template-card-main strong {
-  color: #f4f7ff;
-  font-size: 15px;
-}
-
-.template-card-main span,
-.template-card-main small {
-  color: #9faad0;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.template-use-button {
-  height: 32px;
-  border: 1px solid rgba(82, 106, 171, 0.3);
-  border-radius: 9px;
-  background: rgba(63, 82, 159, 0.58);
-  color: #f4f7ff;
-  cursor: pointer;
-  padding: 0 14px;
-  font-weight: 700;
 }
 
 .workspace {
@@ -2914,13 +2807,8 @@ async function resetLayoutScroll() {
     flex-wrap: wrap;
   }
 
-  .section-title-row,
-  .template-card {
+  .section-title-row {
     flex-wrap: wrap;
-  }
-
-  .template-card {
-    grid-template-columns: 1fr;
   }
 }
 
