@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
-import { NModal, useDialog, useMessage } from 'naive-ui'
+import { useDialog, useMessage } from 'naive-ui'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { DropdownOption } from 'naive-ui'
+import AppSidebar from '@/components/layout/AppSidebar.vue'
+import AppTitlebar from '@/components/layout/AppTitlebar.vue'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
 import TemplateCenter from '@/components/tasks/TemplateCenter.vue'
 import TaskImportPreviewModal from '@/components/tasks/TaskImportPreviewModal.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
 import TaskDetailPanel from '@/components/tasks/TaskDetailPanel.vue'
+import TagManagerModal from '@/components/tasks/TagManagerModal.vue'
 import HelpModal from '@/components/settings/HelpModal.vue'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import logoUrl from '@/assets/logo.png'
@@ -818,203 +821,137 @@ async function resetLayoutScroll() {
     <div class="light-arc light-arc-one" aria-hidden="true"></div>
     <div class="light-arc light-arc-two" aria-hidden="true"></div>
 
-    <header class="app-titlebar" data-tauri-drag-region>
-      <div class="window-brand" data-tauri-drag-region>
-        <div class="titlebar-mark" aria-hidden="true" data-tauri-drag-region>
-          <img :src="logoUrl" alt="" data-tauri-drag-region />
-        </div>
-        <span data-tauri-drag-region>FlowTask - 事项管理器</span>
-      </div>
-      <div class="window-controls" aria-label="窗口操作">
-        <button class="window-control" type="button" aria-label="最小化" @click.stop="minimizeWindow">
-          <span aria-hidden="true"></span>
-        </button>
-        <button class="window-control" type="button" aria-label="最大化" @click.stop="toggleMaximizeWindow">
-          <span aria-hidden="true"></span>
-        </button>
-        <button class="window-control window-control-close" type="button" aria-label="关闭" @click.stop="closeWindow">
-          <span aria-hidden="true"></span>
-        </button>
-      </div>
-    </header>
+    <AppTitlebar
+      :logo-url="logoUrl"
+      title="FlowTask - 事项管理器"
+      @minimize="minimizeWindow"
+      @toggle-maximize="toggleMaximizeWindow"
+      @close="closeWindow"
+    />
 
     <div ref="content" class="app-content">
-      <aside class="sidebar">
-        <section class="brand">
-          <div class="brand-mark" aria-hidden="true">
-            <img :src="logoUrl" alt="" />
-          </div>
-          <div>
-            <h1 class="brand-title">FlowTask</h1>
-            <p class="brand-subtitle">事项管理器</p>
-          </div>
-          <span class="collapse-mark" aria-hidden="true">‹‹</span>
-        </section>
+      <AppSidebar
+        :logo-url="logoUrl"
+        :navigation-items="navigationItems"
+        :tags="tagItems"
+        :selected-tag-id="selectedTagId"
+        :shortcut-warning="shortcutWarning"
+        :theme="taskStore.settings.theme"
+        @create-task="createTask"
+        @set-view="setTaskView"
+        @select-tag="selectTag"
+        @create-tag="openCreateTag"
+        @rename-tag="openRenameTag"
+        @delete-tag="confirmDeleteTag"
+        @open-settings="openSettings"
+        @open-help="helpModalVisible = true"
+        @cycle-theme="cycleTheme"
+      />
 
-        <button class="create-button" type="button" @click="createTask">
-          <span aria-hidden="true">＋</span>
-          创建事项
+      <section id="task-list-panel" class="middle-panel">
+        <button
+          v-if="shouldShowTaskListToggle"
+          class="task-list-toggle"
+          type="button"
+          aria-controls="task-list-content"
+          :aria-expanded="taskListExpanded"
+          :aria-label="taskListToggleLabel"
+          @click="toggleTaskListPanel"
+        >
+          <span class="task-list-toggle-icon" aria-hidden="true">{{ taskListExpanded ? '⌃' : '⌄' }}</span>
+          <span>{{ taskListToggleLabel }}</span>
         </button>
 
-        <nav class="nav-list" aria-label="主导航">
-          <button
-            v-for="item in navigationItems"
-            :key="item.key"
-            class="nav-item"
-            :class="{ active: item.active, disabled: item.disabled }"
-            type="button"
-            :disabled="item.disabled"
-            @click="!item.disabled && setTaskView(item.key)"
-          >
-            <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
-            <span>{{ item.label }}</span>
-            <span v-if="item.count !== null" class="nav-count">{{ item.count }}</span>
-          </button>
-        </nav>
+        <TaskListPanel
+          v-if="!showTemplateCenter"
+          ref="taskListPanel"
+          v-show="!shouldCollapseTaskList"
+          id="task-list-content"
+          :tasks="visibleTasks"
+          :categories="taskStore.categories"
+          :selected-task-id="taskStore.selectedTaskId"
+          :disable-list-scrollbar="isStackedLayout"
+          @select="selectTask"
+          @create="createTask"
+          @run="runTask"
+          @toggle-enabled="taskStore.updateTaskEnabled"
+          @toggle-favorite="toggleTaskFavorite"
+        />
 
-        <section class="tag-block">
-          <header class="tag-header">
-            <span>标签</span>
-            <button type="button" aria-label="新增标签" @click="openCreateTag">＋</button>
-          </header>
-          <div class="tag-list">
-            <button class="tag-item all-tags" :class="{ active: selectedTagId === null }" type="button" @click="selectTag(null)">
-              <span class="tag-dot slate" aria-hidden="true"></span>
-              <span>全部标签</span>
-            </button>
-            <div v-for="item in tagItems" :key="item.id" class="tag-item-row">
-              <button class="tag-item" :class="{ active: selectedTagId === item.id }" type="button" @click="selectTag(item.id)">
-                <span class="tag-dot" :class="item.tone" aria-hidden="true"></span>
-                <span>{{ item.name }}</span>
-              </button>
-              <button class="tag-inline-action" type="button" aria-label="编辑标签" @click="openRenameTag(item)">⌕</button>
-              <button class="tag-inline-action" type="button" aria-label="删除标签" @click="confirmDeleteTag(item)">×</button>
-            </div>
-            <p v-if="tagItems.length === 0" class="empty-tags">暂无标签</p>
-          </div>
-        </section>
-
-        <section class="promo-card" aria-label="自动化提示">
-          <div class="promo-logo" aria-hidden="true">
-            <img :src="logoUrl" alt="" />
-          </div>
-          <h2>释放效率，从自动化开始</h2>
-          <p>将重复的操作流程化，一键触发</p>
-          <button type="button" @click="helpModalVisible = true">了解更多 →</button>
-        </section>
-
-        <footer class="sidebar-footer">
-          <button type="button" aria-label="设置" @click="openSettings">⚙</button>
-          <button type="button" aria-label="帮助" @click="helpModalVisible = true">?</button>
-          <button type="button" aria-label="主题" @click="cycleTheme">☼</button>
-          <button class="orb-button" type="button" aria-label="状态"></button>
-        </footer>
-      </aside>
-
-    <section id="task-list-panel" class="middle-panel">
-      <button
-        v-if="shouldShowTaskListToggle"
-        class="task-list-toggle"
-        type="button"
-        aria-controls="task-list-content"
-        :aria-expanded="taskListExpanded"
-        :aria-label="taskListToggleLabel"
-        @click="toggleTaskListPanel"
-      >
-        <span class="task-list-toggle-icon" aria-hidden="true">{{ taskListExpanded ? '⌃' : '⌄' }}</span>
-        <span>{{ taskListToggleLabel }}</span>
-      </button>
-
-      <TaskListPanel
-        v-if="!showTemplateCenter"
-        ref="taskListPanel"
-        v-show="!shouldCollapseTaskList"
-        id="task-list-content"
-        :tasks="visibleTasks"
-        :categories="taskStore.categories"
-        :selected-task-id="taskStore.selectedTaskId"
-        :disable-list-scrollbar="isStackedLayout"
-        @select="selectTask"
-        @create="createTask"
-        @run="runTask"
-        @toggle-enabled="taskStore.updateTaskEnabled"
-        @toggle-favorite="toggleTaskFavorite"
-      />
-
-      <TemplateCenter
-        v-else
-        :templates="taskStore.templates"
-        :saved-template-count="taskStore.savedTemplates.length"
-        @use="createFromTemplate"
-        @import="openImportFile"
-        @export="exportSavedTemplates"
-      />
-    </section>
-
-    <section class="workspace">
-      <section v-if="showTemplateCenter" class="template-intro">
-        <div class="template-intro-copy">
-          <span class="template-intro-icon" aria-hidden="true">▱</span>
-          <h2>从模板创建事项</h2>
-          <p>模板只会生成可编辑的事项草稿，不会直接运行任何动作。保存时仍会执行现有校验，后续运行也会保留风险确认。</p>
-        </div>
+        <TemplateCenter
+          v-else
+          :templates="taskStore.templates"
+          :saved-template-count="taskStore.savedTemplates.length"
+          @use="createFromTemplate"
+          @import="openImportFile"
+          @export="exportSavedTemplates"
+        />
       </section>
 
-      <TaskDetailPanel
-        v-else-if="selectedTask"
-        :task="selectedTask"
-        :selected-category="selectedCategory"
-        :selected-keywords="selectedKeywords"
-        :formatted-created-at="formattedCreatedAt"
-        :formatted-updated-at="formattedUpdatedAt"
-        :action-count="selectedActionCount"
-        :action-view="activeActionView"
-        :flow-preview="selectedFlowPreview"
-        :action-execution-states="actionExecutionStates"
-        :task-status-run="selectedTaskStatusRun"
-        :current-run="executionStore.currentRun"
-        :active-runs="executionStore.activeRuns"
-        :logs="executionStore.logs"
-        :events="executionStore.events"
-        :running-task="runningSelectedTask"
-        :run-button-label="runButtonLabel"
-        :logs-button-label="logsButtonLabel"
-        :show-execution-panel="showExecutionPanel"
-        :shortcut-trigger="selectedShortcutTrigger"
-        :schedule-trigger="selectedScheduleTrigger"
-        :task-shortcut-draft="taskShortcutDraft"
-        :global-shortcut-draft="shortcutDraft"
-        :shortcut-warning="shortcutWarning"
-        :share-options="shareOptions"
-        :task-menu-options="taskMenuOptions"
-        :is-action-running="isActionRunning"
-        @run="runSelectedTask"
-        @run-action="runSelectedAction"
-        @edit="editSelectedTask"
-        @duplicate="duplicateTask(selectedTask)"
-        @delete="deleteTask(selectedTask)"
-        @save-template="saveSelectedTaskAsTemplate"
-        @toggle-favorite="toggleTaskFavorite(selectedTask.id)"
-        @toggle-enabled="toggleSelectedTaskEnabled"
-        @share-select="handleShareSelect"
-        @task-menu-select="handleTaskMenuSelect"
-        @update:action-view="activeActionView = $event"
-        @update:shortcut-draft="taskShortcutDraft = $event"
-        @update:global-shortcut-draft="shortcutDraft = $event"
-        @save-shortcut="saveTaskShortcutTrigger"
-        @clear-shortcut="clearTaskShortcutTrigger"
-        @save-schedule="saveTaskScheduleTrigger"
-        @clear-schedule="clearTaskScheduleTrigger"
-        @save-global-shortcut="saveShortcut"
-        @toggle-execution-panel="toggleExecutionPanel"
-      />
+      <section class="workspace">
+        <section v-if="showTemplateCenter" class="template-intro">
+          <div class="template-intro-copy">
+            <span class="template-intro-icon" aria-hidden="true">▱</span>
+            <h2>从模板创建事项</h2>
+            <p>模板只会生成可编辑的事项草稿，不会直接运行任何动作。保存时仍会执行现有校验，后续运行也会保留风险确认。</p>
+          </div>
+        </section>
 
-      <NEmpty v-else class="empty-state" description="还没有事项">
-        <template #extra>
-          <button class="create-button compact" type="button" @click="createTask">新增事项</button>
-        </template>
-      </NEmpty>
-    </section>
+        <TaskDetailPanel
+          v-else-if="selectedTask"
+          :task="selectedTask"
+          :selected-category="selectedCategory"
+          :selected-keywords="selectedKeywords"
+          :formatted-created-at="formattedCreatedAt"
+          :formatted-updated-at="formattedUpdatedAt"
+          :action-count="selectedActionCount"
+          :action-view="activeActionView"
+          :flow-preview="selectedFlowPreview"
+          :action-execution-states="actionExecutionStates"
+          :task-status-run="selectedTaskStatusRun"
+          :current-run="executionStore.currentRun"
+          :active-runs="executionStore.activeRuns"
+          :logs="executionStore.logs"
+          :events="executionStore.events"
+          :running-task="runningSelectedTask"
+          :run-button-label="runButtonLabel"
+          :logs-button-label="logsButtonLabel"
+          :show-execution-panel="showExecutionPanel"
+          :shortcut-trigger="selectedShortcutTrigger"
+          :schedule-trigger="selectedScheduleTrigger"
+          :task-shortcut-draft="taskShortcutDraft"
+          :global-shortcut-draft="shortcutDraft"
+          :shortcut-warning="shortcutWarning"
+          :share-options="shareOptions"
+          :task-menu-options="taskMenuOptions"
+          :is-action-running="isActionRunning"
+          @run="runSelectedTask"
+          @run-action="runSelectedAction"
+          @edit="editSelectedTask"
+          @duplicate="duplicateTask(selectedTask)"
+          @delete="deleteTask(selectedTask)"
+          @save-template="saveSelectedTaskAsTemplate"
+          @toggle-favorite="toggleTaskFavorite(selectedTask.id)"
+          @toggle-enabled="toggleSelectedTaskEnabled"
+          @share-select="handleShareSelect"
+          @task-menu-select="handleTaskMenuSelect"
+          @update:action-view="activeActionView = $event"
+          @update:shortcut-draft="taskShortcutDraft = $event"
+          @update:global-shortcut-draft="shortcutDraft = $event"
+          @save-shortcut="saveTaskShortcutTrigger"
+          @clear-shortcut="clearTaskShortcutTrigger"
+          @save-schedule="saveTaskScheduleTrigger"
+          @clear-schedule="clearTaskScheduleTrigger"
+          @save-global-shortcut="saveShortcut"
+          @toggle-execution-panel="toggleExecutionPanel"
+        />
+
+        <NEmpty v-else class="empty-state" description="还没有事项">
+          <template #extra>
+            <button class="create-button compact" type="button" @click="createTask">新增事项</button>
+          </template>
+        </NEmpty>
+      </section>
     </div>
 
     <TaskWizardDrawer
@@ -1038,15 +975,12 @@ async function resetLayoutScroll() {
       @confirm="confirmImport"
     />
 
-    <NModal v-model:show="tagModalVisible" preset="card" class="tag-modal" :title="editingTag ? '编辑标签' : '新增标签'">
-      <NInput v-model:value="tagDraftName" placeholder="标签名称" @keyup.enter="saveTag" />
-      <template #footer>
-        <NSpace justify="end">
-          <NButton @click="tagModalVisible = false">取消</NButton>
-          <NButton type="primary" @click="saveTag">保存</NButton>
-        </NSpace>
-      </template>
-    </NModal>
+    <TagManagerModal
+      v-model:show="tagModalVisible"
+      v-model:draft-name="tagDraftName"
+      :editing-tag="editingTag"
+      @save="saveTag"
+    />
 
     <HelpModal
       v-model:show="helpModalVisible"
@@ -1111,149 +1045,12 @@ async function resetLayoutScroll() {
     rgba(255, 255, 255, 0.78);
 }
 
-:global([data-app-theme="light"]) .task-name,
-:global([data-app-theme="light"]) .brand-title {
+:global([data-app-theme="light"]) .task-name {
   color: #172033;
 }
 
 :global([data-app-theme="light"]) .task-item {
   background: rgba(255, 255, 255, 0.72);
-}
-
-.app-titlebar {
-  position: relative;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-width: 0;
-  height: 56px;
-  border-bottom: 1px solid rgba(82, 106, 171, 0.16);
-  background: rgba(5, 11, 27, 0.42);
-  color: #f4f7ff;
-  user-select: none;
-}
-
-:global([data-app-theme="light"]) .app-titlebar {
-  background: rgba(238, 243, 251, 0.72);
-}
-
-.window-brand {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 10px;
-  padding-left: 30px;
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.window-brand > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-:global([data-app-theme="light"]) .window-brand {
-  color: #172033;
-}
-
-.titlebar-mark {
-  position: relative;
-  display: grid;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  place-items: center;
-}
-
-.titlebar-mark img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  pointer-events: none;
-}
-
-.window-controls {
-  display: flex;
-  height: 56px;
-  align-items: stretch;
-}
-
-.window-control {
-  position: relative;
-  display: grid;
-  width: 56px;
-  height: 56px;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  color: #d5def7;
-  cursor: pointer;
-}
-
-.window-control:hover {
-  background: rgba(82, 106, 171, 0.18);
-}
-
-.window-control span {
-  position: relative;
-  display: block;
-  width: 16px;
-  height: 16px;
-}
-
-.window-control:first-child span::before {
-  position: absolute;
-  right: 1px;
-  bottom: 3px;
-  left: 1px;
-  height: 2px;
-  border-radius: 999px;
-  background: currentColor;
-  content: "";
-}
-
-.window-control:nth-child(2) span::before {
-  position: absolute;
-  inset: 2px;
-  border: 2px solid currentColor;
-  border-radius: 2px;
-  content: "";
-}
-
-.window-control-close {
-  margin: 8px 14px 8px 0;
-  width: 48px;
-  height: 40px;
-  border-radius: 13px;
-  color: #ff6b7b;
-}
-
-.window-control-close:hover {
-  background: rgba(255, 72, 96, 0.18);
-}
-
-.window-control-close span::before,
-.window-control-close span::after {
-  position: absolute;
-  top: 7px;
-  left: 1px;
-  width: 15px;
-  height: 2px;
-  border-radius: 999px;
-  background: currentColor;
-  content: "";
-}
-
-.window-control-close span::before {
-  transform: rotate(45deg);
-}
-
-.window-control-close span::after {
-  transform: rotate(-45deg);
 }
 
 .ambient {
@@ -1310,71 +1107,11 @@ async function resetLayoutScroll() {
   overflow: hidden;
 }
 
-.sidebar,
 .middle-panel,
 .workspace {
   position: relative;
   z-index: 1;
   min-height: 0;
-}
-
-.sidebar {
-  display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
-  min-width: 0;
-  overflow: hidden;
-  padding: 32px 22px 24px;
-}
-
-.brand {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-}
-
-.brand-mark,
-.promo-logo {
-  position: relative;
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-}
-
-.brand-mark img,
-.promo-logo img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  filter: drop-shadow(0 8px 14px rgba(35, 101, 255, 0.28));
-  pointer-events: none;
-}
-
-.brand-title,
-.brand-subtitle,
-.promo-card h2,
-.promo-card p {
-  margin: 0;
-}
-
-.brand-title {
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1.1;
-}
-
-.brand-subtitle {
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.collapse-mark {
-  color: #b6c1df;
-  font-size: 26px;
-  letter-spacing: -7px;
 }
 
 .create-button {
@@ -1397,233 +1134,6 @@ async function resetLayoutScroll() {
 .create-button.compact {
   min-width: 140px;
   margin-top: 0;
-}
-
-.create-button span {
-  font-size: 24px;
-  font-weight: 400;
-  line-height: 1;
-}
-
-.nav-list {
-  display: grid;
-  gap: 10px;
-  margin-top: 38px;
-}
-
-.nav-item {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  height: 49px;
-  border: 1px solid transparent;
-  border-radius: 11px;
-  background: transparent;
-  color: #b6c1df;
-  cursor: pointer;
-  padding: 0 15px;
-  text-align: left;
-}
-
-.nav-item.disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.nav-item.active {
-  border-color: rgba(63, 104, 255, 0.44);
-  background: linear-gradient(135deg, rgba(32, 60, 132, 0.48), rgba(37, 32, 112, 0.46));
-  color: #f4f7ff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 28px rgba(21, 50, 129, 0.18);
-  font-weight: 700;
-}
-
-.nav-icon {
-  color: #c7d3ee;
-  font-size: 19px;
-}
-
-.nav-count {
-  color: #7f8aaa;
-  font-size: 12px;
-}
-
-.tag-block {
-  margin-top: 28px;
-}
-
-.tag-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 14px;
-  color: #65708f;
-  font-size: 13px;
-}
-
-.tag-header button {
-  border: 0;
-  background: transparent;
-  color: #9faad0;
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-}
-
-.tag-list {
-  display: grid;
-  gap: 10px;
-  max-height: min(24vh, 220px);
-  margin-top: 20px;
-  overflow-y: auto;
-  padding: 0 8px;
-}
-
-.tag-item {
-  display: grid;
-  grid-template-columns: 11px minmax(0, 1fr);
-  align-items: center;
-  width: 100%;
-  gap: 14px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: transparent;
-  color: #9faad0;
-  cursor: pointer;
-  font-size: 13px;
-  padding: 7px 8px;
-  text-align: left;
-}
-
-.tag-item.active {
-  border-color: rgba(82, 106, 171, 0.2);
-  background: rgba(27, 35, 55, 0.54);
-  color: #f4f7ff;
-}
-
-.tag-item-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 26px 26px;
-  align-items: center;
-  gap: 4px;
-}
-
-.tag-inline-action {
-  display: grid;
-  height: 26px;
-  place-items: center;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #65708f;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.tag-inline-action:hover {
-  background: rgba(82, 106, 171, 0.16);
-  color: #dce9ff;
-}
-
-.empty-tags {
-  margin: 4px 8px 0;
-  color: #65708f;
-  font-size: 12px;
-}
-
-.tag-dot {
-  width: 11px;
-  height: 11px;
-  border-radius: 4px;
-  background: #3a8bff;
-}
-
-.tag-dot.green {
-  background: #29d6ad;
-}
-
-.tag-dot.amber {
-  background: #ffb83e;
-}
-
-.tag-dot.purple {
-  background: #ad66ff;
-}
-
-.tag-dot.slate {
-  background: #8b96b8;
-}
-
-.promo-card {
-  align-self: end;
-  min-height: 228px;
-  border: 1px solid rgba(82, 106, 171, 0.28);
-  border-radius: 13px;
-  background:
-    radial-gradient(circle at 16% 10%, rgba(76, 89, 255, 0.5), transparent 36%),
-    radial-gradient(circle at 82% 0%, rgba(34, 139, 255, 0.28), transparent 48%),
-    rgba(16, 33, 68, 0.7);
-  padding: 30px 18px 18px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-
-.promo-logo {
-  transform: scale(0.78);
-  transform-origin: left top;
-}
-
-.promo-card h2 {
-  margin-top: 26px;
-  font-size: 15px;
-}
-
-.promo-card p {
-  margin-top: 12px;
-  color: #9faad0;
-  font-size: 12px;
-}
-
-.promo-card button {
-  height: 42px;
-  margin-top: 18px;
-  border: 0;
-  border-radius: 10px;
-  background: rgba(42, 54, 88, 0.86);
-  color: #f4f7ff;
-  cursor: pointer;
-  padding: 0 18px;
-  font-weight: 700;
-}
-
-.sidebar-footer {
-  display: grid;
-  grid-template-columns: repeat(3, 40px) minmax(0, 1fr);
-  align-items: center;
-  gap: 14px;
-  margin-top: 28px;
-}
-
-.sidebar-footer button {
-  border: 0;
-  background: transparent;
-  color: #8290b7;
-  cursor: pointer;
-}
-
-.sidebar-footer button {
-  height: 32px;
-  font-size: 18px;
-}
-
-.orb-button {
-  justify-self: end;
-  width: 60px;
-  height: 60px !important;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 60% 42%, #63c8ff 0 10%, #534bff 11% 34%, #1c2a58 35% 100%) !important;
-  box-shadow: 0 12px 28px rgba(33, 64, 169, 0.3);
 }
 
 .middle-panel {
@@ -1767,71 +1277,11 @@ async function resetLayoutScroll() {
   color: #9faad0;
 }
 
-:deep(.tag-modal) {
-  max-width: 420px;
-}
-
 @media (max-width: 1279px) {
   .main-layout {
     --sidebar-width: 76px;
     --middle-width: clamp(300px, 34vw, 336px);
     --content-padding: 18px;
-  }
-
-  .sidebar {
-    justify-items: center;
-    padding: 22px 12px 18px;
-  }
-
-  .brand {
-    grid-template-columns: 44px;
-    justify-items: center;
-  }
-
-  .brand > div:not(.brand-mark),
-  .collapse-mark,
-  .nav-item span:not(.nav-icon),
-  .tag-block,
-  .promo-card,
-  .orb-button {
-    display: none;
-  }
-
-  .nav-list {
-    margin-top: 30px;
-  }
-
-  .create-button:not(.compact) {
-    width: 48px;
-    height: 48px;
-    margin-top: 26px;
-    border-radius: 12px;
-    font-size: 0;
-    gap: 0;
-    padding: 0;
-  }
-
-  .create-button:not(.compact) span {
-    font-size: 24px;
-  }
-
-  .nav-item {
-    grid-template-columns: 1fr;
-    width: 48px;
-    height: 48px;
-    justify-items: center;
-    padding: 0;
-  }
-
-  .nav-icon {
-    font-size: 20px;
-  }
-
-  .sidebar-footer {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    gap: 10px;
-    margin-top: 18px;
   }
 
   .middle-panel {
@@ -1857,28 +1307,6 @@ async function resetLayoutScroll() {
     gap: 16px;
     overflow-x: hidden;
     overflow-y: auto;
-  }
-
-  .sidebar {
-    display: flex;
-    flex: 0 0 auto;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 16px;
-  }
-
-  .brand {
-    grid-template-columns: 44px minmax(0, 1fr);
-  }
-
-  .brand > div:not(.brand-mark) {
-    display: block;
-  }
-
-  .nav-list,
-  .sidebar-footer {
-    display: flex;
-    margin-top: 0;
   }
 
   .middle-panel,
@@ -1922,36 +1350,6 @@ async function resetLayoutScroll() {
 }
 
 @media (max-width: 640px) {
-  .app-titlebar {
-    height: auto;
-    min-height: 56px;
-  }
-
-  .window-brand {
-    padding-left: 14px;
-    font-size: 14px;
-  }
-
-  .titlebar-mark {
-    width: 28px;
-    height: 28px;
-    flex-basis: 28px;
-  }
-
-  .window-control {
-    width: 44px;
-  }
-
-  .window-control-close {
-    width: 42px;
-    margin-right: 8px;
-  }
-
-  .sidebar {
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-
   .template-intro {
     border-radius: 18px;
     padding: 20px 16px;
