@@ -69,6 +69,16 @@ describe('useGlobalSettingsFlow', () => {
       previousLaunchOnStartup: false
     })
   })
+
+  it('cycles and persists theme preference', async () => {
+    const harness = makeHarness()
+
+    await harness.controller.cycleTheme()
+
+    expect(harness.taskStore.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ theme: 'light' }))
+    expect(harness.controller.themeDraft.value).toBe('light')
+    expect(harness.message.success).toHaveBeenCalledWith('主题已切换为浅色')
+  })
 })
 
 function makeHarness() {
@@ -94,12 +104,13 @@ function makeHarness() {
   const refreshShortcutStatus = vi.fn().mockResolvedValue(undefined)
   const refreshShortcutStatusQuiet = vi.fn().mockResolvedValue(undefined)
   const reportUiError = vi.fn()
+  const message = { success: vi.fn() }
   const controller = useGlobalSettingsFlow(
     {
       taskStore: taskStore as never,
       keybindings,
       shortcutDraft,
-      message: { success: vi.fn() } as never,
+      message: message as never,
       refreshShortcutStatus,
       refreshShortcutStatusQuiet,
       reportUiError
@@ -111,6 +122,7 @@ function makeHarness() {
     autostartApi,
     controller,
     keybindings,
+    message,
     refreshShortcutStatus,
     refreshShortcutStatusQuiet,
     reportUiError,

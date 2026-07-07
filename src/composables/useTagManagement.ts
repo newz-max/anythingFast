@@ -25,6 +25,7 @@ export function useTagManagement(options: UseTagManagementOptions) {
   const tagDraftName = shallowRef('')
   const editingTag = shallowRef<TaskTag | null>(null)
 
+  const tagModalMode = computed(() => (editingTag.value ? 'edit' : 'create'))
   const tagItems = computed(() => createTagItems(options.taskStore.tags))
 
   function selectTag(tagId: string | null) {
@@ -51,12 +52,18 @@ export function useTagManagement(options: UseTagManagementOptions) {
   }
 
   async function saveTag() {
+    const name = tagDraftName.value.trim()
+    if (!name) {
+      options.message.warning('请输入标签名称')
+      return
+    }
+
     try {
       if (editingTag.value) {
-        await options.taskStore.renameTag(editingTag.value.id, tagDraftName.value)
+        await options.taskStore.renameTag(editingTag.value.id, name)
         options.message.success('已更新标签')
       } else {
-        await options.taskStore.createTag(tagDraftName.value)
+        await options.taskStore.createTag(name)
         options.message.success('已新增标签')
       }
       tagModalVisible.value = false
@@ -82,6 +89,7 @@ export function useTagManagement(options: UseTagManagementOptions) {
   return {
     tagItems,
     tagModalVisible,
+    tagModalMode,
     tagDraftName,
     editingTag,
     selectTag,

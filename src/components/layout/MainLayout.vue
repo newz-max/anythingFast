@@ -5,6 +5,7 @@ import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTitlebar from '@/components/layout/AppTitlebar.vue'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
 import TemplateCenter from '@/components/tasks/TemplateCenter.vue'
+import TemplateIntroPanel from '@/components/tasks/TemplateIntroPanel.vue'
 import TaskImportPreviewModal from '@/components/tasks/TaskImportPreviewModal.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
 import TaskDetailPanel from '@/components/tasks/TaskDetailPanel.vue'
@@ -534,13 +535,7 @@ function reportUiError(context: string, err: unknown, extra?: Record<string, unk
       </section>
 
       <section class="workspace">
-        <section v-if="showTemplateCenter" class="template-intro">
-          <div class="template-intro-copy">
-            <span class="template-intro-icon" aria-hidden="true">▱</span>
-            <h2>从模板创建事项</h2>
-            <p>模板只会生成可编辑的事项草稿，不会直接运行任何动作。保存时仍会执行现有校验，后续运行也会保留风险确认。</p>
-          </div>
-        </section>
+        <TemplateIntroPanel v-if="showTemplateCenter" @create-task="createTask" />
 
         <TaskDetailPanel
           v-else-if="selectedTask"
@@ -666,8 +661,7 @@ function reportUiError(context: string, err: unknown, extra?: Record<string, unk
     linear-gradient(135deg, #eef3fb 0%, #f8fbff 46%, #edf4ff 100%);
 }
 
-:global([data-app-theme="light"]) .middle-panel,
-:global([data-app-theme="light"]) .template-intro {
+:global([data-app-theme="light"]) .middle-panel {
   background:
     radial-gradient(circle at 38% -8%, rgba(116, 152, 220, 0.12), transparent 38%),
     rgba(255, 255, 255, 0.78);
@@ -828,59 +822,6 @@ function reportUiError(context: string, err: unknown, extra?: Record<string, unk
   line-height: 1;
 }
 
-.template-intro {
-  display: grid;
-  align-content: center;
-  gap: 30px;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  border: 1px solid rgba(82, 106, 171, 0.28);
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at 100% 100%, rgba(63, 65, 188, 0.26), transparent 36%),
-    radial-gradient(circle at 14% 0%, rgba(51, 92, 178, 0.18), transparent 42%),
-    rgba(14, 19, 37, 0.84);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 32px 80px rgba(0, 0, 0, 0.22);
-  padding: 42px 36px 36px;
-}
-
-.template-intro-copy {
-  display: grid;
-  justify-items: start;
-  gap: 16px;
-  max-width: 560px;
-}
-
-.template-intro-icon {
-  display: grid;
-  width: 72px;
-  height: 72px;
-  place-items: center;
-  border: 1px solid rgba(81, 119, 255, 0.42);
-  border-radius: 18px;
-  background: linear-gradient(145deg, #2442a0, #162555);
-  color: #dce9ff;
-  font-size: 32px;
-}
-
-.template-intro-copy h2,
-.template-intro-copy p {
-  margin: 0;
-}
-
-.template-intro-copy h2 {
-  color: #f4f7ff;
-  font-size: 24px;
-  font-weight: 800;
-}
-
-.template-intro-copy p {
-  color: #9faad0;
-  font-size: 14px;
-  line-height: 1.7;
-}
-
 .empty-state {
   --n-text-color: #8b96b8 !important;
   --n-icon-color: #445071 !important;
@@ -917,10 +858,6 @@ function reportUiError(context: string, err: unknown, extra?: Record<string, unk
     border-radius: 24px 0 0 24px;
   }
 
-  .template-intro {
-    gap: 24px;
-    padding: 30px 22px;
-  }
 }
 
 @media (max-width: 960px) {
@@ -971,16 +908,8 @@ function reportUiError(context: string, err: unknown, extra?: Record<string, unk
     padding-bottom: 0;
   }
 
-  .workspace,
-  .template-intro {
+  .workspace {
     overflow: visible;
-  }
-}
-
-@media (max-width: 640px) {
-  .template-intro {
-    border-radius: 18px;
-    padding: 20px 16px;
   }
 }
 </style>

@@ -4,6 +4,37 @@ import { taskShareActionKeys, useTaskSharing } from '@/composables/useTaskSharin
 import type { TaskItem } from '@/types/domain'
 
 describe('useTaskSharing', () => {
+  it('does nothing when no task is selected', async () => {
+    const copyText = vi.fn().mockResolvedValue(undefined)
+    const exportTaskBundle = vi.fn().mockResolvedValue(undefined)
+    const openImportFile = vi.fn().mockResolvedValue(undefined)
+    const message = { success: vi.fn() }
+    const controller = useTaskSharing(
+      {
+        selectedTask: shallowRef<TaskItem | null>(null),
+        getVisibleTasks: () => [makeTask('task-1')],
+        exportTaskBundle,
+        openImportFile,
+        message: message as never
+      },
+      {
+        copyText,
+        isTauriRuntime: () => false
+      }
+    )
+
+    await controller.handleShareSelect(taskShareActionKeys.copySummary)
+    await controller.handleShareSelect(taskShareActionKeys.copyJson)
+    await controller.handleShareSelect(taskShareActionKeys.exportCurrent)
+    await controller.handleShareSelect(taskShareActionKeys.exportVisible)
+    await controller.handleShareSelect(taskShareActionKeys.importJson)
+
+    expect(copyText).not.toHaveBeenCalled()
+    expect(exportTaskBundle).not.toHaveBeenCalled()
+    expect(openImportFile).not.toHaveBeenCalled()
+    expect(message.success).not.toHaveBeenCalled()
+  })
+
   it('handles every share action key', async () => {
     const selectedTask = shallowRef<TaskItem | null>(makeTask('task-1'))
     const copyText = vi.fn().mockResolvedValue(undefined)

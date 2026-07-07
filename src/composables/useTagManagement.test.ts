@@ -22,6 +22,7 @@ describe('useTagManagement', () => {
 
   it('creates, renames, selects, and deletes tags through the store', async () => {
     const dialogWarning = vi.fn()
+    const message = { success: vi.fn(), warning: vi.fn() }
     const taskStore = makeTaskStore([{ id: 'tag-1', name: '工作' }])
     const selectedTagId = shallowRef<string | null>(null)
     const activeTaskView = shallowRef<'all' | 'templates'>('templates')
@@ -30,7 +31,7 @@ describe('useTagManagement', () => {
       activeTaskView: activeTaskView as never,
       selectedTagId,
       getVisibleTasks: () => [makeTask('task-2')],
-      message: { success: vi.fn() } as never,
+      message: message as never,
       dialog: { warning: dialogWarning } as never,
       reportUiError: vi.fn()
     })
@@ -41,11 +42,20 @@ describe('useTagManagement', () => {
     expect(taskStore.selectTask).toHaveBeenCalledWith('task-2')
 
     controller.openCreateTag()
+    expect(controller.tagModalMode.value).toBe('create')
+    expect(controller.tagDraftName.value).toBe('')
+    controller.tagDraftName.value = '   '
+    await controller.saveTag()
+    expect(message.warning).toHaveBeenCalledWith('请输入标签名称')
+    expect(taskStore.createTag).not.toHaveBeenCalled()
+
     controller.tagDraftName.value = '个人'
     await controller.saveTag()
     expect(taskStore.createTag).toHaveBeenCalledWith('个人')
 
     controller.openRenameTag({ id: 'tag-1', name: '工作' })
+    expect(controller.tagModalMode.value).toBe('edit')
+    expect(controller.tagDraftName.value).toBe('工作')
     controller.tagDraftName.value = '项目'
     await controller.saveTag()
     expect(taskStore.renameTag).toHaveBeenCalledWith('tag-1', '项目')

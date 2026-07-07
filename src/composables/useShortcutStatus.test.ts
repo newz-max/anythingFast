@@ -66,4 +66,34 @@ describe('useShortcutStatus', () => {
     wrapper.unmount()
     expect(unlisten).toHaveBeenCalledTimes(1)
   })
+
+  it('quietly refreshes status without warning messages', async () => {
+    const message = { warning: vi.fn() }
+    const component = defineComponent({
+      setup() {
+        const controller = useShortcutStatus(
+          { message: message as never },
+          {
+            tauriApi: {
+              loadShortcutStatus: vi.fn().mockResolvedValue({
+                shortcut: 'Alt+Space',
+                registered: false,
+                message: '注册失败'
+              })
+            },
+            listenShortcutStatusEvents: vi.fn(),
+            isTauriRuntime: () => true
+          }
+        )
+        return { controller }
+      },
+      template: '<div />'
+    })
+    const wrapper = mount(component)
+
+    await wrapper.vm.controller.refreshShortcutStatusQuiet('quiet refresh')
+
+    expect(wrapper.vm.controller.shortcutWarning.value).toBe('注册失败')
+    expect(message.warning).not.toHaveBeenCalled()
+  })
 })
