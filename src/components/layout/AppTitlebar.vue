@@ -1,13 +1,24 @@
 <script setup lang="ts">
+interface TitlebarUpdateStatus {
+  tone: 'busy' | 'ready'
+  label: string
+  detail: string
+  actionLabel: string
+  actionDisabled: boolean
+  disabledReason: string
+}
+
 defineProps<{
   logoUrl: string
   title: string
+  updateStatus?: TitlebarUpdateStatus | null
 }>()
 
 const emit = defineEmits<{
   minimize: []
   'toggle-maximize': []
   close: []
+  'restart-update': []
 }>()
 </script>
 
@@ -19,16 +30,34 @@ const emit = defineEmits<{
       </div>
       <span data-tauri-drag-region>{{ title }}</span>
     </div>
-    <div class="window-controls" aria-label="窗口操作">
-      <button class="window-control" type="button" aria-label="最小化" @click.stop="emit('minimize')">
-        <span aria-hidden="true"></span>
-      </button>
-      <button class="window-control" type="button" aria-label="最大化" @click.stop="emit('toggle-maximize')">
-        <span aria-hidden="true"></span>
-      </button>
-      <button class="window-control window-control-close" type="button" aria-label="关闭" @click.stop="emit('close')">
-        <span aria-hidden="true"></span>
-      </button>
+    <div class="titlebar-right">
+      <section v-if="updateStatus" class="titlebar-update" :class="`titlebar-update-${updateStatus.tone}`" aria-label="更新状态">
+        <div class="titlebar-update-copy">
+          <span class="titlebar-update-label">{{ updateStatus.label }}</span>
+          <small>{{ updateStatus.detail }}</small>
+        </div>
+        <button
+          v-if="updateStatus.actionLabel"
+          class="titlebar-update-action"
+          type="button"
+          :disabled="updateStatus.actionDisabled"
+          :title="updateStatus.disabledReason"
+          @click.stop="emit('restart-update')"
+        >
+          {{ updateStatus.actionLabel }}
+        </button>
+      </section>
+      <div class="window-controls" aria-label="窗口操作">
+        <button class="window-control" type="button" aria-label="最小化" @click.stop="emit('minimize')">
+          <span aria-hidden="true"></span>
+        </button>
+        <button class="window-control" type="button" aria-label="最大化" @click.stop="emit('toggle-maximize')">
+          <span aria-hidden="true"></span>
+        </button>
+        <button class="window-control window-control-close" type="button" aria-label="关闭" @click.stop="emit('close')">
+          <span aria-hidden="true"></span>
+        </button>
+      </div>
     </div>
   </header>
 </template>
@@ -88,6 +117,84 @@ const emit = defineEmits<{
   height: 100%;
   object-fit: contain;
   pointer-events: none;
+}
+
+.titlebar-right {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.titlebar-update {
+  display: inline-flex;
+  max-width: min(42vw, 420px);
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  margin-left: 16px;
+  border: 1px solid rgba(82, 106, 171, 0.28);
+  border-radius: 8px;
+  background: rgba(27, 35, 55, 0.66);
+  padding: 6px 8px 6px 10px;
+  color: #e8efff;
+}
+
+:global([data-app-theme="light"]) .titlebar-update {
+  background: rgba(255, 255, 255, 0.66);
+  color: #172033;
+}
+
+.titlebar-update-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.titlebar-update-label,
+.titlebar-update-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar-update-label {
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.titlebar-update-copy small {
+  color: #9faad0;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+:global([data-app-theme="light"]) .titlebar-update-copy small {
+  color: #66728b;
+}
+
+.titlebar-update-ready {
+  border-color: rgba(41, 214, 173, 0.44);
+}
+
+.titlebar-update-action {
+  flex: 0 0 auto;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #29d6ad 0%, #3a8bff 100%);
+  color: #04131f;
+  cursor: pointer;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.titlebar-update-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .window-controls {
@@ -179,6 +286,21 @@ const emit = defineEmits<{
   .window-brand {
     padding-left: 14px;
     font-size: 14px;
+  }
+
+  .titlebar-update {
+    max-width: 34vw;
+    gap: 6px;
+    padding: 5px 6px;
+  }
+
+  .titlebar-update-copy small {
+    display: none;
+  }
+
+  .titlebar-update-action {
+    height: 26px;
+    padding: 0 8px;
   }
 
   .titlebar-mark {

@@ -5,7 +5,7 @@ import type { useUpdateStore } from '@/stores/updateStore'
 type UpdateStore = ReturnType<typeof useUpdateStore>
 
 export interface UseStartupUpdateCheckOptions {
-  updateStore: Pick<UpdateStore, 'checkForUpdate'>
+  updateStore: Pick<UpdateStore, 'checkForUpdateAndDownload'>
   delayMs?: number
 }
 
@@ -23,7 +23,7 @@ export function useStartupUpdateCheck(options: UseStartupUpdateCheckOptions, dep
     if (startupUpdateTimer !== null) return
     startupUpdateTimer = window.setTimeout(() => {
       startupUpdateTimer = null
-      void options.updateStore.checkForUpdate('startup')
+      void options.updateStore.checkForUpdateAndDownload('startup')
     }, delayMs)
   }
 

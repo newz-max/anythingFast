@@ -45,6 +45,15 @@ import type {
 } from '@/types/domain'
 import type { TaskWizardMode } from '@/composables/useTaskWizardDraft'
 
+interface TitlebarUpdateStatus {
+  tone: 'busy' | 'ready'
+  label: string
+  detail: string
+  actionLabel: string
+  actionDisabled: boolean
+  disabledReason: string
+}
+
 const taskStore = useTaskStore()
 const executionStore = useExecutionStore()
 const updateStore = useUpdateStore()
@@ -115,6 +124,42 @@ const taskShortcutValues = computed(() =>
     .filter((trigger): trigger is ShortcutTaskTrigger => trigger.type === 'shortcut' && trigger.enabled)
     .map((trigger) => trigger.shortcut)
 )
+const titlebarUpdateStatus = computed<TitlebarUpdateStatus | null>(() => {
+  if (updateStore.state === 'downloading') {
+    return {
+      tone: 'busy',
+      label: `下载更新 ${updateStore.progress.percent}%`,
+      detail: updateStore.availableVersion ? `版本 ${updateStore.availableVersion}` : '正在后台下载',
+      actionLabel: '',
+      actionDisabled: true,
+      disabledReason: ''
+    }
+  }
+
+  if (updateStore.state === 'downloaded') {
+    return {
+      tone: 'ready',
+      label: '更新已就绪',
+      detail: updateStore.availableVersion ? `版本 ${updateStore.availableVersion}` : '重启后安装',
+      actionLabel: '重启更新',
+      actionDisabled: !updateStore.canInstallNow,
+      disabledReason: updateStore.installBlockedReason
+    }
+  }
+
+  if (updateStore.state === 'installing') {
+    return {
+      tone: 'busy',
+      label: '正在安装更新',
+      detail: updateStore.availableVersion ? `版本 ${updateStore.availableVersion}` : '即将重启',
+      actionLabel: '',
+      actionDisabled: true,
+      disabledReason: ''
+    }
+  }
+
+  return null
+})
 const favoriteCount = computed(() => taskStore.tasks.filter((task) => task.favorite).length)
 const recentCount = computed(() => taskStore.tasks.filter((task) => task.lastRunAt).length)
 const navigationItems = computed(() => [
@@ -441,6 +486,19 @@ function runSelectedAction(action: TaskAction) {
   void executeAction(selectedTask.value, action)
 }
 
+async function restartDownloadedUpdateFromTitlebar() {
+  if (!updateStore.canInstallNow) {
+    message.warning(updateStore.installBlockedReason || '当前不能安装更新')
+    return
+  }
+
+  try {
+    await updateStore.installDownloadedUpdateAndRelaunch()
+  } catch (err) {
+    reportUiError('Install update from titlebar failed', err)
+  }
+}
+
 function isActionRunning(action: TaskAction) {
   if (!selectedTask.value) return false
   return Boolean(executionStore.activeRunForTarget(executionStore.actionRunTargetKey(selectedTask.value.id, action.id)))
@@ -470,9 +528,11 @@ function reportUiError(context: string, err: unknown, extra?: Record<string, unk
     <AppTitlebar
       :logo-url="logoUrl"
       title="FlowTask - 事项管理器"
+      :update-status="titlebarUpdateStatus"
       @minimize="minimizeWindow"
       @toggle-maximize="toggleMaximizeWindow"
       @close="closeWindow"
+      @restart-update="restartDownloadedUpdateFromTitlebar"
     />
 
     <div ref="content" class="app-content">

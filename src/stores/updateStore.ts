@@ -66,6 +66,19 @@ export const useUpdateStore = defineStore('update', () => {
     return checkPromise
   }
 
+  async function checkForUpdateAndDownload(source: UpdateCheckSource) {
+    await checkForUpdate(source)
+    if (state.value !== 'available' || !update.value) return
+
+    try {
+      await downloadUpdate()
+    } catch (err) {
+      if (source === 'manual') {
+        throw err
+      }
+    }
+  }
+
   async function runCheckForUpdate(source: UpdateCheckSource) {
     state.value = 'checking'
     error.value = null
@@ -193,6 +206,7 @@ export const useUpdateStore = defineStore('update', () => {
     installBlockedReason,
     canInstallNow,
     checkForUpdate,
+    checkForUpdateAndDownload,
     downloadUpdate,
     installDownloadedUpdateAndRelaunch,
     reset

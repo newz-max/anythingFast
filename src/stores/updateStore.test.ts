@@ -92,6 +92,55 @@ describe('updateStore', () => {
     expect(store.canInstallNow).toBe(true)
   })
 
+  it('automatically downloads a startup update and records progress', async () => {
+    const store = useUpdateStore()
+    const update = makeUpdate()
+    updaterApiMock.checkForUpdate.mockResolvedValue(update)
+    updaterApiMock.downloadUpdate.mockImplementation(async (_update, onEvent) => {
+      onEvent({ event: 'Started', data: { contentLength: 80 } })
+      onEvent({ event: 'Progress', data: { chunkLength: 20 } })
+      onEvent({ event: 'Progress', data: { chunkLength: 60 } })
+      onEvent({ event: 'Finished' })
+    })
+
+    await store.checkForUpdateAndDownload('startup')
+
+    expect(updaterApiMock.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(updaterApiMock.downloadUpdate).toHaveBeenCalledWith(update, expect.any(Function))
+    expect(store.state).toBe('downloaded')
+    expect(store.progress.percent).toBe(100)
+  })
+
+  it('keeps startup automatic download failures non-throwing and records the error', async () => {
+    const store = useUpdateStore()
+    updaterApiMock.checkForUpdate.mockResolvedValue(makeUpdate())
+    updaterApiMock.downloadUpdate.mockRejectedValue(new Error('download failed'))
+
+    await expect(store.checkForUpdateAndDownload('startup')).resolves.toBeUndefined()
+
+    expect(store.state).toBe('error')
+    expect(store.error).toBe('download failed')
+  })
+
+  it('deduplicates automatic downloads after concurrent startup checks', async () => {
+    const store = useUpdateStore()
+    const update = makeUpdate()
+    let resolveCheck: (value: unknown) => void = () => {}
+    updaterApiMock.checkForUpdate.mockReturnValue(new Promise((resolve) => {
+      resolveCheck = resolve
+    }))
+    updaterApiMock.downloadUpdate.mockResolvedValue(undefined)
+
+    const first = store.checkForUpdateAndDownload('startup')
+    const second = store.checkForUpdateAndDownload('startup')
+    resolveCheck(update)
+    await Promise.all([first, second])
+
+    expect(updaterApiMock.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(updaterApiMock.downloadUpdate).toHaveBeenCalledTimes(1)
+    expect(store.state).toBe('downloaded')
+  })
+
   it('blocks install while execution runs or interactions are pending', async () => {
     const update = makeUpdate()
     const store = await useDownloadedUpdateStore(update)

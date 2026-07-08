@@ -11,43 +11,43 @@ describe('useStartupUpdateCheck', () => {
 
   it('does not start outside Tauri', () => {
     vi.useFakeTimers()
-    const checkForUpdate = vi.fn()
-    mountHarness(checkForUpdate, false)
+    const checkForUpdateAndDownload = vi.fn()
+    mountHarness(checkForUpdateAndDownload, false)
 
     vi.advanceTimersByTime(10)
 
-    expect(checkForUpdate).not.toHaveBeenCalled()
+    expect(checkForUpdateAndDownload).not.toHaveBeenCalled()
   })
 
-  it('runs startup update check after the delay', () => {
+  it('runs startup update check and automatic download after the delay', () => {
     vi.useFakeTimers()
-    const checkForUpdate = vi.fn().mockResolvedValue(undefined)
-    mountHarness(checkForUpdate, true)
+    const checkForUpdateAndDownload = vi.fn().mockResolvedValue(undefined)
+    mountHarness(checkForUpdateAndDownload, true)
 
     vi.advanceTimersByTime(9)
-    expect(checkForUpdate).not.toHaveBeenCalled()
+    expect(checkForUpdateAndDownload).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
 
-    expect(checkForUpdate).toHaveBeenCalledWith('startup')
+    expect(checkForUpdateAndDownload).toHaveBeenCalledWith('startup')
   })
 
   it('clears the timer on unmount', () => {
     vi.useFakeTimers()
-    const checkForUpdate = vi.fn()
-    const wrapper = mountHarness(checkForUpdate, true)
+    const checkForUpdateAndDownload = vi.fn()
+    const wrapper = mountHarness(checkForUpdateAndDownload, true)
 
     wrapper.unmount()
     vi.advanceTimersByTime(10)
 
-    expect(checkForUpdate).not.toHaveBeenCalled()
+    expect(checkForUpdateAndDownload).not.toHaveBeenCalled()
   })
 })
 
-function mountHarness(checkForUpdate: ReturnType<typeof vi.fn>, isTauriRuntime: boolean) {
+function mountHarness(checkForUpdateAndDownload: ReturnType<typeof vi.fn>, isTauriRuntime: boolean) {
   return mount(defineComponent({
     setup() {
       useStartupUpdateCheck(
-        { updateStore: { checkForUpdate } as never, delayMs: 10 },
+        { updateStore: { checkForUpdateAndDownload } as never, delayMs: 10 },
         { isTauriRuntime: () => isTauriRuntime }
       )
     },

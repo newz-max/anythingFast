@@ -4,7 +4,9 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, nextTick } from 'vue'
 import MainLayout from './MainLayout.vue'
+import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
+import { useUpdateStore } from '@/stores/updateStore'
 import type { AppConfig, TaskItem } from '@/types/domain'
 
 const executeMock = vi.hoisted(() => vi.fn())
@@ -17,6 +19,12 @@ const messageApi = vi.hoisted(() => ({
 }))
 const dialogApi = vi.hoisted(() => ({
   warning: vi.fn()
+}))
+const updaterApiMock = vi.hoisted(() => ({
+  checkForUpdate: vi.fn(),
+  downloadUpdate: vi.fn(),
+  installUpdate: vi.fn(),
+  relaunchApp: vi.fn()
 }))
 
 vi.mock('@tauri-apps/api/window', () => ({
@@ -48,6 +56,10 @@ vi.mock('@/api/autostart', () => ({
     isEnabled: vi.fn().mockResolvedValue(false),
     setEnabled: vi.fn().mockResolvedValue(undefined)
   }
+}))
+
+vi.mock('@/api/updater', () => ({
+  updaterApi: updaterApiMock
 }))
 
 vi.mock('naive-ui', async (importOriginal) => {
@@ -255,6 +267,10 @@ describe('MainLayout window keyboard shortcuts', () => {
     focusSearchMock.mockClear()
     scrollTaskIntoViewMock.mockClear()
     messageApi.success.mockClear()
+    updaterApiMock.checkForUpdate.mockReset()
+    updaterApiMock.downloadUpdate.mockReset()
+    updaterApiMock.installUpdate.mockReset()
+    updaterApiMock.relaunchApp.mockReset()
   })
 
   afterEach(() => {
@@ -388,4 +404,58 @@ describe('MainLayout window keyboard shortcuts', () => {
     expect(focusSearchMock).not.toHaveBeenCalled()
     expect(settingsMount.taskStore.selectedTaskId).toBe('task-1')
   })
+
+  it('shows downloaded update action in titlebar and installs on click', async () => {
+    const update = makeUpdate()
+    updaterApiMock.checkForUpdate.mockResolvedValue(update)
+    updaterApiMock.downloadUpdate.mockResolvedValue(undefined)
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+    const updateStore = useUpdateStore()
+
+    await updateStore.checkForUpdate('manual')
+    await updateStore.downloadUpdate()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('更新已就绪')
+    expect(wrapper.text()).toContain('重启更新')
+
+    await wrapper.get('.titlebar-update-action').trigger('click')
+    await flushPromises()
+
+    expect(updaterApiMock.installUpdate).toHaveBeenCalledWith(update)
+    expect(updaterApiMock.relaunchApp).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables titlebar restart update action while execution interaction is pending', async () => {
+    updaterApiMock.checkForUpdate.mockResolvedValue(makeUpdate())
+    updaterApiMock.downloadUpdate.mockResolvedValue(undefined)
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+    const updateStore = useUpdateStore()
+
+    await updateStore.checkForUpdate('manual')
+    await updateStore.downloadUpdate()
+    useExecutionStore().beginRuntimeInput()
+    await nextTick()
+
+    const action = wrapper.get('.titlebar-update-action')
+    expect(action.attributes('disabled')).toBeDefined()
+    expect(action.attributes('title')).toContain('当前有运行变量输入窗口')
+  })
 })
+
+function makeUpdate() {
+  return {
+    currentVersion: '0.5.2',
+    version: '0.5.3',
+    date: '2026-07-07T00:00:00Z',
+    body: '更新说明',
+    download: vi.fn(),
+    install: vi.fn()
+  }
+}
+
+function flushPromises() {
+  return new Promise((resolve) => window.setTimeout(resolve, 0))
+}
