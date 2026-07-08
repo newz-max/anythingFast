@@ -27,6 +27,13 @@ const progressLabel = computed(() => {
 
 const lastCheckLabel = computed(() => formatDateTime(updateStore.lastCheckAt))
 const publishedAtLabel = computed(() => formatDateTime(updateStore.publishedAt))
+const statusTone = computed(() => {
+  if (updateStore.state === 'error') return 'error'
+  if (updateStore.state === 'available' || updateStore.state === 'downloaded') return 'action'
+  if (updateStore.state === 'downloading' || updateStore.state === 'installing' || updateStore.state === 'checking') return 'busy'
+  if (updateStore.state === 'upToDate') return 'success'
+  return 'idle'
+})
 
 async function checkManually() {
   try {
@@ -91,11 +98,12 @@ function formatBytes(value: number) {
 
 <template>
   <section class="update-settings">
-    <header class="update-settings-header">
+    <header class="update-hero" :class="`update-hero-${statusTone}`">
       <div class="update-settings-copy">
-        <h3>应用更新</h3>
-        <p>{{ statusText }}</p>
-        <small v-if="lastCheckLabel">上次检查：{{ lastCheckLabel }}</small>
+        <span class="update-kicker">更新状态</span>
+        <h3>{{ statusText }}</h3>
+        <p>更新检查、下载和安装会立即执行，不需要点击设置弹窗底部保存。</p>
+        <small>{{ lastCheckLabel ? `上次检查：${lastCheckLabel}` : '尚无检查记录' }}</small>
       </div>
       <div class="update-settings-actions">
         <NButton size="small" secondary :disabled="updateStore.busy" @click="checkManually">检查更新</NButton>
@@ -106,36 +114,44 @@ function formatBytes(value: number) {
       </div>
     </header>
 
-    <NAlert v-if="updateStore.state === 'error' && updateStore.error" type="error" :show-icon="false">
-      {{ updateStore.error }}
-    </NAlert>
+    <div v-if="updateStore.state === 'error' && updateStore.error || updateStore.installBlockedReason" class="update-alerts">
+      <NAlert v-if="updateStore.state === 'error' && updateStore.error" type="error" :show-icon="false">
+        {{ updateStore.error }}
+      </NAlert>
 
-    <NAlert v-if="updateStore.installBlockedReason" type="warning" :show-icon="false">
-      {{ updateStore.installBlockedReason }}
-    </NAlert>
+      <NAlert v-if="updateStore.installBlockedReason" type="warning" :show-icon="false">
+        {{ updateStore.installBlockedReason }}
+      </NAlert>
+    </div>
 
-    <section v-if="updateStore.state === 'available' || updateStore.state === 'downloaded' || updateStore.state === 'downloading' || updateStore.state === 'installing'" class="update-detail">
+    <section class="update-detail">
       <dl>
         <div>
           <dt>当前版本</dt>
           <dd>{{ updateStore.currentVersion || '未知' }}</dd>
         </div>
         <div>
-          <dt>新版本</dt>
-          <dd>{{ updateStore.availableVersion }}</dd>
+          <dt>可用版本</dt>
+          <dd>{{ updateStore.availableVersion || '暂无' }}</dd>
         </div>
-        <div v-if="publishedAtLabel">
+        <div>
           <dt>发布时间</dt>
-          <dd>{{ publishedAtLabel }}</dd>
+          <dd>{{ publishedAtLabel || '暂无' }}</dd>
         </div>
       </dl>
 
-      <div v-if="updateStore.state === 'downloading'" class="update-progress">
+      <div v-if="updateStore.state === 'downloading'" class="update-progress-panel">
+        <div class="update-progress-header">
+          <strong>下载进度</strong>
+          <span>{{ progressLabel }}</span>
+        </div>
         <NProgress type="line" :percentage="updateStore.progress.percent" :show-indicator="false" />
-        <span>{{ progressLabel }}</span>
       </div>
 
-      <p v-if="updateStore.releaseNotes" class="update-notes">{{ updateStore.releaseNotes }}</p>
+      <section v-if="updateStore.releaseNotes" class="update-notes-panel">
+        <h4>版本说明</h4>
+        <p class="update-notes">{{ updateStore.releaseNotes }}</p>
+      </section>
     </section>
   </section>
 </template>
@@ -143,16 +159,18 @@ function formatBytes(value: number) {
 <style scoped>
 .update-settings {
   display: grid;
-  gap: 12px;
-  border-top: 1px solid var(--app-field-border);
-  padding-top: 16px;
+  gap: 14px;
 }
 
-.update-settings-header {
+.update-hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 14px;
+  gap: 16px;
+  border: 1px solid var(--app-field-border);
+  border-radius: 8px;
+  background: var(--app-field-bg);
+  padding: 16px;
 }
 
 .update-settings-copy {
@@ -161,13 +179,21 @@ function formatBytes(value: number) {
   min-width: 0;
 }
 
-.update-settings-copy h3,
+.update-kicker {
+  color: var(--app-primary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .update-settings-copy p {
   margin: 0;
 }
 
 .update-settings-copy h3 {
+  margin: 0;
   color: var(--app-text);
+  font-size: 18px;
+  line-height: 1.25;
 }
 
 .update-settings-copy p,
@@ -191,9 +217,14 @@ function formatBytes(value: number) {
   gap: 8px;
 }
 
+.update-alerts {
+  display: grid;
+  gap: 8px;
+}
+
 .update-detail {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .update-detail dl {
@@ -213,7 +244,8 @@ function formatBytes(value: number) {
   padding: 9px 10px;
 }
 
-.update-detail dt {
+.update-detail dt,
+.update-progress-header span {
   color: var(--app-muted);
   font-size: 12px;
 }
@@ -228,17 +260,32 @@ function formatBytes(value: number) {
   white-space: nowrap;
 }
 
-.update-progress {
+.update-progress-panel,
+.update-notes-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  border: 1px solid var(--app-field-border);
+  border-radius: 8px;
+  background: var(--app-field-bg);
+  padding: 12px;
+}
+
+.update-progress-header {
+  display: flex;
   align-items: center;
-  gap: 10px;
-  color: var(--app-muted);
-  font-size: 12px;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.update-progress-header strong,
+.update-notes-panel h4 {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 13px;
 }
 
 .update-notes {
-  max-height: 120px;
+  max-height: 150px;
   margin: 0;
   overflow: auto;
   color: var(--app-muted);
@@ -248,14 +295,18 @@ function formatBytes(value: number) {
 }
 
 @media (max-width: 720px) {
-  .update-settings-header,
-  .update-detail dl,
-  .update-progress {
+  .update-hero,
+  .update-detail dl {
     grid-template-columns: 1fr;
   }
 
   .update-settings-actions {
     justify-content: flex-start;
+  }
+
+  .update-progress-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

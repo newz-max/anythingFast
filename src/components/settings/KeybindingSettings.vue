@@ -20,6 +20,7 @@ const groups = computed(() =>
     items: keybindings.effective.value.filter((item) => item.scope === scope)
   }))
 )
+const keybindingCount = computed(() => keybindings.effective.value.length)
 const externalWarnings = computed(() => keybindings.externalWarnings([props.globalShortcut, ...props.taskShortcuts]))
 const configWarning = computed(() => keybindings.warning.value || '')
 
@@ -79,9 +80,13 @@ async function openFile() {
 <template>
   <section class="keybinding-settings">
     <header class="keybinding-settings-header">
-      <div>
+      <div class="keybinding-title">
         <h3>软件内快捷键</h3>
         <p>这些快捷键只在对应窗口或编辑器聚焦时生效；全局唤起和事项触发快捷键仍由系统级注册控制。</p>
+        <div class="keybinding-meta">
+          <NTag size="small" :bordered="false">{{ keybindingCount }} 项</NTag>
+          <NTag size="small" :bordered="false">即时保存</NTag>
+        </div>
       </div>
       <div class="keybinding-actions">
         <NButton size="small" secondary @click="openFile">打开配置文件</NButton>
@@ -89,15 +94,20 @@ async function openFile() {
       </div>
     </header>
 
-    <NAlert v-if="configWarning" type="warning" :show-icon="false" class="keybinding-alert">
-      {{ configWarning }}
-    </NAlert>
-    <NAlert v-if="externalWarnings.length > 0" type="info" :show-icon="false" class="keybinding-alert">
-      {{ externalWarnings[0] }}
-    </NAlert>
+    <div v-if="configWarning || externalWarnings.length > 0" class="keybinding-alerts">
+      <NAlert v-if="configWarning" type="warning" :show-icon="false" class="keybinding-alert">
+        {{ configWarning }}
+      </NAlert>
+      <NAlert v-if="externalWarnings.length > 0" type="info" :show-icon="false" class="keybinding-alert">
+        {{ externalWarnings[0] }}
+      </NAlert>
+    </div>
 
     <section v-for="group in groups" :key="group.scope" class="keybinding-group">
-      <h4>{{ group.label }}</h4>
+      <header class="keybinding-group-header">
+        <h4>{{ group.label }}</h4>
+        <span>{{ group.items.length }} 个命令</span>
+      </header>
       <div class="keybinding-list">
         <article v-for="item in group.items" :key="item.command" class="keybinding-row">
           <div class="keybinding-copy">
@@ -105,17 +115,24 @@ async function openFile() {
             <span>{{ item.description }}</span>
             <small>{{ item.command }}</small>
           </div>
-          <NInput
-            v-model:value="drafts[item.command]"
-            class="keybinding-input"
-            size="small"
-            :disabled="!item.enabled"
-            :placeholder="formatKeybinding(item.defaultKey)"
-            @keyup.enter="saveKeybinding(item)"
-          />
-          <NSwitch :value="item.enabled" @update:value="(enabled: boolean) => setEnabled(item, enabled)" />
-          <NButton size="small" secondary :disabled="!item.enabled" @click="saveKeybinding(item)">保存</NButton>
-          <NButton size="small" quaternary @click="resetCommand(item.command)">默认</NButton>
+          <div class="keybinding-controls">
+            <NInput
+              v-model:value="drafts[item.command]"
+              class="keybinding-input"
+              size="small"
+              :disabled="!item.enabled"
+              :placeholder="formatKeybinding(item.defaultKey)"
+              @keyup.enter="saveKeybinding(item)"
+            />
+            <div class="keybinding-switch">
+              <span>{{ item.enabled ? '启用' : '禁用' }}</span>
+              <NSwitch :value="item.enabled" @update:value="(enabled: boolean) => setEnabled(item, enabled)" />
+            </div>
+            <div class="keybinding-row-actions">
+              <NButton size="small" secondary :disabled="!item.enabled" @click="saveKeybinding(item)">保存</NButton>
+              <NButton size="small" quaternary @click="resetCommand(item.command)">默认</NButton>
+            </div>
+          </div>
         </article>
       </div>
     </section>
@@ -125,14 +142,18 @@ async function openFile() {
 <style scoped>
 .keybinding-settings {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .keybinding-settings-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 14px;
+  gap: 16px;
+  border: 1px solid var(--app-field-border);
+  border-radius: 8px;
+  background: var(--app-field-bg);
+  padding: 14px;
 }
 
 .keybinding-settings-header h3,
@@ -141,11 +162,23 @@ async function openFile() {
   color: var(--app-text);
 }
 
+.keybinding-title {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
 .keybinding-settings-header p {
-  margin: 5px 0 0;
+  margin: 0;
   color: var(--app-muted);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.keybinding-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .keybinding-actions {
@@ -155,13 +188,31 @@ async function openFile() {
   gap: 8px;
 }
 
+.keybinding-alerts {
+  display: grid;
+  gap: 8px;
+}
+
 .keybinding-alert {
   font-size: 13px;
 }
 
 .keybinding-group {
   display: grid;
-  gap: 8px;
+  gap: 10px;
+}
+
+.keybinding-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.keybinding-group-header span {
+  color: var(--app-subtle);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .keybinding-list {
@@ -171,14 +222,14 @@ async function openFile() {
 
 .keybinding-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(120px, 160px) auto auto auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(300px, 0.95fr);
   align-items: center;
-  gap: 9px;
+  gap: 12px;
   min-width: 0;
   border: 1px solid var(--app-field-border);
   border-radius: 8px;
   background: var(--app-field-bg);
-  padding: 10px;
+  padding: 12px;
 }
 
 .keybinding-copy {
@@ -201,8 +252,31 @@ async function openFile() {
   font-size: 12px;
 }
 
+.keybinding-controls {
+  display: grid;
+  grid-template-columns: minmax(116px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .keybinding-input {
   min-width: 0;
+}
+
+.keybinding-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.keybinding-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 @media (max-width: 720px) {
@@ -211,8 +285,24 @@ async function openFile() {
     grid-template-columns: 1fr;
   }
 
-  .keybinding-actions {
+  .keybinding-actions,
+  .keybinding-row-actions {
     justify-content: flex-start;
+  }
+
+  .keybinding-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .keybinding-switch {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 420px) {
+  .keybinding-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>
