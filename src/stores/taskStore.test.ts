@@ -1,12 +1,35 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import type { AppConfig, TaskItem } from '@/types/domain'
+
+const listenConfigUpdatedEventsMock = vi.hoisted(() => vi.fn())
+const loadConfigMock = vi.hoisted(() => vi.fn())
+const saveConfigMock = vi.hoisted(() => vi.fn(async (config: AppConfig) => config))
+const updateSettingsMock = vi.hoisted(() => vi.fn(async (settings: AppConfig['settings']) => makeConfig([], settings)))
+
+vi.mock('@/api/events', () => ({
+  listenConfigUpdatedEvents: listenConfigUpdatedEventsMock
+}))
+
+vi.mock('@/api/tauri', () => ({
+  tauriApi: {
+    loadConfig: loadConfigMock,
+    saveConfig: saveConfigMock,
+    updateSettings: updateSettingsMock
+  }
+}))
+
 import { useTaskStore } from '@/stores/taskStore'
-import type { TaskItem } from '@/types/domain'
 
 describe('taskStore templates', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
+    listenConfigUpdatedEventsMock.mockReset()
+    loadConfigMock.mockReset()
+    saveConfigMock.mockClear()
+    updateSettingsMock.mockClear()
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
   })
 
   it('saves a task action sequence as a non-runnable template', async () => {
@@ -126,4 +149,125 @@ describe('taskStore templates', () => {
       preventOverlap: true
     })
   })
+
+  it('registers a single config update listener in Tauri runtime', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', {})
+    const unlisten = vi.fn()
+    listenConfigUpdatedEventsMock.mockResolvedValue(unlisten)
+    const store = useTaskStore()
+
+    await store.setupConfigSync()
+    await store.setupConfigSync()
+
+    expect(listenConfigUpdatedEventsMock).toHaveBeenCalledTimes(1)
+
+    store.teardownConfigSync()
+    expect(unlisten).toHaveBeenCalledTimes(1)
+  })
+
+  it('reloads canonical backend config after a config update event', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', {})
+    let handler: ((payload: { source: 'saveConfig' }) => void) | undefined
+    listenConfigUpdatedEventsMock.mockImplementation(async (nextHandler) => {
+      handler = nextHandler
+      return vi.fn()
+    })
+    const store = useTaskStore()
+    store.replaceConfig(makeConfig([makeTask('task-1', '旧事项')]))
+    store.selectTask('task-1')
+    loadConfigMock.mockResolvedValue(makeConfig([makeTask('task-1', '旧事项'), makeTask('task-2', '新增事项')]))
+
+    await store.setupConfigSync()
+    if (!handler) throw new Error('config update handler was not registered')
+    handler({ source: 'saveConfig' })
+    await vi.waitFor(() => expect(store.tasks.map((task) => task.id)).toEqual(['task-1', 'task-2']))
+
+    expect(store.selectedTaskId).toBe('task-1')
+    expect(loadConfigMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves previous config when sync reload fails', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', {})
+    const store = useTaskStore()
+    store.replaceConfig(makeConfig([makeTask('task-old', '旧事项')]))
+    loadConfigMock.mockRejectedValue(new Error('reload failed'))
+
+    await store.reloadFromConfigUpdate()
+
+    expect(store.tasks.map((task) => task.id)).toEqual(['task-old'])
+    expect(store.error).toBe('reload failed')
+  })
+
+  it('queues rapid config update reloads without overlapping backend loads', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', {})
+    const store = useTaskStore()
+    const firstLoad = deferred<AppConfig>()
+    loadConfigMock
+      .mockReturnValueOnce(firstLoad.promise)
+      .mockResolvedValueOnce(makeConfig([makeTask('task-2', '第二次同步')]))
+
+    const firstReload = store.reloadFromConfigUpdate()
+    const secondReload = store.reloadFromConfigUpdate()
+
+    expect(loadConfigMock).toHaveBeenCalledTimes(1)
+
+    firstLoad.resolve(makeConfig([makeTask('task-1', '第一次同步')]))
+    await firstReload
+    await secondReload
+
+    expect(loadConfigMock).toHaveBeenCalledTimes(2)
+    expect(store.tasks.map((task) => task.id)).toEqual(['task-2'])
+  })
 })
+
+function makeConfig(tasks: TaskItem[], settings: AppConfig['settings'] = {
+  globalShortcut: 'Alt+Space',
+  theme: 'system',
+  launchOnStartup: false
+}): AppConfig {
+  return {
+    version: 1,
+    tasks,
+    tags: [],
+    templates: [],
+    settings
+  }
+}
+
+function makeTask(id: string, name: string): TaskItem {
+  return {
+    id,
+    name,
+    category: '工作',
+    keywords: [],
+    description: '',
+    actions: [
+      {
+        id: `${id}-action`,
+        type: 'openUrl',
+        name: '打开网页',
+        params: { url: 'https://example.com' },
+        enabled: true,
+        continueOnError: false,
+        riskLevel: 'low'
+      }
+    ],
+    riskLevel: 'low',
+    enabled: true,
+    favorite: false,
+    tagIds: [],
+    triggers: [{ type: 'manual', enabled: true }],
+    createdAt: '2026-07-01T00:00:00Z',
+    updatedAt: '2026-07-01T00:00:00Z'
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}

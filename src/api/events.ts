@@ -1,6 +1,12 @@
 import { listen } from '@tauri-apps/api/event'
 import type { ActionExecutionResult, ActionType, ExecutionScope, ShortcutStatus } from '@/types/domain'
 
+export type ConfigUpdateSource = 'saveConfig' | 'importConfig' | 'updateSettings' | 'runMetadata'
+
+export interface ConfigUpdatedPayload {
+  source: ConfigUpdateSource
+}
+
 export type ExecutionEventStatus =
   | 'started'
   | 'action-started'
@@ -31,4 +37,8 @@ export function listenExecutionEvents(handler: (payload: ExecutionEventPayload) 
 
 export function listenShortcutStatusEvents(handler: (payload: ShortcutStatus) => void) {
   return listen<ShortcutStatus>('shortcut-status', (event) => handler(event.payload))
+}
+
+export function listenConfigUpdatedEvents(handler: (payload: ConfigUpdatedPayload) => void) {
+  return listen<ConfigUpdatedPayload>('config-updated', (event) => handler(event.payload))
 }

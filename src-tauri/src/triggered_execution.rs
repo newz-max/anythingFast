@@ -66,6 +66,7 @@ pub fn execute_unattended_task(
     let summary = executor::execute_task(app, &task, &runtime_variables, false)?;
     storage::update_task_run_metadata(app, &summary.task_id, summary.finished_at.clone())
         .map_err(|err| format!("保存执行结果失败：{err}"))?;
+    crate::emit_config_updated(app, crate::CONFIG_UPDATED_RUN_METADATA);
     Ok(summary)
 }
 

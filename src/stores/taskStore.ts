@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, shallowRef } from 'vue'
+import type { UnlistenFn } from '@tauri-apps/api/event'
+import { listenConfigUpdatedEvents } from '@/api/events'
 import { tauriApi } from '@/api/tauri'
 import { builtInTaskTemplates } from '@/domain/taskTemplates'
 import { createDefaultConfig, normalizeConfig, normalizeTemplate } from '@/domain/taskFactory'
@@ -14,6 +16,9 @@ export const useTaskStore = defineStore('tasks', () => {
   const loading = shallowRef(false)
   const saving = shallowRef(false)
   const error = shallowRef<string | null>(null)
+  let configSyncUnlisten: UnlistenFn | null = null
+  let configSyncReload: Promise<void> | null = null
+  let configSyncQueued = false
 
   const tasks = computed(() => config.value.tasks)
   const tags = computed(() => config.value.tags)
@@ -27,18 +32,81 @@ export const useTaskStore = defineStore('tasks', () => {
   })
 
   async function load() {
+    await loadConfig({
+      preserveSelectedTask: false,
+      clearOnError: true,
+      context: 'Load task config failed',
+      throwOnError: false
+    })
+  }
+
+  async function loadConfig(options: {
+    preserveSelectedTask: boolean
+    clearOnError: boolean
+    context: string
+    throwOnError: boolean
+  }) {
     loading.value = true
     error.value = null
+    const previousSelectedTaskId = selectedTaskId.value
     try {
-      config.value = normalizeConfig(isTauriRuntime() ? await tauriApi.loadConfig() : loadBrowserConfig())
-      selectedTaskId.value = config.value.tasks[0]?.id || null
+      const nextConfig = normalizeConfig(isTauriRuntime() ? await tauriApi.loadConfig() : loadBrowserConfig())
+      replaceConfig(nextConfig, options.preserveSelectedTask ? previousSelectedTaskId : undefined)
     } catch (err) {
-      logDevError('Load task config failed', err)
+      logDevError(options.context, err)
       error.value = getErrorMessage(err)
-      config.value = createDefaultConfig()
+      if (options.clearOnError) {
+        config.value = createDefaultConfig()
+        selectedTaskId.value = null
+      }
+      if (options.throwOnError) {
+        throw err
+      }
     } finally {
       loading.value = false
     }
+  }
+
+  async function setupConfigSync() {
+    if (!isTauriRuntime() || configSyncUnlisten) return
+    try {
+      configSyncUnlisten = await listenConfigUpdatedEvents(() => {
+        void reloadFromConfigUpdate()
+      })
+    } catch (err) {
+      logDevError('Setup config update listener failed', err)
+      error.value = getErrorMessage(err)
+      throw err
+    }
+  }
+
+  function teardownConfigSync() {
+    configSyncUnlisten?.()
+    configSyncUnlisten = null
+    configSyncQueued = false
+  }
+
+  function reloadFromConfigUpdate() {
+    if (!isTauriRuntime()) return Promise.resolve()
+    if (configSyncReload) {
+      configSyncQueued = true
+      return configSyncReload
+    }
+
+    configSyncReload = (async () => {
+      do {
+        configSyncQueued = false
+        await loadConfig({
+          preserveSelectedTask: true,
+          clearOnError: false,
+          context: 'Reload task config from update event failed',
+          throwOnError: false
+        })
+      } while (configSyncQueued)
+    })().finally(() => {
+      configSyncReload = null
+    })
+    return configSyncReload
   }
 
   async function persist() {
@@ -214,9 +282,12 @@ export const useTaskStore = defineStore('tasks', () => {
     selectedTaskId.value = taskId
   }
 
-  function replaceConfig(nextConfig: AppConfig) {
+  function replaceConfig(nextConfig: AppConfig, preferredTaskId?: string | null) {
     config.value = normalizeConfig(nextConfig)
-    selectedTaskId.value = nextConfig.tasks[0]?.id || null
+    selectedTaskId.value =
+      preferredTaskId && config.value.tasks.some((task) => task.id === preferredTaskId)
+        ? preferredTaskId
+        : config.value.tasks[0]?.id || null
   }
 
   return {
@@ -233,6 +304,9 @@ export const useTaskStore = defineStore('tasks', () => {
     saving,
     error,
     load,
+    setupConfigSync,
+    teardownConfigSync,
+    reloadFromConfigUpdate,
     persist,
     upsertTask,
     removeTask,

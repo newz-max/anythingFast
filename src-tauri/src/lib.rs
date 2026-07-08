@@ -14,6 +14,7 @@ mod variables;
 use commands::*;
 use diagnostics::dev_log_error;
 use domain::{ShortcutStatus, TaskTrigger};
+use serde::Serialize;
 use std::sync::Mutex;
 use tauri::{
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
@@ -28,6 +29,17 @@ struct TaskShortcutRegistry(Mutex<Vec<(Shortcut, String)>>);
 
 #[derive(Default)]
 struct GlobalShortcutState(Mutex<GlobalShortcutRegistration>);
+
+pub(crate) const CONFIG_UPDATED_SAVE_CONFIG: &str = "saveConfig";
+pub(crate) const CONFIG_UPDATED_IMPORT_CONFIG: &str = "importConfig";
+pub(crate) const CONFIG_UPDATED_UPDATE_SETTINGS: &str = "updateSettings";
+pub(crate) const CONFIG_UPDATED_RUN_METADATA: &str = "runMetadata";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConfigUpdatedPayload {
+    source: &'static str,
+}
 
 struct GlobalShortcutRegistration {
     shortcut: Option<Shortcut>,
@@ -360,6 +372,12 @@ fn emit_shortcut_status(app: &tauri::AppHandle, status: ShortcutStatus) {
     }
 }
 
+pub(crate) fn emit_config_updated(app: &tauri::AppHandle, source: &'static str) {
+    if let Err(err) = app.emit("config-updated", ConfigUpdatedPayload { source }) {
+        dev_log_error("Emit config updated failed", &err);
+    }
+}
+
 fn format_shortcut_registration_error(shortcut: &str, raw_error: &str) -> String {
     let lower = raw_error.to_lowercase();
     if lower.contains("already registered") || lower.contains("hotkey already registered") {
@@ -405,4 +423,19 @@ fn trigger_task_shortcut(app: &tauri::AppHandle, task_id: String) {
             );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_updated_payload_serializes_as_camel_case_source() {
+        let payload = ConfigUpdatedPayload {
+            source: CONFIG_UPDATED_SAVE_CONFIG,
+        };
+        let value = serde_json::to_value(payload).expect("serialize payload");
+
+        assert_eq!(value["source"], "saveConfig");
+    }
 }

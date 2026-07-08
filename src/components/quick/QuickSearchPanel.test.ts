@@ -274,4 +274,46 @@ describe('QuickSearchPanel keyboard navigation', () => {
 
     expect(unlistenFocusChangedMock).toHaveBeenCalledTimes(1)
   })
+
+  it('reflects task config replacements without remounting the quick panel', async () => {
+    const wrapper = await mountPanel([makeTask(1)])
+    const taskStore = useTaskStore()
+
+    expect(resultItems(wrapper)).toHaveLength(1)
+    expect(resultItems(wrapper)[0].text()).toContain('事项 1')
+
+    taskStore.replaceConfig(makeConfig([makeTask(2, { name: '新增事项' })]))
+    await nextTick()
+    await nextTick()
+
+    expect(resultItems(wrapper)).toHaveLength(1)
+    expect(resultItems(wrapper)[0].text()).toContain('新增事项')
+
+    taskStore.replaceConfig(makeConfig([makeTask(2, { name: '新增事项', enabled: false })]))
+    await nextTick()
+    await nextTick()
+
+    expect(resultItems(wrapper)).toHaveLength(0)
+    expect(wrapper.text()).toContain('没有匹配的启用事项')
+  })
+
+  it('updates recent ranking and metadata after task run metadata sync', async () => {
+    const wrapper = await mountPanel([
+      makeTask(1, { lastRunAt: '2026-07-01T08:00:00.000Z' }),
+      makeTask(2, { lastRunAt: '2026-07-02T08:00:00.000Z' })
+    ])
+    const taskStore = useTaskStore()
+
+    expect(resultItems(wrapper)[0].text()).toContain('事项 2')
+
+    taskStore.replaceConfig(makeConfig([
+      makeTask(1, { lastRunAt: '2026-07-03T08:00:00.000Z' }),
+      makeTask(2, { lastRunAt: '2026-07-02T08:00:00.000Z' })
+    ]))
+    await nextTick()
+    await nextTick()
+
+    expect(resultItems(wrapper)[0].text()).toContain('事项 1')
+    expect(resultItems(wrapper)[0].text()).toContain('上次')
+  })
 })

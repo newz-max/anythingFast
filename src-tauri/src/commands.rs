@@ -72,6 +72,7 @@ pub fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig, Strin
         .map_err(|err| log_command_error("save_config storage write failed", err))?;
     crate::scheduler::refresh_scheduled_triggers(&app, &normalized)
         .map_err(|err| log_command_error("save_config refresh schedules failed", err))?;
+    crate::emit_config_updated(&app, crate::CONFIG_UPDATED_SAVE_CONFIG);
     storage::load_config(&app).map_err(|err| log_command_error("save_config reload failed", err))
 }
 
@@ -220,6 +221,7 @@ fn run_task_blocking(
     .map_err(|err| log_command_error("run_task execute failed", err))?;
     storage::update_task_run_metadata(&app, &summary.task_id, summary.finished_at.clone())
         .map_err(|err| log_command_error("run_task save run metadata failed", err))?;
+    crate::emit_config_updated(&app, crate::CONFIG_UPDATED_RUN_METADATA);
     Ok(summary)
 }
 
@@ -307,6 +309,7 @@ fn run_task_action_blocking(
     .map_err(|err| log_command_error("run_task_action execute failed", err))?;
     storage::update_task_run_metadata(&app, &summary.task_id, summary.finished_at.clone())
         .map_err(|err| log_command_error("run_task_action save run metadata failed", err))?;
+    crate::emit_config_updated(&app, crate::CONFIG_UPDATED_RUN_METADATA);
     Ok(summary)
 }
 
@@ -374,6 +377,7 @@ pub fn confirm_import_bundle(app: AppHandle, bundle_json: String) -> Result<AppC
         .map_err(|err| log_command_error("confirm_import_bundle save failed", err))?;
     crate::scheduler::refresh_scheduled_triggers(&app, &next_config)
         .map_err(|err| log_command_error("confirm_import_bundle refresh schedules failed", err))?;
+    crate::emit_config_updated(&app, crate::CONFIG_UPDATED_IMPORT_CONFIG);
     storage::load_config(&app)
         .map_err(|err| log_command_error("confirm_import_bundle reload failed", err))
 }
@@ -461,6 +465,7 @@ pub fn update_settings(app: AppHandle, settings: AppSettings) -> Result<AppConfi
         .map_err(|err| log_command_error("update_settings register shortcut failed", err))?;
     storage::save_config(&app, &config)
         .map_err(|err| log_command_error("update_settings save config failed", err))?;
+    crate::emit_config_updated(&app, crate::CONFIG_UPDATED_UPDATE_SETTINGS);
     storage::load_config(&app)
         .map_err(|err| log_command_error("update_settings reload failed", err))
 }
