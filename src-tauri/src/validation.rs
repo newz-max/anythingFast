@@ -177,10 +177,6 @@ pub fn validate_template_model(template: &TaskTemplate) -> ValidationResult {
 pub fn validate_action_model(action: &TaskAction) -> ValidationResult {
     let mut issues = Vec::new();
 
-    if matches!(action.timeout_ms, Some(0)) {
-        issues.push(issue("timeoutMs", "超时时间必须大于 0"));
-    }
-
     issues.extend(validate_action_output_binding(action));
     issues.extend(validate_action_condition(&action.condition));
 
@@ -665,6 +661,24 @@ mod tests {
         };
 
         assert!(!validate_action_model(&action).valid);
+    }
+
+    #[test]
+    fn allows_zero_timeout_as_unlimited() {
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::OpenUrl,
+            name: None,
+            params: json!({ "url": "https://example.com" }),
+            enabled: true,
+            timeout_ms: Some(0),
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: RiskLevel::Low,
+        };
+
+        assert!(validate_action_model(&action).valid);
     }
 
     #[test]

@@ -188,7 +188,7 @@ describe('validation', () => {
     expect(result.issues.map((issue) => issue.field)).toContain('durationMs')
   })
 
-  it('allows cleared optional timeout locally', () => {
+  it('allows cleared and zero optional timeout locally', () => {
     const action: TaskAction = {
       id: 'action-1',
       type: 'delay',
@@ -202,6 +202,27 @@ describe('validation', () => {
     const result = validateActionLocal(action)
 
     expect(result.valid).toBe(true)
+
+    const zeroTimeoutResult = validateActionLocal({ ...action, timeoutMs: 0 })
+
+    expect(zeroTimeoutResult.valid).toBe(true)
+  })
+
+  it('rejects negative optional timeout locally', () => {
+    const action: TaskAction = {
+      id: 'action-1',
+      type: 'delay',
+      name: 'wait',
+      params: {},
+      enabled: true,
+      timeoutMs: -1,
+      riskLevel: 'low'
+    }
+
+    const result = validateActionLocal(action)
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.field)).toContain('timeoutMs')
   })
 
   it('validates task variables and action references locally', () => {

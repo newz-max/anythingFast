@@ -42,7 +42,7 @@ const formStubs = {
   }),
   NInputNumber: defineComponent({
     name: 'NInputNumber',
-    props: ['value'],
+    props: ['value', 'min', 'placeholder'],
     emits: ['update:value'],
     template: '<input :value="value" type="number" @input="$emit(\'update:value\', Number($event.target.value))" />'
   }),
@@ -167,6 +167,22 @@ describe('ActionParamForm', () => {
     expect(shellSelect.props('options')).toContainEqual({ label: '终端默认配置', value: 'terminal' })
   })
 
+  it('allows zero as the no-timeout value in action timeout input', () => {
+    const wrapper = mount(ActionParamForm, {
+      props: {
+        modelValue: makeCommandAction()
+      },
+      global: {
+        stubs: formStubs
+      }
+    })
+
+    const timeoutInput = wrapper.findComponent({ name: 'NInputNumber' })
+
+    expect(timeoutInput.props('min')).toBe(0)
+    expect(timeoutInput.props('placeholder')).toBe('0 或留空表示不限时')
+  })
+
   it('shows command shell selection for script commands', () => {
     const wrapper = mount(ActionParamForm, {
       props: {
@@ -245,8 +261,9 @@ describe('ActionParamForm', () => {
       }
     })
 
-    expect(wrapper.text()).toContain('显示终端窗口时会同步记录输出到执行日志')
-    expect(wrapper.text()).toContain('交互式命令仍以终端窗口中的提示和输入为准')
+    expect(wrapper.text()).toContain('后台运行会分离记录 stdout/stderr')
+    expect(wrapper.text()).toContain('显示终端窗口时记录合流终端输出')
+    expect(wrapper.text()).toContain('长输出可能截断')
   })
 
   it('updates command output bindings', async () => {

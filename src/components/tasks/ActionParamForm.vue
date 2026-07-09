@@ -152,8 +152,8 @@ function updateTerminalHost(value: string) {
           <NInputNumber
             :value="action.timeoutMs ?? null"
             clearable
-            :min="1"
-            placeholder="可选"
+            :min="0"
+            placeholder="0 或留空表示不限时"
             @update:value="(value: number | null) => patchAction({ timeoutMs: value })"
           />
         </NFormItem>
@@ -244,7 +244,7 @@ function updateTerminalHost(value: string) {
         </NGi>
       </NGrid>
       <NAlert class="command-log-note" type="info" :show-icon="false">
-        显示终端窗口时会同步记录输出到执行日志；交互式命令仍以终端窗口中的提示和输入为准。
+        后台运行会分离记录 stdout/stderr；显示终端窗口时记录合流终端输出。交互式命令以终端提示为准，长输出可能截断。
       </NAlert>
       <NGrid v-if="commandSource === 'inline'" :cols="3" :x-gap="12" responsive="screen">
         <NGi :span="3">
