@@ -82,7 +82,9 @@ fn read_keybindings_file(path: &PathBuf) -> StorageResult<KeybindingsLoadResult>
         Err(err) => Ok(KeybindingsLoadResult {
             overrides: Vec::new(),
             path: path.to_string_lossy().to_string(),
-            warning: Some(format!("keybindings.json 无法读取，已使用默认快捷键：{err}")),
+            warning: Some(format!(
+                "keybindings.json 无法读取，已使用默认快捷键：{err}"
+            )),
         }),
     }
 }
@@ -165,10 +167,7 @@ fn write_config_file(path: &PathBuf, config: &AppConfig) -> StorageResult<()> {
     Ok(())
 }
 
-fn write_keybindings_file(
-    path: &PathBuf,
-    overrides: &[KeybindingOverride],
-) -> StorageResult<()> {
+fn write_keybindings_file(path: &PathBuf, overrides: &[KeybindingOverride]) -> StorageResult<()> {
     ensure_parent(path)?;
     let temp_path = path.with_extension("json.tmp");
     let content = serde_json::to_string_pretty(overrides)?;
