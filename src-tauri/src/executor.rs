@@ -828,6 +828,13 @@ fn run_command(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> 
                         terminal_output,
                     ));
                 }
+                Ok(TerminalCompletion::Closed) => {
+                    let terminal_output = output_log_path
+                        .as_ref()
+                        .and_then(|path| read_command_output_log(path));
+                    cleanup_temp_paths(&terminal_command.temp_paths);
+                    return Err(cancelled_output(None, None, terminal_output));
+                }
                 Err(message) => {
                     let terminal_output = output_log_path
                         .as_ref()
@@ -1046,6 +1053,7 @@ struct TerminalCommand {
     exit_code_path: Option<PathBuf>,
     completion_path: Option<PathBuf>,
     timeout_path: Option<PathBuf>,
+    runner_pid_path: Option<PathBuf>,
     wait_for_completion: bool,
     configure_process: bool,
 }
@@ -1228,6 +1236,7 @@ fn powershell_terminal_command(
     let exit_code_path = temp_runner_path("txt");
     let completion_path = temp_runner_path("done");
     let timeout_path = temp_runner_path("timeout");
+    let runner_pid_path = temp_runner_path("pid");
     let timeout_watchdog_path =
         terminal_timeout_watchdog_script(&completion_path, &timeout_path, timeout_ms)?;
     let invocation = powershell_script_invocation(script_path, script_args);
@@ -1236,6 +1245,7 @@ fn powershell_terminal_command(
     let exit_code_path_text = exit_code_path.to_string_lossy().to_string();
     let completion_path_text = completion_path.to_string_lossy().to_string();
     let timeout_path_text = timeout_path.to_string_lossy().to_string();
+    let runner_pid_path_text = runner_pid_path.to_string_lossy().to_string();
     let timeout_watchdog_path_text = timeout_watchdog_path
         .as_ref()
         .map(|path| path.to_string_lossy().to_string())
@@ -1247,6 +1257,7 @@ $outputLogPath = {output_log_path}
 $exitCodePath = {exit_code_path}
 $completionPath = {completion_path}
 $timeoutPath = {timeout_path}
+$runnerPidPath = {runner_pid_path}
 $timeoutWatchdogPath = {timeout_watchdog_path}
 $skipTerminalPause = $env:ANYTHING_FAST_SKIP_TERMINAL_PAUSE -eq '1'
 try {{
@@ -1262,6 +1273,10 @@ try {{
   if (Test-Path -LiteralPath $timeoutPath) {{
     Remove-Item -LiteralPath $timeoutPath -Force
   }}
+  if (Test-Path -LiteralPath $runnerPidPath) {{
+    Remove-Item -LiteralPath $runnerPidPath -Force
+  }}
+  Set-Content -LiteralPath $runnerPidPath -Value $PID -Encoding UTF8
   if ($timeoutWatchdogPath) {{
     $hostPath = (Get-Process -Id $PID).Path
     Start-Process -FilePath $hostPath -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $timeoutWatchdogPath, $PID) | Out-Null
@@ -1294,6 +1309,7 @@ exit $exitCode
         exit_code_path = powershell_quote(&exit_code_path_text),
         completion_path = powershell_quote(&completion_path_text),
         timeout_path = powershell_quote(&timeout_path_text),
+        runner_pid_path = powershell_quote(&runner_pid_path_text),
         timeout_watchdog_path = powershell_quote(&timeout_watchdog_path_text),
     );
     write_powershell_script(&runner_path, &runner_script)?;
@@ -1311,6 +1327,7 @@ exit $exitCode
     temp_paths.push(exit_code_path.clone());
     temp_paths.push(completion_path.clone());
     temp_paths.push(timeout_path.clone());
+    temp_paths.push(runner_pid_path.clone());
     if let Some(path) = timeout_watchdog_path {
         temp_paths.push(path);
     }
@@ -1321,6 +1338,7 @@ exit $exitCode
         exit_code_path: Some(exit_code_path),
         completion_path: Some(completion_path),
         timeout_path: Some(timeout_path),
+        runner_pid_path: Some(runner_pid_path),
         wait_for_completion: host_mode == TerminalHostMode::WindowsTerminal,
         configure_process: host_mode == TerminalHostMode::Direct,
     })
@@ -1361,6 +1379,7 @@ fn cmd_terminal_command(
     let exit_code_path = temp_runner_path("txt");
     let completion_path = temp_runner_path("done");
     let timeout_path = temp_runner_path("timeout");
+    let runner_pid_path = temp_runner_path("pid");
     let timeout_watchdog_path =
         terminal_timeout_watchdog_script(&completion_path, &timeout_path, timeout_ms)?;
     let invocation = cmd_invocation(script_path, script_args);
@@ -1373,16 +1392,18 @@ fn cmd_terminal_command(
     let exit_code_path_text = exit_code_path.to_string_lossy().to_string();
     let completion_path_text = completion_path.to_string_lossy().to_string();
     let timeout_path_text = timeout_path.to_string_lossy().to_string();
+    let runner_pid_path_text = runner_pid_path.to_string_lossy().to_string();
     let timeout_watchdog_path_text = timeout_watchdog_path
         .as_ref()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
     let runner_script = format!(
-        "@echo off\r\nsetlocal EnableDelayedExpansion\r\nset \"outputLogPath={output_log_path}\"\r\nset \"exitCodePath={exit_code_path}\"\r\nset \"completionPath={completion_path}\"\r\nset \"timeoutPath={timeout_path}\"\r\nset \"timeoutWatchdogPath={timeout_watchdog_path}\"\r\nif exist \"%outputLogPath%\" del /f /q \"%outputLogPath%\" >nul 2>nul\r\nif exist \"%exitCodePath%\" del /f /q \"%exitCodePath%\" >nul 2>nul\r\nif exist \"%completionPath%\" del /f /q \"%completionPath%\" >nul 2>nul\r\nif exist \"%timeoutPath%\" del /f /q \"%timeoutPath%\" >nul 2>nul\r\nif not \"%timeoutWatchdogPath%\"==\"\" (\r\n  for /f %%p in ('powershell -NoProfile -ExecutionPolicy Bypass -Command \"(Get-CimInstance Win32_Process -Filter \\\"ProcessId=$PID\\\").ParentProcessId\"') do set \"runnerPid=%%p\"\r\n  start \"\" /min powershell -NoProfile -ExecutionPolicy Bypass -File \"%timeoutWatchdogPath%\" !runnerPid!\r\n)\r\n(\r\n  cmd /C \"{invocation}\"\r\n  echo(!ERRORLEVEL!>\"%exitCodePath%\"\r\n) 2>&1 | powershell -NoProfile -ExecutionPolicy Bypass -Command \"$input | Tee-Object -FilePath {powershell_output_log_path}\"\r\nif exist \"%exitCodePath%\" (\r\n  set /p exitCode=<\"%exitCodePath%\"\r\n) else (\r\n  set \"exitCode=1\"\r\n)\r\necho done>\"%completionPath%\"\r\nif not \"%exitCode%\"==\"0\" (\r\n  echo.\r\n  echo 命令执行失败，退出码：%exitCode%\r\n  if not \"%ANYTHING_FAST_SKIP_TERMINAL_PAUSE%\"==\"1\" set /p \"=按 Enter 关闭终端\"{pause_success_block})\r\nexit /b %exitCode%\r\n",
+        "@echo off\r\nsetlocal EnableDelayedExpansion\r\nset \"outputLogPath={output_log_path}\"\r\nset \"exitCodePath={exit_code_path}\"\r\nset \"completionPath={completion_path}\"\r\nset \"timeoutPath={timeout_path}\"\r\nset \"runnerPidPath={runner_pid_path}\"\r\nset \"timeoutWatchdogPath={timeout_watchdog_path}\"\r\nif exist \"%outputLogPath%\" del /f /q \"%outputLogPath%\" >nul 2>nul\r\nif exist \"%exitCodePath%\" del /f /q \"%exitCodePath%\" >nul 2>nul\r\nif exist \"%completionPath%\" del /f /q \"%completionPath%\" >nul 2>nul\r\nif exist \"%timeoutPath%\" del /f /q \"%timeoutPath%\" >nul 2>nul\r\nif exist \"%runnerPidPath%\" del /f /q \"%runnerPidPath%\" >nul 2>nul\r\nfor /f %%p in ('powershell -NoProfile -ExecutionPolicy Bypass -Command \"(Get-CimInstance Win32_Process -Filter \\\"ProcessId=$PID\\\").ParentProcessId\"') do set \"runnerPid=%%p\"\r\nif not \"!runnerPid!\"==\"\" echo(!runnerPid!>\"%runnerPidPath%\"\r\nif not \"%timeoutWatchdogPath%\"==\"\" (\r\n  start \"\" /min powershell -NoProfile -ExecutionPolicy Bypass -File \"%timeoutWatchdogPath%\" !runnerPid!\r\n)\r\n(\r\n  cmd /C \"{invocation}\"\r\n  echo(!ERRORLEVEL!>\"%exitCodePath%\"\r\n) 2>&1 | powershell -NoProfile -ExecutionPolicy Bypass -Command \"$input | Tee-Object -FilePath {powershell_output_log_path}\"\r\nif exist \"%exitCodePath%\" (\r\n  set /p exitCode=<\"%exitCodePath%\"\r\n) else (\r\n  set \"exitCode=1\"\r\n)\r\necho done>\"%completionPath%\"\r\nif not \"%exitCode%\"==\"0\" (\r\n  echo.\r\n  echo 命令执行失败，退出码：%exitCode%\r\n  if not \"%ANYTHING_FAST_SKIP_TERMINAL_PAUSE%\"==\"1\" set /p \"=按 Enter 关闭终端\"{pause_success_block})\r\nexit /b %exitCode%\r\n",
         output_log_path = output_log_path_text,
         exit_code_path = exit_code_path_text,
         completion_path = completion_path_text,
         timeout_path = timeout_path_text,
+        runner_pid_path = runner_pid_path_text,
         timeout_watchdog_path = timeout_watchdog_path_text,
         powershell_output_log_path = powershell_quote(&output_log_path_text),
     );
@@ -1395,6 +1416,7 @@ fn cmd_terminal_command(
     temp_paths.push(exit_code_path.clone());
     temp_paths.push(completion_path.clone());
     temp_paths.push(timeout_path.clone());
+    temp_paths.push(runner_pid_path.clone());
     if let Some(path) = timeout_watchdog_path {
         temp_paths.push(path);
     }
@@ -1405,6 +1427,7 @@ fn cmd_terminal_command(
         exit_code_path: Some(exit_code_path),
         completion_path: Some(completion_path),
         timeout_path: Some(timeout_path),
+        runner_pid_path: Some(runner_pid_path),
         wait_for_completion: host_mode == TerminalHostMode::WindowsTerminal,
         configure_process: host_mode == TerminalHostMode::Direct,
     })
@@ -1618,6 +1641,7 @@ fn cmd_keep_open_flag(close_terminal_on_finish: bool) -> &'static str {
 enum TerminalCompletion {
     Exited(i32),
     TimedOut,
+    Closed,
 }
 
 fn terminal_timed_out(terminal: &TerminalCommand) -> bool {
@@ -1642,10 +1666,26 @@ fn wait_for_terminal_completion(terminal: &TerminalCommand) -> Result<TerminalCo
         if terminal_timed_out(terminal) {
             return Ok(TerminalCompletion::TimedOut);
         }
+        if terminal_runner_closed(terminal) {
+            return Ok(TerminalCompletion::Closed);
+        }
         thread::sleep(Duration::from_millis(250));
     }
 
     read_exit_code(exit_code_path).map(TerminalCompletion::Exited)
+}
+
+fn terminal_runner_closed(terminal: &TerminalCommand) -> bool {
+    terminal
+        .runner_pid_path
+        .as_ref()
+        .and_then(|path| read_runner_pid(path).ok())
+        .is_some_and(|pid| !process_is_active(pid))
+}
+
+fn read_runner_pid(path: &Path) -> Result<u32, String> {
+    let text = fs::read_to_string(path).map_err(|err| err.to_string())?;
+    text.trim().parse::<u32>().map_err(|err| err.to_string())
 }
 
 fn read_exit_code(path: &Path) -> Result<i32, String> {
@@ -2019,6 +2059,31 @@ fn configure_terminal_process(command: &mut Command) {
 
 #[cfg(not(windows))]
 fn configure_terminal_process(_command: &mut Command) {}
+
+#[cfg(windows)]
+fn process_is_active(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+
+        let mut exit_code = 0;
+        let success = GetExitCodeProcess(handle, &mut exit_code) != 0;
+        CloseHandle(handle);
+        success && exit_code == STILL_ACTIVE as u32
+    }
+}
+
+#[cfg(not(windows))]
+fn process_is_active(_pid: u32) -> bool {
+    true
+}
 
 fn terminate_child_process_tree(child: &mut Child) {
     terminate_process_tree(child.id());
@@ -3062,8 +3127,46 @@ mod tests {
         assert!(!terminal.configure_process);
         assert!(terminal.exit_code_path.is_some());
         assert!(terminal.completion_path.is_some());
+        assert!(terminal.runner_pid_path.is_some());
+        assert!(runner.contains("$runnerPidPath"));
+        assert!(runner.contains("Set-Content -LiteralPath $runnerPidPath -Value $PID"));
         assert!(runner.contains("Set-Content -LiteralPath $exitCodePath"));
         assert!(runner.contains("Set-Content -LiteralPath $completionPath"));
+        cleanup_temp_paths(&terminal.temp_paths);
+    }
+
+    #[test]
+    fn cmd_terminal_runner_writes_runner_pid_marker() {
+        let working_dir = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let action = TaskAction {
+            id: "a".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("command".into()),
+            params: json!({
+                "command": "echo ok",
+                "workingDir": working_dir,
+                "showTerminal": true,
+                "terminalHost": "systemTerminal",
+                "shell": "cmd"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: crate::domain::RiskLevel::Medium,
+        };
+
+        let terminal = terminal_command(&action, true, &working_dir).expect("terminal command");
+        let runner_path = runner_path(&terminal, "cmd");
+        let runner = std::fs::read_to_string(runner_path).expect("read runner");
+
+        assert!(terminal.runner_pid_path.is_some());
+        assert!(runner.contains("set \"runnerPidPath="));
+        assert!(runner.contains("echo(!runnerPid!>\"%runnerPidPath%\""));
         cleanup_temp_paths(&terminal.temp_paths);
     }
 
@@ -3130,6 +3233,7 @@ mod tests {
             exit_code_path: Some(exit_code_path),
             completion_path: Some(completion_path),
             timeout_path: Some(timeout_path),
+            runner_pid_path: None,
             wait_for_completion: true,
             configure_process: false,
         };
@@ -3137,6 +3241,35 @@ mod tests {
         let completion = wait_for_terminal_completion(&terminal).expect("completion");
 
         assert!(matches!(completion, TerminalCompletion::TimedOut));
+        cleanup_temp_paths(&terminal.temp_paths);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn terminal_completion_returns_closed_when_runner_pid_is_gone() {
+        let runner_pid_path = temp_runner_path("pid");
+        let completion_path = temp_runner_path("done");
+        let exit_code_path = temp_runner_path("txt");
+        std::fs::write(&runner_pid_path, "0").expect("write runner pid marker");
+        let terminal = TerminalCommand {
+            command: Command::new("cmd"),
+            temp_paths: vec![
+                runner_pid_path.clone(),
+                completion_path.clone(),
+                exit_code_path.clone(),
+            ],
+            output_log_path: None,
+            exit_code_path: Some(exit_code_path),
+            completion_path: Some(completion_path),
+            timeout_path: None,
+            runner_pid_path: Some(runner_pid_path),
+            wait_for_completion: true,
+            configure_process: false,
+        };
+
+        let completion = wait_for_terminal_completion(&terminal).expect("completion");
+
+        assert!(matches!(completion, TerminalCompletion::Closed));
         cleanup_temp_paths(&terminal.temp_paths);
     }
 
