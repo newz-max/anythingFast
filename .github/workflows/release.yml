@@ -36,6 +36,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -64,6 +66,55 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+      - name: Generate release notes
+        id: release-notes
+        shell: pwsh
+        env:
+          RAW_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $rawTag = $env:RAW_TAG
+          if ([string]::IsNullOrWhiteSpace($rawTag)) {
+            throw 'Release tag is empty.'
+          }
+
+          $version = (Get-Content -Raw -Path 'src-tauri/tauri.conf.json' | ConvertFrom-Json).version
+          $releaseTag = $rawTag.Replace('__VERSION__', $version)
+          $targetRef = 'HEAD'
+
+          if (git rev-parse --verify --quiet "refs/tags/$releaseTag") {
+            $targetRef = $releaseTag
+          }
+
+          $targetCommit = (git rev-list -n 1 $targetRef).Trim()
+          $previousTag = ''
+          try {
+            $previousTag = (git describe --tags --match 'v*' --abbrev=0 "$targetCommit^" 2>$null).Trim()
+          } catch {
+            $previousTag = ''
+          }
+
+          $range = if ($previousTag) { "$previousTag..$targetCommit" } else { $targetCommit }
+          $commitLines = git log --pretty=format:'%h %s' $range |
+            Where-Object { $_ -and ($_ -notmatch '^[0-9a-f]+\s+v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') } |
+            ForEach-Object { "- $_" }
+
+          if (-not $commitLines) {
+            $commitLines = @('- 本次发布仅包含版本号更新。')
+          }
+
+          $body = @(
+            '## Commits'
+            ''
+            $commitLines
+          ) -join "`n"
+
+          "tag=$releaseTag" >> $env:GITHUB_OUTPUT
+          "body<<EOF" >> $env:GITHUB_OUTPUT
+          $body >> $env:GITHUB_OUTPUT
+          "EOF" >> $env:GITHUB_OUTPUT
+
       - name: Build and publish Tauri release
         uses: tauri-apps/tauri-action@v1
         env:
@@ -71,9 +122,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           tauriScript: yarn tauri
-          tagName: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-          releaseName: "事项入口管理器 ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-          generateReleaseNotes: true
+          tagName: ${{ steps.release-notes.outputs.tag }}
+          releaseName: "事项入口管理器 ${{ steps.release-notes.outputs.tag }}"
+          releaseBody: ${{ steps.release-notes.outputs.body }}
+          generateReleaseNotes: false
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || contains(github.ref_name, '-') }}
           args: ''
