@@ -122,6 +122,10 @@ function resultItems(wrapper: VueWrapper) {
   return wrapper.findAll('.result-item')
 }
 
+function lastScrollTarget() {
+  return scrollIntoViewMock.mock.contexts.at(-1)
+}
+
 describe('QuickSearchPanel keyboard navigation', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
@@ -159,11 +163,35 @@ describe('QuickSearchPanel keyboard navigation', () => {
     expect(resultItems(wrapper)[1].attributes('aria-selected')).toBe('true')
     expect(resultItems(wrapper)[0].attributes('aria-selected')).toBe('false')
     expect(scrollIntoViewMock).toHaveBeenLastCalledWith({ block: 'nearest' })
+    expect(lastScrollTarget()).toBe(resultItems(wrapper)[1].element)
 
     await pressKey('ArrowUp')
 
     expect(resultItems(wrapper)[0].classes()).toContain('active')
     expect(resultItems(wrapper)[0].attributes('aria-selected')).toBe('true')
+    expect(lastScrollTarget()).toBe(resultItems(wrapper)[0].element)
+  })
+
+  it('scrolls the active result by task id after search reorders results', async () => {
+    const wrapper = await mountPanel([
+      makeTask(1, { name: '低优先级事项', description: 'alpha' }),
+      makeTask(2, { name: 'Alpha 入口' }),
+      makeTask(3, { name: '关键词事项', keywords: ['alphabet'] })
+    ])
+
+    await wrapper.find('input').setValue('alpha')
+    await nextTick()
+    await nextTick()
+
+    expect(resultItems(wrapper)[0].text()).toContain('Alpha 入口')
+    expect(resultItems(wrapper)[0].classes()).toContain('active')
+    expect(lastScrollTarget()).toBe(resultItems(wrapper)[0].element)
+
+    await pressKey('ArrowDown')
+
+    expect(resultItems(wrapper)[1].text()).toContain('关键词事项')
+    expect(resultItems(wrapper)[1].classes()).toContain('active')
+    expect(lastScrollTarget()).toBe(resultItems(wrapper)[1].element)
   })
 
   it('uses customized quick search navigation keybindings', async () => {

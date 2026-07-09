@@ -27,7 +27,6 @@ const selectedIndex = shallowRef(0)
 const inputRef = useTemplateRef<{ focus: () => void }>('searchInput')
 const searchBoxRef = useTemplateRef<HTMLElement>('searchBox')
 const resultsRef = useTemplateRef<HTMLElement>('results')
-const resultItemRefs = useTemplateRef<HTMLButtonElement[]>('resultItems')
 let unlistenFocusChanged: (() => void) | null = null
 
 const visibleResults = computed(() => results.value.slice(0, 8))
@@ -131,7 +130,12 @@ async function resetResultsScroll() {
 
 async function scrollSelectedIntoView() {
   await nextTick()
-  resultItemRefs.value?.[selectedIndex.value]?.scrollIntoView({
+  const task = selectedTask.value
+  if (!task || !resultsRef.value) return
+  const selectedElement = document.getElementById(resultOptionId(task.id))
+  if (!(selectedElement instanceof HTMLElement) || !resultsRef.value.contains(selectedElement)) return
+
+  selectedElement.scrollIntoView({
     block: 'nearest'
   })
 }
@@ -276,7 +280,6 @@ function resultOptionId(taskId: string) {
             v-for="(row, index) in resultRows"
             :key="row.task.id"
             :id="resultOptionId(row.task.id)"
-            ref="resultItems"
             type="button"
             role="option"
             class="result-item"
