@@ -4,10 +4,12 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, nextTick, ref } from 'vue'
 import QuickSearchPanel from './QuickSearchPanel.vue'
+import { useKeybindings } from '@/composables/useKeybindings'
 import { useTaskStore } from '@/stores/taskStore'
 import type { AppConfig, TaskItem } from '@/types/domain'
 
 const executeMock = vi.hoisted(() => vi.fn())
+const openMainWindowCreateTaskMock = vi.hoisted(() => vi.fn())
 const hideWindowMock = vi.hoisted(() => vi.fn())
 const onFocusChangedMock = vi.hoisted(() => vi.fn())
 const unlistenFocusChangedMock = vi.hoisted(() => vi.fn())
@@ -18,6 +20,12 @@ vi.mock('@tauri-apps/api/window', () => ({
     hide: hideWindowMock,
     onFocusChanged: onFocusChangedMock
   })
+}))
+
+vi.mock('@/api/tauri', () => ({
+  tauriApi: {
+    openMainWindowCreateTask: openMainWindowCreateTaskMock
+  }
 }))
 
 vi.mock('@/composables/useTaskExecution', async () => {
@@ -131,6 +139,8 @@ describe('QuickSearchPanel keyboard navigation', () => {
     document.body.innerHTML = ''
     localStorage.clear()
     executeMock.mockClear()
+    openMainWindowCreateTaskMock.mockReset()
+    openMainWindowCreateTaskMock.mockResolvedValue(undefined)
     hideWindowMock.mockClear()
     onFocusChangedMock.mockClear()
     onFocusChangedMock.mockImplementation(async (handler: (event: { payload: boolean }) => void) => {
@@ -212,6 +222,50 @@ describe('QuickSearchPanel keyboard navigation', () => {
     await pressKey('Enter')
 
     expect(executeMock).not.toHaveBeenCalled()
+  })
+
+  it('opens the main window create flow with the default shortcut and displays it in the hint', async () => {
+    const wrapper = await mountPanel()
+
+    await pressKey('n', window, { ctrlKey: true })
+
+    expect(openMainWindowCreateTaskMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.status').text()).toContain('Ctrl+N 新增事项')
+  })
+
+  it('handles create task from the focused search input and prevents the default WebView behavior', async () => {
+    const wrapper = await mountPanel()
+    const input = wrapper.find('input').element as HTMLInputElement
+    input.focus()
+    const event = new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, bubbles: true, cancelable: true })
+
+    input.dispatchEvent(event)
+    await nextTick()
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(openMainWindowCreateTaskMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses a customized create-task shortcut', async () => {
+    localStorage.setItem('anything-fast-keybindings', JSON.stringify([{ command: 'quick.createTask', key: 'Alt+N' }]))
+    const wrapper = await mountPanel()
+
+    await pressKey('n', window, { ctrlKey: true })
+    expect(openMainWindowCreateTaskMock).not.toHaveBeenCalled()
+
+    await pressKey('n', window, { altKey: true })
+    expect(openMainWindowCreateTaskMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.status').text()).toContain('Alt+N 新增事项')
+  })
+
+  it('does not invoke a disabled create-task shortcut and represents it accurately', async () => {
+    localStorage.setItem('anything-fast-keybindings', JSON.stringify([{ command: 'quick.createTask', disabled: true }]))
+    await useKeybindings().loadKeybindings()
+    const disabledWrapper = await mountPanel()
+
+    await pressKey('n', window, { ctrlKey: true })
+    expect(openMainWindowCreateTaskMock).not.toHaveBeenCalled()
+    expect(disabledWrapper.find('.status').text()).toContain('已禁用 新增事项')
   })
 
   it('clamps selection to the visible result range', async () => {

@@ -54,6 +54,7 @@ export const tauriApi = {
   confirmImportBundle: (bundleJson: string) => invokeCommand<AppConfig>('confirm_import_bundle', { bundleJson }),
   confirmImportBundleFile: (path: string) => invokeCommand<AppConfig>('confirm_import_bundle_file', { path }),
   createTaskFromTemplate: (template: TaskTemplate) => invokeCommand<TaskItem>('create_task_from_template', { template }),
+  openMainWindowCreateTask: () => invokeCommand<void>('open_main_window_create_task'),
   loadExecutionLogs: (limit: number) => invokeCommand<ExecutionLogSummary[]>('load_execution_logs', { limit }),
   loadShortcutStatus: () => invokeCommand<ShortcutStatus>('load_shortcut_status'),
   loadKeybindings: () => invokeCommand<KeybindingsLoadResult>('load_keybindings'),

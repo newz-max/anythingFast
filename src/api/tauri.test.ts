@@ -44,4 +44,12 @@ describe('tauriApi', () => {
 
     expect(invokeMock).toHaveBeenCalledWith('resolve_update_proxy', undefined)
   })
+
+  it('invokes the main-window create-task command', async () => {
+    invokeMock.mockResolvedValueOnce(undefined)
+
+    await expect(tauriApi.openMainWindowCreateTask()).resolves.toBeUndefined()
+
+    expect(invokeMock).toHaveBeenCalledWith('open_main_window_create_task', undefined)
+  })
 })

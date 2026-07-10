@@ -395,6 +395,11 @@ pub fn create_task_from_template(template: crate::domain::TaskTemplate) -> TaskI
 }
 
 #[tauri::command]
+pub fn open_main_window_create_task(app: AppHandle) -> Result<(), String> {
+    crate::request_main_window_create_task(&app)
+}
+
+#[tauri::command]
 pub fn load_execution_logs(
     app: AppHandle,
     limit: usize,

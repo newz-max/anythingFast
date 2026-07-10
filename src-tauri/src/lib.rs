@@ -34,6 +34,13 @@ pub(crate) const CONFIG_UPDATED_SAVE_CONFIG: &str = "saveConfig";
 pub(crate) const CONFIG_UPDATED_IMPORT_CONFIG: &str = "importConfig";
 pub(crate) const CONFIG_UPDATED_UPDATE_SETTINGS: &str = "updateSettings";
 pub(crate) const CONFIG_UPDATED_RUN_METADATA: &str = "runMetadata";
+pub(crate) const MAIN_WINDOW_INTENT_EVENT: &str = "main-window-intent";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum MainWindowIntent {
+    CreateTask,
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,6 +168,7 @@ pub fn run() {
             confirm_import_bundle,
             confirm_import_bundle_file,
             create_task_from_template,
+            open_main_window_create_task,
             load_execution_logs,
             load_shortcut_status,
             load_keybindings,
@@ -395,6 +403,29 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+pub(crate) fn request_main_window_create_task(app: &tauri::AppHandle) -> Result<(), String> {
+    if let Some(quick_panel) = app.get_webview_window("quick-panel") {
+        quick_panel
+            .hide()
+            .map_err(|err| format!("无法隐藏快捷搜索窗口：{err}"))?;
+    }
+
+    let main_window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "无法打开主窗口：窗口不可用".to_string())?;
+    main_window
+        .show()
+        .map_err(|err| format!("无法显示主窗口：{err}"))?;
+    main_window
+        .unminimize()
+        .map_err(|err| format!("无法恢复主窗口：{err}"))?;
+    main_window
+        .set_focus()
+        .map_err(|err| format!("无法聚焦主窗口：{err}"))?;
+    app.emit_to("main", MAIN_WINDOW_INTENT_EVENT, MainWindowIntent::CreateTask)
+        .map_err(|err| format!("无法发送主窗口创建事项意图：{err}"))
+}
+
 fn show_quick_panel(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("quick-panel") {
         let _ = window.center();
@@ -437,5 +468,12 @@ mod tests {
         let value = serde_json::to_value(payload).expect("serialize payload");
 
         assert_eq!(value["source"], "saveConfig");
+    }
+
+    #[test]
+    fn main_window_create_task_intent_serializes_as_camel_case() {
+        let value = serde_json::to_value(MainWindowIntent::CreateTask).expect("serialize intent");
+
+        assert_eq!(value, "createTask");
     }
 }

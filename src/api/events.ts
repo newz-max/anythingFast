@@ -7,6 +7,8 @@ export interface ConfigUpdatedPayload {
   source: ConfigUpdateSource
 }
 
+export type MainWindowIntent = 'createTask'
+
 export type ExecutionEventStatus =
   | 'started'
   | 'action-started'
@@ -41,4 +43,8 @@ export function listenShortcutStatusEvents(handler: (payload: ShortcutStatus) =>
 
 export function listenConfigUpdatedEvents(handler: (payload: ConfigUpdatedPayload) => void) {
   return listen<ConfigUpdatedPayload>('config-updated', (event) => handler(event.payload))
+}
+
+export function listenMainWindowIntentEvents(handler: (intent: MainWindowIntent) => void) {
+  return listen<MainWindowIntent>('main-window-intent', (event) => handler(event.payload))
 }

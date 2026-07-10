@@ -17,6 +17,7 @@ export type KeybindingCommand =
   | 'quick.selectNextResult'
   | 'quick.selectPreviousResult'
   | 'quick.executeSelected'
+  | 'quick.createTask'
   | 'taskEditor.save'
   | 'taskEditor.close'
   | 'taskEditor.previousStep'
@@ -191,6 +192,14 @@ export const defaultKeybindings: KeybindingDefinition[] = [
     defaultKey: 'Enter',
     label: '执行选中结果',
     description: '执行当前选中的快捷搜索结果。',
+    editable: true
+  },
+  {
+    command: 'quick.createTask',
+    scope: 'quick-search',
+    defaultKey: 'Ctrl+N',
+    label: '新增事项',
+    description: '在主窗口中打开新增事项流程。',
     editable: true
   },
   {

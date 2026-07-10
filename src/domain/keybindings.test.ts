@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import {
+  defaultKeybindings,
   eventMatchesKeybinding,
   keybindingMatchesCommand,
   normalizeKeybinding,
@@ -38,6 +39,26 @@ describe('keybindings domain', () => {
     expect(keybindingMatchesCommand(keyEvent('r', { altKey: true }), 'main.runSelectedTask', effective)).toBe(true)
     expect(keybindingMatchesCommand(keyEvent('Enter', { ctrlKey: true }), 'main.runSelectedTask', effective)).toBe(false)
     expect(keybindingMatchesCommand(keyEvent('a'), 'main.addAction', effective)).toBe(false)
+  })
+
+  it('configures quick search task creation independently from the main window command', () => {
+    const defaults = resolveEffectiveKeybindings([])
+    const defaultCreate = defaults.find((item) => item.command === 'quick.createTask')
+
+    expect(defaultCreate).toMatchObject({
+      scope: 'quick-search',
+      defaultKey: 'Ctrl+N',
+      key: 'Ctrl+N',
+      enabled: true
+    })
+    expect(defaultKeybindings.some((item) => item.command === 'main.createTask' && item.defaultKey === 'Ctrl+N')).toBe(true)
+    expect(validateKeybindingOverrides([{ command: 'quick.createTask', key: 'Ctrl+N' }])).toHaveLength(0)
+
+    const customized = resolveEffectiveKeybindings([{ command: 'quick.createTask', key: 'Alt+N' }])
+    expect(keybindingMatchesCommand(keyEvent('n', { altKey: true }), 'quick.createTask', customized)).toBe(true)
+
+    const disabled = resolveEffectiveKeybindings([{ command: 'quick.createTask', disabled: true }])
+    expect(keybindingMatchesCommand(keyEvent('n', { ctrlKey: true }), 'quick.createTask', disabled)).toBe(false)
   })
 
   it('validates malformed keys and same-scope conflicts while allowing cross-scope reuse', () => {

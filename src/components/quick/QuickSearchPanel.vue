@@ -12,6 +12,7 @@ import { logDevError } from '@/utils/errors'
 import { isEditableKeyboardTarget } from '@/utils/keyboard'
 import { isTauriRuntime } from '@/utils/tauriRuntime'
 import { keybindingMatchesCommand } from '@/domain/keybindings'
+import { tauriApi } from '@/api/tauri'
 import logoUrl from '@/assets/logo.png'
 import type { RiskLevel, TaskAction, TaskItem } from '@/types/domain'
 
@@ -45,8 +46,11 @@ const resultRows = computed(() =>
 const selectedTask = computed(() => resultRows.value[selectedIndex.value]?.task || null)
 const resultCountLabel = computed(() => (taskStore.loading ? '加载中' : `${results.value.length} 个可执行事项`))
 const quickShortcutHint = computed(() => {
-  const key = (command: string) => keybindings.effective.value.find((item) => item.command === command)?.key || '已禁用'
-  return `${taskStore.settings.globalShortcut} 唤起 · ${key('quick.focusSearch')} 搜索 · ${key('quick.selectPreviousResult')}/${key('quick.selectNextResult')} 选择 · ${key('quick.executeSelected')} 执行 · ${key('quick.closePanel')} 关闭`
+  const key = (command: string) => {
+    const binding = keybindings.effective.value.find((item) => item.command === command)
+    return binding?.enabled ? binding.key : '已禁用'
+  }
+  return `${taskStore.settings.globalShortcut} 唤起 · ${key('quick.focusSearch')} 搜索 · ${key('quick.selectPreviousResult')}/${key('quick.selectNextResult')} 选择 · ${key('quick.executeSelected')} 执行 · ${key('quick.createTask')} 新增事项 · ${key('quick.closePanel')} 关闭`
 })
 
 watch(
@@ -85,6 +89,11 @@ function onKeydown(event: KeyboardEvent) {
   if (keybindingMatchesCommand(event, 'quick.closePanel', keybindings.effective.value)) {
     event.preventDefault()
     void hideWindow()
+    return
+  }
+  if (keybindingMatchesCommand(event, 'quick.createTask', keybindings.effective.value)) {
+    event.preventDefault()
+    void tauriApi.openMainWindowCreateTask()
     return
   }
   if (keybindingMatchesCommand(event, 'quick.selectNextResult', keybindings.effective.value)) {

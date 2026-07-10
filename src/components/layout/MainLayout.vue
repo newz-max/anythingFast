@@ -25,6 +25,7 @@ import { useKeybindings } from '@/composables/useKeybindings'
 import { useTaskImportExport } from '@/composables/useTaskImportExport'
 import { useResponsiveMainLayout } from '@/composables/useResponsiveMainLayout'
 import { useMainWindowShortcuts } from '@/composables/useMainWindowShortcuts'
+import { useMainWindowIntents } from '@/composables/useMainWindowIntents'
 import { useTaskExecutionPanel } from '@/composables/useTaskExecutionPanel'
 import { useTaskSharing } from '@/composables/useTaskSharing'
 import { useTagManagement } from '@/composables/useTagManagement'
@@ -276,6 +277,8 @@ useMainWindowShortcuts({
     activeActionView.value = view
   }
 })
+
+useMainWindowIntents({ createTask })
 
 onMounted(async () => {
   shortcutDraft.value = taskStore.settings.globalShortcut
