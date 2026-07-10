@@ -4,7 +4,7 @@ use crate::domain::{
     TaskAction, TaskExportBundle, TaskItem, TaskTemplate, TaskTemplateAction, TaskTrigger,
     TaskVariable,
 };
-use crate::risk::{derive_action_risk, derive_task_risk};
+use crate::risk::{derive_action_risk, derive_task_risk, normalize_config_risk};
 use crate::validation::{
     normalize_task, validate_config_model, validate_task_model, validate_template_model,
 };
@@ -170,7 +170,7 @@ pub fn confirm_import(bundle_json: &str, config: &AppConfig) -> Result<AppConfig
             .join("; "));
     }
 
-    Ok(next_config)
+    Ok(normalize_config_risk(next_config))
 }
 
 pub fn template_to_task(template: &TaskTemplate) -> TaskItem {

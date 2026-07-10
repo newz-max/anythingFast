@@ -37,7 +37,7 @@ defineEmits<{
               <strong class="action-title">{{ action.name || getActionTypeLabel(action.type) }}</strong>
               <NTag size="small">{{ getActionTypeLabel(action.type) }}</NTag>
               <NTag size="small" :type="action.riskLevel === 'high' ? 'error' : action.riskLevel === 'medium' ? 'warning' : 'success'">
-                {{ action.riskLevel }}
+                预估 {{ action.riskLevel }}
               </NTag>
             </div>
             <div class="action-detail">{{ describeAction(action) }}</div>

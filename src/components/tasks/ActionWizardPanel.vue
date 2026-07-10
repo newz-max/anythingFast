@@ -162,12 +162,16 @@ function onEditorKeydown(event: KeyboardEvent) {
               <NDescriptionsItem label="关键设置">{{ describeAction(draft) }}</NDescriptionsItem>
               <NDescriptionsItem label="执行条件">{{ describeCondition(draft.condition) }}</NDescriptionsItem>
               <NDescriptionsItem label="启用状态">{{ draft.enabled ? '启用' : '停用' }}</NDescriptionsItem>
-              <NDescriptionsItem label="风险等级">
+              <NDescriptionsItem label="预估风险">
                 <NTag :type="draft.riskLevel === 'high' ? 'error' : draft.riskLevel === 'medium' ? 'warning' : 'success'">
                   {{ draft.riskLevel }}
                 </NTag>
               </NDescriptionsItem>
             </NDescriptions>
+
+            <NAlert type="info" title="保存后以后端风险分析为准">
+              当前风险用于编辑预览，保存、导入和执行时会重新使用后端规则判断。
+            </NAlert>
 
             <NAlert v-if="!validation.valid" type="warning" title="保存前需要修正">
               <ul class="issue-list">

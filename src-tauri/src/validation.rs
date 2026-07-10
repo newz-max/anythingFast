@@ -3,7 +3,7 @@ use crate::domain::{
     RiskLevel, ScheduleMisfirePolicy, ScheduleMode, TaskAction, TaskItem, TaskTemplate,
     TaskTemplateAction, TaskTrigger, ValidationResult,
 };
-use crate::risk::{derive_action_risk, derive_task_risk};
+use crate::risk::{derive_action_risk, derive_task_risk, normalize_task_risk};
 use crate::variables::{
     collect_action_string_values, collect_condition_string_values, collect_condition_variable_keys,
     collect_output_binding_keys, extract_variable_references, is_valid_variable_key,
@@ -439,20 +439,11 @@ pub fn normalize_task(mut task: TaskItem) -> TaskItem {
             manual => manual,
         })
         .collect();
-    task.risk_level = derive_task_risk(&task);
     for variable in &mut task.variables {
         variable.key = variable.key.trim().to_string();
         variable.label = variable.label.trim().to_string();
     }
-    task.actions = task
-        .actions
-        .into_iter()
-        .map(|mut action| {
-            action.risk_level = derive_action_risk(&action);
-            action
-        })
-        .collect();
-    task
+    normalize_task_risk(task)
 }
 
 fn string_param<'a>(action: &'a TaskAction, key: &str) -> &'a str {

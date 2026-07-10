@@ -29,7 +29,7 @@ function conditionDetail(action: TaskItem['actions'][number]) {
       <strong>{{ actionCount }}</strong>
     </div>
     <div class="metric">
-      <span>风险等级</span>
+      <span>预估风险</span>
       <NTag :type="task.riskLevel === 'high' ? 'error' : task.riskLevel === 'medium' ? 'warning' : 'success'">
         {{ task.riskLevel }}
       </NTag>
@@ -42,6 +42,7 @@ function conditionDetail(action: TaskItem['actions'][number]) {
       <span>运行变量</span>
       <strong>{{ variableCount }}</strong>
     </div>
+    <p class="risk-note">保存后以后端风险分析为准。</p>
     <NDivider />
     <ol class="steps">
       <li v-for="action in task.actions" :key="action.id" :class="{ disabled: !action.enabled }">
@@ -72,6 +73,13 @@ function conditionDetail(action: TaskItem['actions'][number]) {
   padding-left: 18px;
   color: #475467;
   font-size: 13px;
+}
+
+.risk-note {
+  margin: 2px 0 0;
+  color: #8b96b8;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .disabled {

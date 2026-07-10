@@ -150,6 +150,41 @@ describe('taskStore templates', () => {
     })
   })
 
+  it('replaces provisional risk metadata with backend save result', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', {})
+    const store = useTaskStore()
+    const task = makeTask('task-risk', '风险事项')
+    task.actions = [
+      {
+        id: 'action-risk',
+        type: 'runCommand',
+        name: '删除目录',
+        params: {
+          source: 'inline',
+          command: 'Remove-Item -Recurse dist',
+          workingDir: 'D:\\Project',
+          shell: 'powershell'
+        },
+        enabled: true,
+        continueOnError: false,
+        riskLevel: 'low'
+      }
+    ]
+    task.riskLevel = 'low'
+    const backendTask: TaskItem = {
+      ...task,
+      actions: task.actions.map((action) => ({ ...action, riskLevel: 'high' })),
+      riskLevel: 'high'
+    }
+    saveConfigMock.mockResolvedValueOnce(makeConfig([backendTask]))
+
+    await store.upsertTask(task)
+
+    expect(saveConfigMock).toHaveBeenCalledTimes(1)
+    expect(store.tasks[0].riskLevel).toBe('high')
+    expect(store.tasks[0].actions[0].riskLevel).toBe('high')
+  })
+
   it('registers a single config update listener in Tauri runtime', async () => {
     Reflect.set(window, '__TAURI_INTERNALS__', {})
     const unlisten = vi.fn()

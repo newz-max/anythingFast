@@ -7,7 +7,7 @@ use crate::domain::{
 };
 use crate::executor;
 use crate::import_export;
-use crate::risk::{action_detail, analyze_task_risk, derive_action_risk};
+use crate::risk::{action_detail, analyze_task_risk, derive_action_risk, normalize_config_risk};
 use crate::storage;
 use crate::validation::{
     normalize_task, validate_action_model, validate_config_model, validate_task_model,
@@ -41,6 +41,7 @@ pub fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig, Strin
         .into_iter()
         .map(import_export::normalize_template)
         .collect();
+    normalized = normalize_config_risk(normalized);
 
     let mut issues = Vec::new();
     issues.extend(validate_config_model(&normalized));
@@ -369,8 +370,10 @@ pub fn preview_import_bundle_file(app: AppHandle, path: String) -> Result<Import
 pub fn confirm_import_bundle(app: AppHandle, bundle_json: String) -> Result<AppConfig, String> {
     let config = storage::load_config(&app)
         .map_err(|err| log_command_error("confirm_import_bundle load config failed", err))?;
-    let next_config = import_export::confirm_import(&bundle_json, &config)
-        .map_err(|err| log_command_error("confirm_import_bundle process failed", err))?;
+    let next_config = normalize_config_risk(
+        import_export::confirm_import(&bundle_json, &config)
+            .map_err(|err| log_command_error("confirm_import_bundle process failed", err))?,
+    );
     crate::refresh_task_shortcuts(&app, &next_config)
         .map_err(|err| log_command_error("confirm_import_bundle refresh shortcuts failed", err))?;
     storage::save_config(&app, &next_config)

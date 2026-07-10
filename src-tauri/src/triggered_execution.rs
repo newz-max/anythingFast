@@ -315,6 +315,70 @@ mod tests {
         );
     }
 
+    #[test]
+    fn resolved_high_risk_command_requires_unattended_confirmation() {
+        let mut task = task_with_variables(vec![TaskVariable {
+            key: "command".into(),
+            label: "Command".into(),
+            default_value: "Remove-Item -Recurse dist".into(),
+            required: true,
+            secret: false,
+        }]);
+        task.actions = vec![TaskAction {
+            id: "action".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("命令".into()),
+            params: json!({
+                "command": "{{command}}",
+                "workingDir": "D:\\Project",
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: RiskLevel::Medium,
+        }];
+        task.last_run_at = Some("2026-07-01T00:00:00Z".into());
+
+        let risk = analyze_task_risk_for_unattended(&task, HashMap::new());
+
+        assert!(risk.requires_confirmation);
+        assert!(risk.reasons.iter().any(|reason| reason == "包含高风险动作"));
+        assert_eq!(risk.high_risk_actions.len(), 1);
+    }
+
+    #[test]
+    fn first_command_requires_unattended_confirmation() {
+        let mut task = task_with_variables(Vec::new());
+        task.actions = vec![TaskAction {
+            id: "action".into(),
+            action_type: ActionType::RunCommand,
+            name: Some("命令".into()),
+            params: json!({
+                "command": "Get-ChildItem",
+                "workingDir": "D:\\Project",
+                "shell": "powershell"
+            }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: RiskLevel::Medium,
+        }];
+
+        let risk = analyze_task_risk_for_unattended(&task, HashMap::new());
+
+        assert!(risk.requires_confirmation);
+        assert!(
+            risk.reasons
+                .iter()
+                .any(|reason| reason == "首次执行包含命令动作的事项")
+        );
+    }
+
     fn task_with_variables(variables: Vec<TaskVariable>) -> TaskItem {
         TaskItem {
             id: "task".into(),

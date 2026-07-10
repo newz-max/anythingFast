@@ -1,0 +1,68 @@
+[
+  {
+    "name": "regular URL is low risk",
+    "action": {
+      "id": "action-open-url",
+      "type": "openUrl",
+      "name": "Open docs",
+      "params": {
+        "url": "https://example.com/docs"
+      },
+      "enabled": true,
+      "riskLevel": "high"
+    },
+    "expectedRisk": "low"
+  },
+  {
+    "name": "regular inline command is medium risk",
+    "action": {
+      "id": "action-command-medium",
+      "type": "runCommand",
+      "name": "List files",
+      "params": {
+        "source": "inline",
+        "command": "Get-ChildItem",
+        "workingDir": "D:\\Project",
+        "shell": "powershell"
+      },
+      "enabled": true,
+      "riskLevel": "low"
+    },
+    "expectedRisk": "medium"
+  },
+  {
+    "name": "remove item command is high risk",
+    "action": {
+      "id": "action-command-high",
+      "type": "runCommand",
+      "name": "Remove dist",
+      "params": {
+        "source": "inline",
+        "command": "Remove-Item -Recurse dist",
+        "workingDir": "D:\\Project",
+        "shell": "powershell"
+      },
+      "enabled": true,
+      "riskLevel": "low"
+    },
+    "expectedRisk": "high"
+  },
+  {
+    "name": "script command is high risk",
+    "action": {
+      "id": "action-script-high",
+      "type": "runCommand",
+      "name": "Run script",
+      "params": {
+        "source": "script",
+        "command": "",
+        "workingDir": "D:\\Project",
+        "shell": "powershell",
+        "scriptPath": "D:\\Project\\start.ps1"
+      },
+      "enabled": true,
+      "riskLevel": "medium"
+    },
+    "expectedRisk": "high"
+  }
+]
