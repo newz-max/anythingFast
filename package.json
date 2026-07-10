@@ -1,6 +1,6 @@
 {
   "name": "anything-fast",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "private": true,
   "packageManager": "yarn@1.22.22",
   "type": "module",
