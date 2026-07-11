@@ -4,12 +4,17 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, nextTick, ref } from 'vue'
 import QuickSearchPanel from './QuickSearchPanel.vue'
+import QuickCreateConfirm from './QuickCreateConfirm.vue'
 import { useKeybindings } from '@/composables/useKeybindings'
 import { useTaskStore } from '@/stores/taskStore'
 import type { AppConfig, TaskItem } from '@/types/domain'
 
 const executeMock = vi.hoisted(() => vi.fn())
 const openMainWindowCreateTaskMock = vi.hoisted(() => vi.fn())
+const inspectPathInputMock = vi.hoisted(() => vi.fn())
+const getDefaultWorkingDirMock = vi.hoisted(() => vi.fn())
+const saveConfigMock = vi.hoisted(() => vi.fn(async (config: AppConfig) => config))
+const loadKeybindingsMock = vi.hoisted(() => vi.fn())
 const hideWindowMock = vi.hoisted(() => vi.fn())
 const onFocusChangedMock = vi.hoisted(() => vi.fn())
 const unlistenFocusChangedMock = vi.hoisted(() => vi.fn())
@@ -24,7 +29,11 @@ vi.mock('@tauri-apps/api/window', () => ({
 
 vi.mock('@/api/tauri', () => ({
   tauriApi: {
-    openMainWindowCreateTask: openMainWindowCreateTaskMock
+    openMainWindowCreateTask: openMainWindowCreateTaskMock,
+    inspectPathInput: inspectPathInputMock,
+    getDefaultWorkingDir: getDefaultWorkingDirMock,
+    saveConfig: saveConfigMock,
+    loadKeybindings: loadKeybindingsMock
   }
 }))
 
@@ -55,6 +64,21 @@ const NInputStub = defineComponent({
 
 const stubs = {
   NInput: NInputStub,
+  NSelect: {
+    inheritAttrs: false,
+    props: ['value'],
+    emits: ['update:value'],
+    template: '<input class="select-stub" :value="value" @input="$emit(\'update:value\', $event.target.value)" />'
+  },
+  NCheckbox: {
+    props: ['checked'],
+    emits: ['update:checked'],
+    template: '<label><input type="checkbox" :checked="checked" @input="$emit(\'update:checked\', $event.target.checked)" @change="$emit(\'update:checked\', $event.target.checked)" /><slot /></label>'
+  },
+  NButton: {
+    props: ['disabled', 'loading'],
+    template: '<button :disabled="disabled"><slot /></button>'
+  },
   NSpin: { template: '<span>loading</span>' },
   NTag: { props: ['type'], template: '<span><slot /></span>' },
   ExecutionStatusStrip: { template: '<div />' }
@@ -141,6 +165,19 @@ describe('QuickSearchPanel keyboard navigation', () => {
     executeMock.mockClear()
     openMainWindowCreateTaskMock.mockReset()
     openMainWindowCreateTaskMock.mockResolvedValue(undefined)
+    inspectPathInputMock.mockReset()
+    inspectPathInputMock.mockResolvedValue({
+      input: 'D:\\Project\\anythingFast',
+      exists: true,
+      kind: 'folder',
+      normalizedPath: 'D:\\Project\\anythingFast'
+    })
+    getDefaultWorkingDirMock.mockReset()
+    getDefaultWorkingDirMock.mockResolvedValue('C:\\Users\\Administrator')
+    saveConfigMock.mockClear()
+    saveConfigMock.mockImplementation(async (config: AppConfig) => config)
+    loadKeybindingsMock.mockReset()
+    loadKeybindingsMock.mockResolvedValue({ overrides: [], path: 'keybindings.json' })
     hideWindowMock.mockClear()
     onFocusChangedMock.mockClear()
     onFocusChangedMock.mockImplementation(async (handler: (event: { payload: boolean }) => void) => {
@@ -158,6 +195,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
 
   afterEach(() => {
     mountedWrappers.splice(0).forEach((wrapper) => wrapper.unmount())
+    vi.useRealTimers()
     Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
   })
 
@@ -377,6 +415,87 @@ describe('QuickSearchPanel keyboard navigation', () => {
 
     expect(resultItems(wrapper)).toHaveLength(0)
     expect(wrapper.text()).toContain('没有匹配的启用事项')
+  })
+
+  it('shows URL create suggestion when there are no matching task results', async () => {
+    const wrapper = await mountPanel([])
+
+    await wrapper.find('input').setValue('https://github.com')
+    await nextTick()
+
+    expect(wrapper.find('.quick-create-suggestion').exists()).toBe(true)
+    expect(wrapper.text()).toContain('创建打开 URL 事项')
+    expect(wrapper.text()).toContain('https://github.com/')
+  })
+
+  it('does not show create suggestions when existing task results match', async () => {
+    const wrapper = await mountPanel([makeTask(1, { name: 'https://github.com' })])
+
+    await wrapper.find('input').setValue('https://github.com')
+    await nextTick()
+
+    expect(resultItems(wrapper)).toHaveLength(1)
+    expect(wrapper.find('.quick-create-suggestion').exists()).toBe(false)
+  })
+
+  it('opens quick create confirmation with Enter for suggestions', async () => {
+    const wrapper = await mountPanel([])
+
+    await wrapper.find('input').setValue('https://github.com')
+    await nextTick()
+    await pressKey('Enter')
+
+    expect(wrapper.text()).toContain('确认事项信息')
+    expect(executeMock).not.toHaveBeenCalled()
+  })
+
+  it('saves command suggestions and optionally executes the saved task', async () => {
+    const wrapper = await mountPanel([])
+    const taskStore = useTaskStore()
+
+    await wrapper.find('input').setValue('cmd: yarn dev')
+    await nextTick()
+    await pressKey('Enter')
+    wrapper.findComponent(QuickCreateConfirm).vm.$emit('submit', {
+      name: '执行 yarn dev',
+      category: '未分类',
+      keywords: [],
+      favorite: false,
+      runImmediately: true
+    })
+    await vi.waitFor(() => expect(taskStore.tasks).toHaveLength(1))
+
+    expect(getDefaultWorkingDirMock).not.toHaveBeenCalled()
+    expect(taskStore.tasks[0].actions[0]).toMatchObject({
+        type: 'runCommand',
+        params: {
+          command: 'yarn dev',
+          workingDir: '.'
+        },
+      riskLevel: 'medium'
+    })
+    expect(executeMock).toHaveBeenCalledTimes(1)
+    expect(executeMock.mock.calls[0][0].id).toBe(taskStore.tasks[0].id)
+  })
+
+  it('shows path suggestions after backend inspection', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', {
+      transformCallback: () => 1,
+      invoke: vi.fn()
+    })
+    vi.useFakeTimers()
+    const wrapper = await mountPanel([])
+
+    await wrapper.find('input').setValue('D:\\Project\\anythingFast')
+    vi.advanceTimersByTime(180)
+    await Promise.resolve()
+    await nextTick()
+    await nextTick()
+
+    expect(inspectPathInputMock).toHaveBeenCalledWith('D:\\Project\\anythingFast')
+    expect(wrapper.text()).toContain('创建打开文件夹事项')
+
+    vi.useRealTimers()
   })
 
   it('updates recent ranking and metadata after task run metadata sync', async () => {

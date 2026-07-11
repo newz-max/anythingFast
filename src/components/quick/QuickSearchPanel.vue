@@ -2,13 +2,16 @@
 import { computed, nextTick, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vue'
+import QuickCreateConfirm from '@/components/quick/QuickCreateConfirm.vue'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
+import { createQuickTaskFromIntent, type QuickCreateSuggestion } from '@/domain/quickInput'
 import { useTaskSearch } from '@/composables/useTaskSearch'
 import { useTaskExecution } from '@/composables/useTaskExecution'
+import { useQuickInputIntent } from '@/composables/useQuickInputIntent'
 import { useKeybindings } from '@/composables/useKeybindings'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
-import { logDevError } from '@/utils/errors'
+import { getErrorMessage, logDevError } from '@/utils/errors'
 import { isEditableKeyboardTarget } from '@/utils/keyboard'
 import { isTauriRuntime } from '@/utils/tauriRuntime'
 import { keybindingMatchesCommand } from '@/domain/keybindings'
@@ -17,14 +20,26 @@ import logoUrl from '@/assets/logo.png'
 import type { RiskLevel, TaskAction, TaskItem } from '@/types/domain'
 
 type RiskTagType = 'success' | 'warning' | 'error'
+interface QuickCreateSubmitPayload {
+  name: string
+  category: string
+  keywords: string[]
+  favorite: boolean
+  runImmediately: boolean
+}
 
 const taskStore = useTaskStore()
 const executionStore = useExecutionStore()
 const enabledTasks = computed(() => taskStore.tasks.filter((task) => task.enabled))
 const { query, results } = useTaskSearch(enabledTasks, { ranking: 'quickRecent' })
+const quickInput = useQuickInputIntent(query)
 const { execute } = useTaskExecution()
 const keybindings = useKeybindings()
 const selectedIndex = shallowRef(0)
+const confirmingSuggestion = shallowRef<QuickCreateSuggestion | null>(null)
+const quickCreateSaving = shallowRef(false)
+const quickCreateError = shallowRef<string | null>(null)
+const quickCreateStatus = shallowRef<string | null>(null)
 const inputRef = useTemplateRef<{ focus: () => void }>('searchInput')
 const searchBoxRef = useTemplateRef<HTMLElement>('searchBox')
 const resultsRef = useTemplateRef<HTMLElement>('results')
@@ -44,6 +59,10 @@ const resultRows = computed(() =>
   })
 )
 const selectedTask = computed(() => resultRows.value[selectedIndex.value]?.task || null)
+const visibleSuggestions = computed(() =>
+  !taskStore.loading && resultRows.value.length === 0 ? quickInput.suggestions.value : []
+)
+const selectedSuggestion = computed(() => visibleSuggestions.value[0] || null)
 const resultCountLabel = computed(() => (taskStore.loading ? '加载中' : `${results.value.length} 个可执行事项`))
 const quickShortcutHint = computed(() => {
   const key = (command: string) => {
@@ -88,6 +107,10 @@ function onKeydown(event: KeyboardEvent) {
   }
   if (keybindingMatchesCommand(event, 'quick.closePanel', keybindings.effective.value)) {
     event.preventDefault()
+    if (confirmingSuggestion.value) {
+      cancelQuickCreate()
+      return
+    }
     void hideWindow()
     return
   }
@@ -109,6 +132,11 @@ function onKeydown(event: KeyboardEvent) {
   if (keybindingMatchesCommand(event, 'quick.executeSelected', keybindings.effective.value) && selectedTask.value) {
     event.preventDefault()
     void execute(selectedTask.value)
+    return
+  }
+  if (keybindingMatchesCommand(event, 'quick.executeSelected', keybindings.effective.value) && selectedSuggestion.value?.canSaveDirectly) {
+    event.preventDefault()
+    openQuickCreate(selectedSuggestion.value)
   }
 }
 
@@ -120,6 +148,9 @@ function focusSearchInput() {
 
 function resetSelection() {
   selectedIndex.value = 0
+  confirmingSuggestion.value = null
+  quickCreateError.value = null
+  quickCreateStatus.value = null
   void resetResultsScroll()
 }
 
@@ -151,6 +182,55 @@ async function scrollSelectedIntoView() {
 
 function runTask(task: TaskItem) {
   void execute(task)
+}
+
+function openQuickCreate(suggestion: QuickCreateSuggestion) {
+  if (!suggestion.canSaveDirectly) return
+  confirmingSuggestion.value = suggestion
+  quickCreateError.value = null
+  quickCreateStatus.value = null
+}
+
+function cancelQuickCreate() {
+  confirmingSuggestion.value = null
+  quickCreateError.value = null
+}
+
+async function submitQuickCreate(payload: QuickCreateSubmitPayload) {
+  const suggestion = confirmingSuggestion.value
+  if (!suggestion) return
+
+  quickCreateSaving.value = true
+  quickCreateError.value = null
+  quickCreateStatus.value = null
+  try {
+    const workingDir = suggestion.intent.kind === 'command' ? await resolveDefaultWorkingDir() : undefined
+    const task = createQuickTaskFromIntent(suggestion.intent, {
+      name: payload.name,
+      category: payload.category,
+      keywords: payload.keywords,
+      favorite: payload.favorite,
+      workingDir
+    })
+    const savedTask = await taskStore.upsertTask(task)
+    confirmingSuggestion.value = null
+    query.value = ''
+    resetSelection()
+    quickCreateStatus.value = payload.runImmediately ? '事项已保存，正在执行' : '事项已创建'
+    if (payload.runImmediately) {
+      await execute(savedTask)
+    }
+  } catch (err) {
+    logDevError('Quick create task failed', err)
+    quickCreateError.value = getErrorMessage(err)
+  } finally {
+    quickCreateSaving.value = false
+  }
+}
+
+async function resolveDefaultWorkingDir() {
+  if (!isTauriRuntime()) return '.'
+  return tauriApi.getDefaultWorkingDir()
 }
 
 async function hideWindow() {
@@ -321,9 +401,40 @@ function resultOptionId(taskId: string) {
             </span>
           </button>
 
-          <div v-if="resultRows.length === 0" class="state-panel empty">
-            <span class="empty-icon" aria-hidden="true"></span>
-            <span>没有匹配的启用事项</span>
+          <div v-if="resultRows.length === 0" class="empty-stack">
+            <QuickCreateConfirm
+              v-if="confirmingSuggestion"
+              :intent="confirmingSuggestion.intent"
+              :categories="taskStore.categories"
+              :saving="quickCreateSaving"
+              :error="quickCreateError"
+              @submit="submitQuickCreate"
+              @cancel="cancelQuickCreate"
+            />
+
+            <button
+              v-else-if="selectedSuggestion"
+              type="button"
+              class="quick-create-suggestion"
+              :class="{ pending: selectedSuggestion.pending, disabled: !selectedSuggestion.canSaveDirectly }"
+              :disabled="!selectedSuggestion.canSaveDirectly"
+              @click="openQuickCreate(selectedSuggestion)"
+            >
+              <span class="suggestion-icon" aria-hidden="true">+</span>
+              <span class="suggestion-main">
+                <span class="suggestion-title">{{ selectedSuggestion.title }}</span>
+                <span class="suggestion-detail">{{ selectedSuggestion.detail }}</span>
+              </span>
+              <NTag v-if="selectedSuggestion.pending" size="small" type="info">确认中</NTag>
+              <NTag v-else-if="!selectedSuggestion.canSaveDirectly" size="small" type="warning">需确认</NTag>
+            </button>
+
+            <div v-else class="state-panel empty">
+              <span class="empty-icon" aria-hidden="true"></span>
+              <span>没有匹配的启用事项</span>
+            </div>
+
+            <p v-if="quickCreateStatus" class="quick-create-status">{{ quickCreateStatus }}</p>
           </div>
         </template>
       </section>
@@ -688,6 +799,94 @@ function resultOptionId(taskId: string) {
   background: rgba(27, 35, 55, 0.38);
   color: #8b96b8;
   font-size: 13px;
+}
+
+.empty-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.quick-create-suggestion {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 76px;
+  border: 1px solid rgba(112, 154, 255, 0.32);
+  border-radius: 12px;
+  background:
+    linear-gradient(90deg, rgba(83, 132, 255, 0.16), transparent 48%),
+    rgba(27, 35, 55, 0.7);
+  color: inherit;
+  cursor: pointer;
+  padding: 13px;
+  text-align: left;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.quick-create-suggestion:hover:not(:disabled) {
+  border-color: rgba(112, 154, 255, 0.92);
+  background:
+    linear-gradient(90deg, rgba(83, 132, 255, 0.2), transparent 48%),
+    rgba(31, 43, 78, 0.9);
+  box-shadow: 0 0 0 2px rgba(102, 146, 255, 0.28);
+}
+
+.quick-create-suggestion:focus-visible {
+  outline: 2px solid rgba(168, 194, 255, 0.82);
+  outline-offset: 2px;
+}
+
+.quick-create-suggestion:disabled {
+  cursor: default;
+  opacity: 0.78;
+}
+
+.suggestion-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(77, 135, 255, 0.2);
+  color: #c8dbff;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.suggestion-main {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.suggestion-title,
+.suggestion-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-title {
+  color: #f4f7ff;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.suggestion-detail {
+  color: #aab5d4;
+  font-size: 12px;
+}
+
+.quick-create-status {
+  margin: 0;
+  color: #8db4ff;
+  font-size: 12px;
 }
 
 .empty-icon {

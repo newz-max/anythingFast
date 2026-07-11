@@ -228,6 +228,16 @@ export interface UpdateProxyResolution {
   status: string
 }
 
+export type PathInspectionKind = 'file' | 'folder' | 'unknown'
+
+export interface PathInspection {
+  input: string
+  exists: boolean
+  kind: PathInspectionKind
+  normalizedPath: string
+  message?: string
+}
+
 export type KeybindingScope = 'main' | 'quick-search' | 'task-editor' | 'action-editor'
 
 export interface KeybindingOverride {

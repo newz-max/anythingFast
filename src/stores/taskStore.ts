@@ -153,6 +153,7 @@ export const useTaskStore = defineStore('tasks', () => {
     config.value = { ...config.value, tasks }
     selectedTaskId.value = normalized.id
     await persist()
+    return config.value.tasks.find((item) => item.id === normalized.id) || normalized
   }
 
   async function removeTask(taskId: string) {

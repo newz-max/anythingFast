@@ -178,11 +178,12 @@ describe('taskStore templates', () => {
     }
     saveConfigMock.mockResolvedValueOnce(makeConfig([backendTask]))
 
-    await store.upsertTask(task)
+    const savedTask = await store.upsertTask(task)
 
     expect(saveConfigMock).toHaveBeenCalledTimes(1)
     expect(store.tasks[0].riskLevel).toBe('high')
     expect(store.tasks[0].actions[0].riskLevel).toBe('high')
+    expect(savedTask.riskLevel).toBe('high')
   })
 
   it('registers a single config update listener in Tauri runtime', async () => {

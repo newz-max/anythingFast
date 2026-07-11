@@ -237,6 +237,24 @@ pub struct UpdateProxyResolution {
     pub status: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PathInspectionKind {
+    File,
+    Folder,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PathInspection {
+    pub input: String,
+    pub exists: bool,
+    pub kind: PathInspectionKind,
+    pub normalized_path: String,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct KeybindingOverride {

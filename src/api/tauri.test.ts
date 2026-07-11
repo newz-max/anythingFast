@@ -52,4 +52,30 @@ describe('tauriApi', () => {
 
     expect(invokeMock).toHaveBeenCalledWith('open_main_window_create_task', undefined)
   })
+
+  it('invokes path inspection command', async () => {
+    invokeMock.mockResolvedValueOnce({
+      input: 'D:\\Project',
+      exists: true,
+      kind: 'folder',
+      normalizedPath: 'D:\\Project'
+    })
+
+    await expect(tauriApi.inspectPathInput('D:\\Project')).resolves.toEqual({
+      input: 'D:\\Project',
+      exists: true,
+      kind: 'folder',
+      normalizedPath: 'D:\\Project'
+    })
+
+    expect(invokeMock).toHaveBeenCalledWith('inspect_path_input', { input: 'D:\\Project' })
+  })
+
+  it('invokes default working directory command', async () => {
+    invokeMock.mockResolvedValueOnce('C:\\Users\\Administrator')
+
+    await expect(tauriApi.getDefaultWorkingDir()).resolves.toBe('C:\\Users\\Administrator')
+
+    expect(invokeMock).toHaveBeenCalledWith('get_default_working_dir', undefined)
+  })
 })

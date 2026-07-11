@@ -1,9 +1,9 @@
 use crate::diagnostics::dev_log_error;
 use crate::domain::{
     AppConfig, AppSettings, ExecutionLogSummary, ExportBundleRequest, ImportPreview,
-    KeybindingOverride, KeybindingsLoadResult, PreviewAction, RiskAnalysis, RiskLevel,
-    ShortcutStatus, TaskAction, TaskExecutionSummary, TaskExportBundle, TaskItem,
-    UpdateProxyResolution, ValidationResult,
+    KeybindingOverride, KeybindingsLoadResult, PathInspection, PathInspectionKind, PreviewAction,
+    RiskAnalysis, RiskLevel, ShortcutStatus, TaskAction, TaskExecutionSummary, TaskExportBundle,
+    TaskItem, UpdateProxyResolution, ValidationResult,
 };
 use crate::executor;
 use crate::import_export;
@@ -15,6 +15,7 @@ use crate::validation::{
 };
 use crate::variables::{self, RuntimeVariableContext};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 
@@ -403,6 +404,18 @@ pub fn open_main_window_create_task(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn inspect_path_input(input: String) -> Result<PathInspection, String> {
+    inspect_path_input_value(input)
+}
+
+#[tauri::command]
+pub fn get_default_working_dir() -> Result<String, String> {
+    default_working_dir()
+        .map(|path| path.to_string_lossy().to_string())
+        .map_err(|err| log_command_error("get_default_working_dir failed", err))
+}
+
+#[tauri::command]
 pub fn load_execution_logs(
     app: AppHandle,
     limit: usize,
@@ -487,6 +500,74 @@ fn log_command_error(context: &str, error: impl ToString) -> String {
     message
 }
 
+fn inspect_path_input_value(input: String) -> Result<PathInspection, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(log_command_error("inspect_path_input failed", "路径不能为空"));
+    }
+
+    let path = PathBuf::from(trimmed);
+    match std::fs::metadata(&path) {
+        Ok(metadata) => {
+            let kind = if metadata.is_file() {
+                PathInspectionKind::File
+            } else if metadata.is_dir() {
+                PathInspectionKind::Folder
+            } else {
+                PathInspectionKind::Unknown
+            };
+            let normalized_path = path
+                .canonicalize()
+                .unwrap_or_else(|_| path.clone())
+                .to_string_lossy()
+                .to_string();
+            let message = if kind == PathInspectionKind::Unknown {
+                Some("路径存在，但不是普通文件或文件夹".to_string())
+            } else {
+                None
+            };
+            Ok(PathInspection {
+                input: trimmed.to_string(),
+                exists: true,
+                kind,
+                normalized_path,
+                message,
+            })
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(PathInspection {
+            input: trimmed.to_string(),
+            exists: false,
+            kind: PathInspectionKind::Unknown,
+            normalized_path: trimmed.to_string(),
+            message: Some("路径不存在".to_string()),
+        }),
+        Err(err) => Err(log_command_error("inspect_path_input metadata failed", err)),
+    }
+}
+
+fn default_working_dir() -> Result<PathBuf, std::io::Error> {
+    if let Some(home) = home_dir() {
+        if home.is_dir() {
+            return Ok(home);
+        }
+    }
+    std::env::current_dir()
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            let drive = std::env::var_os("HOMEDRIVE")?;
+            let path = std::env::var_os("HOMEPATH")?;
+            let mut home = PathBuf::from(drive);
+            home.push(path);
+            Some(home)
+        })
+        .or_else(|| std::env::var_os("HOME").filter(|value| !value.is_empty()).map(PathBuf::from))
+}
+
 fn analyze_task_risk_for_runtime(
     task: &TaskItem,
     runtime_variables: HashMap<String, String>,
@@ -521,4 +602,72 @@ fn analyze_task_risk_for_runtime(
         }
     }
     analysis
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn inspect_path_input_reports_file() {
+        let dir = std::env::temp_dir().join(format!("anything-fast-test-{}", uuid()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let file = dir.join("sample.txt");
+        fs::write(&file, "sample").expect("write temp file");
+
+        let inspection = inspect_path_input_value(file.to_string_lossy().to_string()).expect("inspect file");
+
+        assert!(inspection.exists);
+        assert_eq!(inspection.kind, PathInspectionKind::File);
+        assert!(inspection.normalized_path.ends_with("sample.txt"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn inspect_path_input_reports_folder() {
+        let dir = std::env::temp_dir().join(format!("anything-fast-test-{}", uuid()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+
+        let inspection = inspect_path_input_value(dir.to_string_lossy().to_string()).expect("inspect folder");
+
+        assert!(inspection.exists);
+        assert_eq!(inspection.kind, PathInspectionKind::Folder);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn inspect_path_input_reports_missing_path() {
+        let missing = std::env::temp_dir().join(format!("anything-fast-missing-{}", uuid()));
+
+        let inspection = inspect_path_input_value(missing.to_string_lossy().to_string()).expect("inspect missing");
+
+        assert!(!inspection.exists);
+        assert_eq!(inspection.kind, PathInspectionKind::Unknown);
+        assert_eq!(inspection.message.as_deref(), Some("路径不存在"));
+    }
+
+    #[test]
+    fn inspect_path_input_rejects_empty_input() {
+        let result = inspect_path_input_value("  ".to_string());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn default_working_dir_returns_existing_folder() {
+        let dir = default_working_dir().expect("default working dir");
+
+        assert!(dir.is_dir());
+    }
+
+    fn uuid() -> String {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+            .to_string()
+    }
 }
