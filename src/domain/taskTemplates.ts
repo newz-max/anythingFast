@@ -1,4 +1,4 @@
-import { createTaskDraft } from '@/domain/taskFactory'
+import { createTaskDraft, normalizeTask } from '@/domain/taskFactory'
 import { deriveActionRisk, maxRisk } from '@/domain/risk'
 import { inferMissingInputVariableKeys } from '@/domain/variables'
 import { clonePlainDto } from '@/utils/clonePlainDto'
@@ -72,7 +72,7 @@ export function createTaskFromTemplate(template: TaskTemplate): TaskItem {
     required: true,
     secret: false
   }))
-  return {
+  return normalizeTask({
     ...draft,
     name: source.name,
     category: source.category || draft.category,
@@ -83,7 +83,7 @@ export function createTaskFromTemplate(template: TaskTemplate): TaskItem {
       ...action,
       id: `action-${crypto.randomUUID()}`
     }))
-  }
+  })
 }
 
 export function deriveTemplateRisk(template: TaskTemplate): RiskLevel {

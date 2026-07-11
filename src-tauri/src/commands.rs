@@ -395,11 +395,6 @@ pub fn confirm_import_bundle_file(app: AppHandle, path: String) -> Result<AppCon
 }
 
 #[tauri::command]
-pub fn create_task_from_template(template: crate::domain::TaskTemplate) -> TaskItem {
-    import_export::template_to_task(&template)
-}
-
-#[tauri::command]
 pub fn open_main_window_create_task(app: AppHandle) -> Result<(), String> {
     crate::request_main_window_create_task(&app)
 }

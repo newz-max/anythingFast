@@ -1,6 +1,5 @@
 use crate::domain::{
     ActionCondition, ActionType, FieldIssue, TaskAction, TaskActionOutputBinding, TaskItem,
-    TaskVariable,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -177,14 +176,6 @@ pub struct ActionOutputSnapshot {
 pub struct VariableReference {
     pub field: String,
     pub key: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ActionVariableReferenceScan {
-    pub text_references: Vec<VariableReference>,
-    pub condition_variable_keys: Vec<VariableReference>,
-    pub output_binding_keys: Vec<VariableReference>,
-    pub produced_variable_keys: Vec<VariableReference>,
 }
 
 pub fn is_valid_variable_key(key: &str) -> bool {
@@ -415,73 +406,6 @@ pub fn collect_action_produced_variable_keys(action: &TaskAction) -> Vec<Variabl
     collect_output_binding_keys(action)
 }
 
-pub fn scan_action_variable_references(
-    action: &TaskAction,
-) -> Result<ActionVariableReferenceScan, String> {
-    let mut text_references = Vec::new();
-    let values = collect_action_string_values(action)
-        .into_iter()
-        .chain(collect_condition_string_values(&action.condition));
-    for (field, value) in values {
-        for key in extract_variable_references(&value)? {
-            text_references.push(VariableReference {
-                field: field.clone(),
-                key,
-            });
-        }
-    }
-    Ok(ActionVariableReferenceScan {
-        text_references,
-        condition_variable_keys: collect_condition_variable_keys(&action.condition),
-        output_binding_keys: collect_output_binding_keys(action),
-        produced_variable_keys: collect_action_produced_variable_keys(action),
-    })
-}
-
-pub fn infer_missing_input_variable_keys(
-    actions: &[TaskAction],
-    variables: &[TaskVariable],
-) -> Vec<String> {
-    let mut available_keys: HashSet<String> = variables
-        .iter()
-        .map(|variable| variable.key.trim().to_string())
-        .filter(|key| !key.is_empty())
-        .collect();
-    let mut missing_keys = Vec::new();
-
-    for action in actions {
-        if let Ok(scan) = scan_action_variable_references(action) {
-            for reference in scan.text_references {
-                add_missing_input_key(&mut available_keys, &mut missing_keys, &reference.key);
-            }
-            for reference in scan.condition_variable_keys {
-                add_missing_input_key(&mut available_keys, &mut missing_keys, &reference.key);
-            }
-            if action.enabled {
-                for reference in scan.produced_variable_keys {
-                    if is_valid_variable_key(&reference.key) {
-                        available_keys.insert(reference.key);
-                    }
-                }
-            }
-            continue;
-        }
-
-        for reference in collect_condition_variable_keys(&action.condition) {
-            add_missing_input_key(&mut available_keys, &mut missing_keys, &reference.key);
-        }
-        if action.enabled {
-            for reference in collect_action_produced_variable_keys(action) {
-                if is_valid_variable_key(&reference.key) {
-                    available_keys.insert(reference.key);
-                }
-            }
-        }
-    }
-
-    missing_keys
-}
-
 pub fn extract_variable_references(value: &str) -> Result<Vec<String>, String> {
     let mut seen = HashSet::new();
     let mut refs = Vec::new();
@@ -504,18 +428,6 @@ pub fn extract_variable_references(value: &str) -> Result<Vec<String>, String> {
         return Err(format!("变量引用语法无效：{value}"));
     }
     Ok(refs)
-}
-
-fn add_missing_input_key(
-    available_keys: &mut HashSet<String>,
-    missing_keys: &mut Vec<String>,
-    key: &str,
-) {
-    if !is_valid_variable_key(key) || available_keys.contains(key) {
-        return;
-    }
-    available_keys.insert(key.to_string());
-    missing_keys.push(key.to_string());
 }
 
 fn resolve_string_param(
@@ -880,64 +792,6 @@ mod tests {
             extract_variable_references("{{second}} {{ first }} {{second}}").expect("refs");
 
         assert_eq!(references, vec!["second", "first"]);
-    }
-
-    #[test]
-    fn scans_condition_variables_and_output_binding_keys() {
-        let mut command = action(
-            ActionType::RunCommand,
-            json!({
-                "command": "echo {{input}}",
-                "workingDir": "D:\\Project",
-                "shell": "powershell"
-            }),
-        );
-        command.condition = Some(ActionCondition::VariableEquals {
-            variable: "status".into(),
-            value: "{{expectedStatus}}".into(),
-        });
-        command.output_binding = Some(TaskActionOutputBinding {
-            stdout_variable: Some("generatedPath".into()),
-            stderr_variable: None,
-            exit_code_variable: Some("lastExitCode".into()),
-        });
-
-        let scan = scan_action_variable_references(&command).expect("scan");
-
-        assert_eq!(
-            scan.text_references,
-            vec![
-                VariableReference {
-                    field: "command".into(),
-                    key: "input".into(),
-                },
-                VariableReference {
-                    field: "condition.value".into(),
-                    key: "expectedStatus".into(),
-                },
-            ]
-        );
-        assert_eq!(
-            scan.condition_variable_keys,
-            vec![VariableReference {
-                field: "condition.variable".into(),
-                key: "status".into(),
-            }]
-        );
-        assert_eq!(
-            scan.output_binding_keys,
-            vec![
-                VariableReference {
-                    field: "outputBinding.stdoutVariable".into(),
-                    key: "generatedPath".into(),
-                },
-                VariableReference {
-                    field: "outputBinding.exitCodeVariable".into(),
-                    key: "lastExitCode".into(),
-                },
-            ]
-        );
-        assert_eq!(scan.produced_variable_keys, scan.output_binding_keys);
     }
 
     fn task_with_variables(variables: Vec<TaskVariable>) -> TaskItem {

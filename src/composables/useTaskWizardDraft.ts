@@ -21,7 +21,7 @@ export function useTaskWizardDraft(options: {
   watch(
     [options.mode, options.sourceTask],
     ([mode, task]) => {
-      const key = mode === 'create' ? CREATE_DRAFT_KEY : task?.id
+      const key = task?.id || (mode === 'create' ? CREATE_DRAFT_KEY : null)
       activeKey.value = key || CREATE_DRAFT_KEY
 
       if (!key) {
@@ -36,7 +36,7 @@ export function useTaskWizardDraft(options: {
         return
       }
 
-      const nextDraft = mode === 'create' ? createTaskDraft() : task ? clonePlainDto(task) : null
+      const nextDraft = task ? clonePlainDto(task) : mode === 'create' ? createTaskDraft() : null
       draft.value = nextDraft
       if (nextDraft) {
         draftCache.set(key, nextDraft)

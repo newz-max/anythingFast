@@ -17,7 +17,6 @@ import type {
   TaskExportBundle,
   TaskExecutionSummary,
   TaskItem,
-  TaskTemplate,
   UpdateProxyResolution,
   ValidationResult
 } from '@/types/domain'
@@ -64,7 +63,6 @@ export const tauriApi = {
   previewImportBundleFile: (path: string) => invokeCommand<ImportPreview>('preview_import_bundle_file', { path }),
   confirmImportBundle: (bundleJson: string) => invokeCommand<AppConfig>('confirm_import_bundle', { bundleJson }),
   confirmImportBundleFile: (path: string) => invokeCommand<AppConfig>('confirm_import_bundle_file', { path }),
-  createTaskFromTemplate: (template: TaskTemplate) => invokeCommand<TaskItem>('create_task_from_template', { template }),
   openMainWindowCreateTask: () => invokeCommand<void>('open_main_window_create_task'),
   getClipboardContext: () => invokeCommand<ClipboardContextSnapshot>('get_clipboard_context'),
   inspectPathInput: (input: string) => invokeCommand<PathInspection>('inspect_path_input', { input }),

@@ -6,13 +6,17 @@ describe('task templates', () => {
   it('creates an editable task draft from a built-in template', () => {
     const template = builtInTaskTemplates[0]
     const task = createTaskFromTemplate(template)
+    const anotherTask = createTaskFromTemplate(template)
 
     expect(task.id).toMatch(/^task-/)
+    expect(task.id).not.toBe(anotherTask.id)
     expect(task.name).toBe(template.name)
     expect(task.actions).toHaveLength(template.actions.length)
     expect(task.actions[0].id).toMatch(/^action-/)
+    expect(task.actions[0].id).not.toBe(anotherTask.actions[0].id)
     expect(task.enabled).toBe(true)
     expect(task.favorite).toBe(false)
+    expect(task.triggers).toEqual([{ type: 'manual', enabled: true }])
   })
 
   it('derives template risk from its action sequence', () => {
@@ -71,6 +75,13 @@ describe('task templates', () => {
     expect(task.actions[0].outputBinding).toEqual({ stdoutVariable: 'generatedPath' })
     expect(task.actions[1].condition).toEqual({ type: 'variableNotEmpty', variable: 'generatedPath' })
     expect(task.variables).toEqual(template.variables)
+    expect(task.actions.map((action) => action.name)).toEqual(['生成路径', '打开生成文件'])
+
+    task.actions[0].outputBinding!.stdoutVariable = 'changedPath'
+    task.variables![0].label = '已修改'
+
+    expect(template.actions[0].outputBinding).toEqual({ stdoutVariable: 'generatedPath' })
+    expect(template.variables![0].label).toBe('生成路径')
   })
 
   it('generates missing input variables from template references in stable order', () => {
@@ -129,5 +140,54 @@ describe('task templates', () => {
     const task = createTaskFromTemplate(template)
 
     expect(task.variables?.map((variable) => variable.key)).toEqual(['manualSuffix'])
+  })
+
+  it('normalizes stale risk metadata and incomplete task fields', () => {
+    const template: TaskTemplate = {
+      id: 'template-stale-risk',
+      name: '归一化模板',
+      category: '  ',
+      actions: [
+        {
+          type: 'runCommand',
+          name: '不完整命令',
+          params: { command: 'echo ready', workingDir: '', shell: 'powershell' },
+          enabled: true,
+          riskLevel: 'low'
+        },
+        {
+          type: 'readClipboard',
+          name: '读取剪贴板',
+          params: { targetVariable: 'clipboardText' },
+          enabled: true,
+          riskLevel: 'low'
+        }
+      ]
+    }
+
+    const task = createTaskFromTemplate(template)
+
+    expect(task.category).toBe('未分类')
+    expect(task.keywords).toEqual([])
+    expect(task.description).toBe('')
+    expect(task.favorite).toBe(false)
+    expect(task.triggers).toEqual([{ type: 'manual', enabled: true }])
+    expect(task.actions[0].params).toEqual({
+      source: 'inline',
+      command: 'echo ready',
+      workingDir: '',
+      env: {},
+      showTerminal: false,
+      closeTerminalOnFinish: true,
+      terminalHost: 'systemTerminal',
+      shell: 'powershell',
+      scriptPath: '',
+      scriptArgs: []
+    })
+    expect(task.actions[0].condition).toEqual({ type: 'always' })
+    expect(task.actions[0].outputBinding).toBeNull()
+    expect(task.actions[0].riskLevel).toBe('medium')
+    expect(task.actions[1].riskLevel).toBe('high')
+    expect(task.riskLevel).toBe('high')
   })
 })

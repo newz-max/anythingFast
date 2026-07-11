@@ -1,14 +1,12 @@
 use crate::domain::{
     ActionType, AppConfig, ExportBundleRequest, ImportConflictSummary, ImportPathHint,
     ImportPreview, ImportRiskSummary, ImportTaskPreview, ImportTemplatePreview, RiskLevel,
-    TaskAction, TaskExportBundle, TaskItem, TaskTemplate, TaskTemplateAction, TaskTrigger,
-    TaskVariable,
+    TaskAction, TaskExportBundle, TaskItem, TaskTemplate, TaskTemplateAction,
 };
 use crate::risk::{derive_action_risk, derive_task_risk, normalize_config_risk};
 use crate::validation::{
     normalize_task, validate_config_model, validate_task_model, validate_template_model,
 };
-use crate::variables::infer_missing_input_variable_keys;
 use chrono::Utc;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -171,42 +169,6 @@ pub fn confirm_import(bundle_json: &str, config: &AppConfig) -> Result<AppConfig
     }
 
     Ok(normalize_config_risk(next_config))
-}
-
-pub fn template_to_task(template: &TaskTemplate) -> TaskItem {
-    let timestamp = Utc::now().to_rfc3339();
-    let actions: Vec<TaskAction> = template
-        .actions
-        .iter()
-        .map(|action| template_action_to_task_action(action, new_id("action")))
-        .collect();
-    let mut variables = template.variables.clone();
-    let missing_variables = infer_missing_input_variable_keys(&actions, &variables);
-    variables.extend(missing_variables.into_iter().map(|key| TaskVariable {
-        key: key.clone(),
-        label: key,
-        default_value: String::new(),
-        required: true,
-        secret: false,
-    }));
-    let task = TaskItem {
-        id: new_id("task"),
-        name: template.name.clone(),
-        category: template.category.clone(),
-        keywords: template.keywords.clone(),
-        description: template.description.clone(),
-        variables,
-        actions,
-        risk_level: RiskLevel::Low,
-        enabled: true,
-        favorite: false,
-        tag_ids: Vec::new(),
-        triggers: vec![TaskTrigger::Manual { enabled: true }],
-        last_run_at: None,
-        created_at: timestamp.clone(),
-        updated_at: timestamp,
-    };
-    normalize_task(task)
 }
 
 pub fn template_risk(template: &TaskTemplate) -> RiskLevel {
@@ -533,6 +495,7 @@ fn risk_weight(risk: &RiskLevel) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::TaskTrigger;
     use crate::risk::analyze_task_risk;
     use serde_json::json;
 
@@ -802,71 +765,6 @@ mod tests {
                 ..
             } if time == "09:00"
         ));
-    }
-
-    #[test]
-    fn template_to_task_copies_template_variables() {
-        let template = sample_template("template-vars");
-
-        let task = template_to_task(&template);
-
-        assert_eq!(task.variables.len(), 1);
-        assert_eq!(task.variables[0].key, "projectUrl");
-        assert_eq!(task.variables[0].label, "项目地址");
-        assert_eq!(task.variables[0].default_value, "https://example.com");
-        assert!(task.variables[0].required);
-        assert!(!task.variables[0].secret);
-    }
-
-    #[test]
-    fn template_to_task_generates_missing_input_variables_in_order() {
-        let mut template = sample_template("template-generated-vars");
-        template.variables.clear();
-        template.actions = vec![
-            TaskTemplateAction {
-                action_type: ActionType::RunCommand,
-                name: Some("生成路径".into()),
-                params: json!({
-                    "command": "echo path",
-                    "workingDir": "D:\\Project",
-                    "shell": "powershell"
-                }),
-                enabled: true,
-                timeout_ms: None,
-                continue_on_error: None,
-                output_binding: Some(crate::domain::TaskActionOutputBinding {
-                    stdout_variable: Some("generatedPath".into()),
-                    stderr_variable: None,
-                    exit_code_variable: None,
-                }),
-                condition: None,
-                risk_level: RiskLevel::Medium,
-            },
-            TaskTemplateAction {
-                action_type: ActionType::OpenFolder,
-                name: Some("打开目录".into()),
-                params: json!({ "path": "{{generatedPath}}\\{{manualSuffix}}\\{{firstInput}}" }),
-                enabled: true,
-                timeout_ms: None,
-                continue_on_error: None,
-                output_binding: None,
-                condition: Some(crate::domain::ActionCondition::VariableNotEmpty {
-                    variable: "statusInput".into(),
-                }),
-                risk_level: RiskLevel::Low,
-            },
-        ];
-
-        let task = template_to_task(&template);
-
-        assert_eq!(
-            task.variables
-                .iter()
-                .map(|variable| variable.key.as_str())
-                .collect::<Vec<_>>(),
-            vec!["manualSuffix", "firstInput", "statusInput"]
-        );
-        assert!(task.variables.iter().all(|variable| variable.required));
     }
 
     #[test]
