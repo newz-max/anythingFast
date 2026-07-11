@@ -4,8 +4,10 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vue'
 import QuickContextSuggestions from '@/components/quick/QuickContextSuggestions.vue'
 import QuickCreateConfirm from '@/components/quick/QuickCreateConfirm.vue'
+import QuickRecommendationSection from '@/components/quick/QuickRecommendationSection.vue'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { createQuickTaskFromIntent, type QuickCreateSuggestion } from '@/domain/quickInput'
+import { deriveTimeContext, getQuickRecommendations, getTimeContextLabel } from '@/domain/quickRecommendations'
 import { useTaskSearch } from '@/composables/useTaskSearch'
 import { useTaskExecution } from '@/composables/useTaskExecution'
 import { useQuickInputIntent } from '@/composables/useQuickInputIntent'
@@ -28,6 +30,16 @@ interface QuickCreateSubmitPayload {
   keywords: string[]
   favorite: boolean
   runImmediately: boolean
+}
+
+interface QuickRecommendationRow {
+  task: TaskItem
+  actionDetail: string
+  categoryTone: string
+  lastRunLabel: string
+  running: boolean
+  riskLabel: string
+  riskTagType: RiskTagType
 }
 
 type QuickSelectableOption =
@@ -53,30 +65,44 @@ const resultsRef = useTemplateRef<HTMLElement>('results')
 let unlistenFocusChanged: (() => void) | null = null
 let panelWasFocused = true
 
-const visibleResults = computed(() => results.value.slice(0, 8))
-const resultRows = computed(() =>
-  visibleResults.value.map((task) => {
-    const action = findDisplayAction(task, query.value)
-    return {
-      task,
-      actionDetail: action ? `${getActionTypeLabel(action.type)} · ${describeAction(action)}` : `${task.actions.length} 个动作`,
-      categoryTone: categoryTone(task.category),
-      meta: formatTaskMeta(task),
-      running: Boolean(executionStore.activeRunForTarget(executionStore.taskRunTargetKey(task.id)))
-    }
-  })
-)
+const recommendationGroups = computed(() => {
+  if (query.value.trim()) return null
+
+  const now = new Date()
+  return {
+    context: deriveTimeContext(now),
+    groups: getQuickRecommendations(results.value, now)
+  }
+})
+const timeMatchedRows = computed(() => recommendationGroups.value?.groups.timeMatched.map(toRecommendationRow) || [])
+const recentRows = computed(() => recommendationGroups.value?.groups.recent.map(toRecommendationRow) || [])
+const normalResultRows = computed(() => {
+  const tasks = recommendationGroups.value
+    ? recommendationGroups.value.groups.remaining.slice(0, 8)
+    : results.value.slice(0, 8)
+
+  return tasks.map(toNormalResultRow)
+})
+const timeMatchedTitle = computed(() => {
+  const context = recommendationGroups.value?.context
+  return context ? `本时段推荐 · ${getTimeContextLabel(context)}` : '本时段推荐'
+})
 const contextSuggestions = computed(() =>
   !taskStore.loading && !query.value.trim() ? quickContext.suggestions.value : []
 )
 const manualSuggestions = computed(() =>
-  !taskStore.loading && resultRows.value.length === 0 ? quickInput.suggestions.value : []
+  !taskStore.loading && Boolean(query.value.trim()) && normalResultRows.value.length === 0 ? quickInput.suggestions.value : []
+)
+const hasVisibleTaskResults = computed(() =>
+  timeMatchedRows.value.length > 0 || recentRows.value.length > 0 || normalResultRows.value.length > 0
 )
 const selectableOptions = computed<QuickSelectableOption[]>(() => [
   ...contextSuggestions.value
     .filter((suggestion) => suggestion.canSaveDirectly)
     .map((suggestion) => ({ kind: 'context' as const, id: suggestion.id, suggestion })),
-  ...resultRows.value.map((row) => ({ kind: 'task' as const, id: row.task.id, task: row.task }))
+  ...timeMatchedRows.value.map((row) => ({ kind: 'task' as const, id: row.task.id, task: row.task })),
+  ...recentRows.value.map((row) => ({ kind: 'task' as const, id: row.task.id, task: row.task })),
+  ...normalResultRows.value.map((row) => ({ kind: 'task' as const, id: row.task.id, task: row.task }))
 ])
 const selectedOption = computed(() => selectableOptions.value[selectedIndex.value] || null)
 const selectedTask = computed(() => selectedOption.value?.kind === 'task' ? selectedOption.value.task : null)
@@ -293,6 +319,33 @@ function startQuickPanelSession() {
   void quickContext.refresh()
 }
 
+function toRecommendationRow(task: TaskItem): QuickRecommendationRow {
+  return {
+    task,
+    ...taskRowDetails(task),
+    lastRunLabel: formatTaskTime(task.lastRunAt || ''),
+    riskLabel: riskLabel(task.riskLevel),
+    riskTagType: riskTagType(task.riskLevel)
+  }
+}
+
+function toNormalResultRow(task: TaskItem) {
+  return {
+    task,
+    ...taskRowDetails(task),
+    meta: formatTaskMeta(task)
+  }
+}
+
+function taskRowDetails(task: TaskItem) {
+  const action = findDisplayAction(task, query.value)
+  return {
+    actionDetail: action ? `${getActionTypeLabel(action.type)} · ${describeAction(action)}` : `${task.actions.length} 个动作`,
+    categoryTone: categoryTone(task.category),
+    running: Boolean(executionStore.activeRunForTarget(executionStore.taskRunTargetKey(task.id)))
+  }
+}
+
 function findDisplayAction(task: TaskItem, searchQuery: string) {
   const normalizedQuery = normalize(searchQuery)
   if (!normalizedQuery) {
@@ -432,8 +485,28 @@ function optionId(option: QuickSelectableOption) {
             @create="openQuickCreate"
           />
 
+          <QuickRecommendationSection
+            v-if="timeMatchedRows.length"
+            :title="timeMatchedTitle"
+            :rows="timeMatchedRows"
+            :selected-id="selectedTask?.id"
+            :option-id="(task) => resultOptionId(task.id)"
+            @select="selectOption('task', $event.id)"
+            @execute="runTask"
+          />
+
+          <QuickRecommendationSection
+            v-if="recentRows.length"
+            title="最近运行"
+            :rows="recentRows"
+            :selected-id="selectedTask?.id"
+            :option-id="(task) => resultOptionId(task.id)"
+            @select="selectOption('task', $event.id)"
+            @execute="runTask"
+          />
+
           <button
-            v-for="row in resultRows"
+            v-for="row in normalResultRows"
             :key="row.task.id"
             :id="resultOptionId(row.task.id)"
             type="button"
@@ -468,7 +541,7 @@ function optionId(option: QuickSelectableOption) {
             </span>
           </button>
 
-          <div v-if="resultRows.length === 0" class="empty-stack">
+          <div v-if="!hasVisibleTaskResults" class="empty-stack">
             <button
               v-if="selectedManualSuggestion"
               type="button"

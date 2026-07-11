@@ -154,7 +154,7 @@ async function pressKey(key: string, target: Window | HTMLElement = window, opti
 }
 
 function resultItems(wrapper: VueWrapper) {
-  return wrapper.findAll('.result-item')
+  return wrapper.findAll('.result-item, .recommendation-item')
 }
 
 function lastScrollTarget() {
@@ -618,4 +618,130 @@ describe('QuickSearchPanel keyboard navigation', () => {
     expect(resultItems(wrapper)[0].text()).toContain('事项 1')
     expect(resultItems(wrapper)[0].text()).toContain('上次')
   })
+
+  it('orders time-matched, recent, and ordinary tasks as one navigable recommendation list', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(localDate(6, 9, 0))
+    const wrapper = await mountPanel([
+      makeTask(1, { name: '周一事项', lastRunAt: localDate(6, 8, 10).toISOString() }),
+      makeTask(2, { name: '周二事项', lastRunAt: localDate(7, 10, 30).toISOString() }),
+      makeTask(3, { name: '夜间事项', lastRunAt: localDate(5, 20, 0).toISOString() }),
+      makeTask(4, { name: '未运行事项' })
+    ])
+
+    expect(wrapper.text()).toContain('本时段推荐')
+    expect(wrapper.text()).toContain('最近运行')
+    expect(wrapper.text()).toContain('基于最近运行时间')
+    expect(wrapper.findAll('#quick-result-task-1')).toHaveLength(1)
+    expect(wrapper.findAll('#quick-result-task-2')).toHaveLength(1)
+    expect(wrapper.findAll('#quick-result-task-3')).toHaveLength(1)
+    expect(wrapper.findAll('#quick-result-task-4')).toHaveLength(1)
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-1')
+
+    await pressKey('ArrowDown')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-2')
+
+    await pressKey('ArrowDown')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-3')
+
+    await pressKey('ArrowDown')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-4')
+
+    await pressKey('Enter')
+    expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-4' }))
+  })
+
+  it('keeps a saveable clipboard suggestion ahead of recommendation groups', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(localDate(6, 9, 0))
+    Reflect.set(window, '__TAURI_INTERNALS__', { transformCallback: () => 1, invoke: vi.fn() })
+    getClipboardContextMock.mockResolvedValueOnce({
+      source: 'clipboard',
+      capturedAt: '2026-07-06T09:00:00.000Z',
+      status: 'available',
+      text: 'https://context.example',
+      truncated: false
+    })
+    const wrapper = await mountPanel([
+      makeTask(1, { name: '周一事项', lastRunAt: localDate(6, 8, 10).toISOString() }),
+      makeTask(2, { name: '夜间事项', lastRunAt: localDate(5, 20, 0).toISOString() })
+    ])
+    await Promise.resolve()
+    await nextTick()
+    await nextTick()
+
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toMatch(/^quick-context-/)
+    expect(wrapper.find('.context-suggestion').text()).toContain('来自剪贴板')
+
+    await pressKey('ArrowDown')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-1')
+  })
+
+  it('hides both recommendation groups after a non-empty search query', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(localDate(6, 9, 0))
+    const wrapper = await mountPanel([
+      makeTask(1, { name: '周一事项', lastRunAt: localDate(6, 8, 10).toISOString() }),
+      makeTask(2, { name: '匹配普通事项' })
+    ])
+
+    expect(wrapper.findAll('.recommendation-item')).toHaveLength(1)
+
+    await wrapper.find('input').setValue('匹配普通')
+    await nextTick()
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('本时段推荐')
+    expect(wrapper.text()).not.toContain('最近运行')
+    expect(wrapper.findAll('.recommendation-item')).toHaveLength(0)
+    expect(resultItems(wrapper)).toHaveLength(1)
+    expect(resultItems(wrapper)[0].text()).toContain('匹配普通事项')
+  })
+
+  it('routes high-risk and runtime-variable recommendations through the existing execution entry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(localDate(6, 9, 0))
+    const wrapper = await mountPanel([
+      makeTask(1, {
+        name: '高风险变量事项',
+        lastRunAt: localDate(6, 8, 10).toISOString(),
+        variables: [{ key: 'token', label: '令牌', defaultValue: '', required: true, secret: true }],
+        actions: [{
+          id: 'high-risk-action',
+          type: 'runCommand',
+          name: '清理临时文件',
+          params: {
+            source: 'inline',
+            command: 'Remove-Item C:\\Temp\\example',
+            workingDir: 'C:\\Temp',
+            env: {},
+            showTerminal: false,
+            closeTerminalOnFinish: true,
+            terminalHost: 'systemTerminal',
+            shell: 'powershell',
+            scriptPath: '',
+            scriptArgs: []
+          },
+          enabled: true,
+          continueOnError: false,
+          condition: { type: 'always' },
+          outputBinding: null,
+          riskLevel: 'high'
+        }]
+      })
+    ])
+
+    expect(wrapper.find('.recommendation-item').text()).toContain('高风险')
+    await pressKey('Enter')
+
+    expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'task-1',
+      riskLevel: 'high',
+      variables: [expect.objectContaining({ key: 'token', required: true })]
+    }))
+  })
 })
+
+function localDate(day: number, hour: number, minute: number) {
+  return new Date(2026, 6, day, hour, minute)
+}
