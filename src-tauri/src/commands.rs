@@ -1,4 +1,5 @@
 use crate::diagnostics::dev_log_error;
+use crate::context::ClipboardContextSnapshot;
 use crate::domain::{
     AppConfig, AppSettings, ExecutionLogSummary, ExportBundleRequest, ImportPreview,
     KeybindingOverride, KeybindingsLoadResult, PathInspection, PathInspectionKind, PreviewAction,
@@ -401,6 +402,11 @@ pub fn create_task_from_template(template: crate::domain::TaskTemplate) -> TaskI
 #[tauri::command]
 pub fn open_main_window_create_task(app: AppHandle) -> Result<(), String> {
     crate::request_main_window_create_task(&app)
+}
+
+#[tauri::command]
+pub fn get_clipboard_context() -> ClipboardContextSnapshot {
+    crate::context::get_clipboard_context()
 }
 
 #[tauri::command]

@@ -2,12 +2,14 @@
 import { computed, nextTick, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vue'
+import QuickContextSuggestions from '@/components/quick/QuickContextSuggestions.vue'
 import QuickCreateConfirm from '@/components/quick/QuickCreateConfirm.vue'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { createQuickTaskFromIntent, type QuickCreateSuggestion } from '@/domain/quickInput'
 import { useTaskSearch } from '@/composables/useTaskSearch'
 import { useTaskExecution } from '@/composables/useTaskExecution'
 import { useQuickInputIntent } from '@/composables/useQuickInputIntent'
+import { useQuickContext, type QuickContextSuggestion } from '@/composables/useQuickContext'
 import { useKeybindings } from '@/composables/useKeybindings'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
@@ -28,11 +30,16 @@ interface QuickCreateSubmitPayload {
   runImmediately: boolean
 }
 
+type QuickSelectableOption =
+  | { kind: 'context'; id: string; suggestion: QuickContextSuggestion }
+  | { kind: 'task'; id: string; task: TaskItem }
+
 const taskStore = useTaskStore()
 const executionStore = useExecutionStore()
 const enabledTasks = computed(() => taskStore.tasks.filter((task) => task.enabled))
 const { query, results } = useTaskSearch(enabledTasks, { ranking: 'quickRecent' })
 const quickInput = useQuickInputIntent(query)
+const quickContext = useQuickContext()
 const { execute } = useTaskExecution()
 const keybindings = useKeybindings()
 const selectedIndex = shallowRef(0)
@@ -44,6 +51,7 @@ const inputRef = useTemplateRef<{ focus: () => void }>('searchInput')
 const searchBoxRef = useTemplateRef<HTMLElement>('searchBox')
 const resultsRef = useTemplateRef<HTMLElement>('results')
 let unlistenFocusChanged: (() => void) | null = null
+let panelWasFocused = true
 
 const visibleResults = computed(() => results.value.slice(0, 8))
 const resultRows = computed(() =>
@@ -58,11 +66,22 @@ const resultRows = computed(() =>
     }
   })
 )
-const selectedTask = computed(() => resultRows.value[selectedIndex.value]?.task || null)
-const visibleSuggestions = computed(() =>
+const contextSuggestions = computed(() =>
+  !taskStore.loading && !query.value.trim() ? quickContext.suggestions.value : []
+)
+const manualSuggestions = computed(() =>
   !taskStore.loading && resultRows.value.length === 0 ? quickInput.suggestions.value : []
 )
-const selectedSuggestion = computed(() => visibleSuggestions.value[0] || null)
+const selectableOptions = computed<QuickSelectableOption[]>(() => [
+  ...contextSuggestions.value
+    .filter((suggestion) => suggestion.canSaveDirectly)
+    .map((suggestion) => ({ kind: 'context' as const, id: suggestion.id, suggestion })),
+  ...resultRows.value.map((row) => ({ kind: 'task' as const, id: row.task.id, task: row.task }))
+])
+const selectedOption = computed(() => selectableOptions.value[selectedIndex.value] || null)
+const selectedTask = computed(() => selectedOption.value?.kind === 'task' ? selectedOption.value.task : null)
+const selectedContextSuggestion = computed(() => selectedOption.value?.kind === 'context' ? selectedOption.value.suggestion : null)
+const selectedManualSuggestion = computed(() => manualSuggestions.value[0] || null)
 const resultCountLabel = computed(() => (taskStore.loading ? '加载中' : `${results.value.length} 个可执行事项`))
 const quickShortcutHint = computed(() => {
   const key = (command: string) => {
@@ -73,7 +92,7 @@ const quickShortcutHint = computed(() => {
 })
 
 watch(
-  () => resultRows.value.length,
+  () => selectableOptions.value.length,
   (length) => {
     selectedIndex.value = Math.min(selectedIndex.value, Math.max(length - 1, 0))
   },
@@ -82,6 +101,7 @@ watch(
 
 onMounted(async () => {
   void keybindings.loadKeybindings()
+  startQuickPanelSession()
   try {
     await executionStore.setupListeners()
   } catch (err) {
@@ -134,9 +154,14 @@ function onKeydown(event: KeyboardEvent) {
     void execute(selectedTask.value)
     return
   }
-  if (keybindingMatchesCommand(event, 'quick.executeSelected', keybindings.effective.value) && selectedSuggestion.value?.canSaveDirectly) {
+  if (keybindingMatchesCommand(event, 'quick.executeSelected', keybindings.effective.value) && selectedContextSuggestion.value) {
     event.preventDefault()
-    openQuickCreate(selectedSuggestion.value)
+    openQuickCreate(selectedContextSuggestion.value)
+    return
+  }
+  if (keybindingMatchesCommand(event, 'quick.executeSelected', keybindings.effective.value) && selectedManualSuggestion.value?.canSaveDirectly) {
+    event.preventDefault()
+    openQuickCreate(selectedManualSuggestion.value)
   }
 }
 
@@ -155,7 +180,7 @@ function resetSelection() {
 }
 
 function moveSelection(delta: number) {
-  const lastIndex = Math.max(resultRows.value.length - 1, 0)
+  const lastIndex = Math.max(selectableOptions.value.length - 1, 0)
   selectedIndex.value = Math.min(Math.max(selectedIndex.value + delta, 0), lastIndex)
   void scrollSelectedIntoView()
 }
@@ -170,9 +195,9 @@ async function resetResultsScroll() {
 
 async function scrollSelectedIntoView() {
   await nextTick()
-  const task = selectedTask.value
-  if (!task || !resultsRef.value) return
-  const selectedElement = document.getElementById(resultOptionId(task.id))
+  const option = selectedOption.value
+  if (!option || !resultsRef.value) return
+  const selectedElement = document.getElementById(optionId(option))
   if (!(selectedElement instanceof HTMLElement) || !resultsRef.value.contains(selectedElement)) return
 
   selectedElement.scrollIntoView({
@@ -182,6 +207,11 @@ async function scrollSelectedIntoView() {
 
 function runTask(task: TaskItem) {
   void execute(task)
+}
+
+function selectOption(kind: QuickSelectableOption['kind'], id: string) {
+  const index = selectableOptions.value.findIndex((option) => option.kind === kind && option.id === id)
+  if (index >= 0) selectedIndex.value = index
 }
 
 function openQuickCreate(suggestion: QuickCreateSuggestion) {
@@ -243,7 +273,11 @@ async function setupFocusLossHiding() {
   try {
     unlistenFocusChanged = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
       if (!focused) {
+        panelWasFocused = false
         void hideWindow()
+      } else if (!panelWasFocused) {
+        panelWasFocused = true
+        startQuickPanelSession()
       }
     })
   } catch (err) {
@@ -251,6 +285,12 @@ async function setupFocusLossHiding() {
       logDevError('Setup quick focus listener failed', err)
     }
   }
+}
+
+function startQuickPanelSession() {
+  query.value = ''
+  resetSelection()
+  void quickContext.refresh()
 }
 
 function findDisplayAction(task: TaskItem, searchQuery: string) {
@@ -321,6 +361,14 @@ function formatTaskTime(value: string) {
 function resultOptionId(taskId: string) {
   return `quick-result-${taskId}`
 }
+
+function contextOptionId(suggestion: QuickContextSuggestion) {
+  return `quick-context-${suggestion.id}`
+}
+
+function optionId(option: QuickSelectableOption) {
+  return option.kind === 'task' ? resultOptionId(option.task.id) : contextOptionId(option.suggestion)
+}
 </script>
 
 <template>
@@ -356,7 +404,7 @@ function resultOptionId(taskId: string) {
         class="results"
         role="listbox"
         aria-label="快捷搜索结果"
-        :aria-activedescendant="selectedTask ? resultOptionId(selectedTask.id) : undefined"
+        :aria-activedescendant="selectedOption ? optionId(selectedOption) : undefined"
         aria-live="polite"
       >
         <div v-if="taskStore.loading" class="state-panel">
@@ -364,17 +412,36 @@ function resultOptionId(taskId: string) {
           <span>正在加载事项配置</span>
         </div>
 
+        <QuickCreateConfirm
+          v-else-if="confirmingSuggestion"
+          :intent="confirmingSuggestion.intent"
+          :categories="taskStore.categories"
+          :saving="quickCreateSaving"
+          :error="quickCreateError"
+          @submit="submitQuickCreate"
+          @cancel="cancelQuickCreate"
+        />
+
         <template v-else>
+          <QuickContextSuggestions
+            v-if="contextSuggestions.length"
+            :suggestions="contextSuggestions"
+            :selected-id="selectedContextSuggestion?.id"
+            :option-id="contextOptionId"
+            @select="selectOption('context', $event.id)"
+            @create="openQuickCreate"
+          />
+
           <button
-            v-for="(row, index) in resultRows"
+            v-for="row in resultRows"
             :key="row.task.id"
             :id="resultOptionId(row.task.id)"
             type="button"
             role="option"
             class="result-item"
-            :class="{ active: index === selectedIndex, running: row.running }"
-            :aria-selected="index === selectedIndex"
-            @mouseenter="selectedIndex = index"
+            :class="{ active: selectedTask?.id === row.task.id, running: row.running }"
+            :aria-selected="selectedTask?.id === row.task.id"
+            @mouseenter="selectOption('task', row.task.id)"
             @click="runTask(row.task)"
           >
             <span class="task-icon" :class="row.categoryTone" aria-hidden="true">
@@ -402,40 +469,30 @@ function resultOptionId(taskId: string) {
           </button>
 
           <div v-if="resultRows.length === 0" class="empty-stack">
-            <QuickCreateConfirm
-              v-if="confirmingSuggestion"
-              :intent="confirmingSuggestion.intent"
-              :categories="taskStore.categories"
-              :saving="quickCreateSaving"
-              :error="quickCreateError"
-              @submit="submitQuickCreate"
-              @cancel="cancelQuickCreate"
-            />
-
             <button
-              v-else-if="selectedSuggestion"
+              v-if="selectedManualSuggestion"
               type="button"
               class="quick-create-suggestion"
-              :class="{ pending: selectedSuggestion.pending, disabled: !selectedSuggestion.canSaveDirectly }"
-              :disabled="!selectedSuggestion.canSaveDirectly"
-              @click="openQuickCreate(selectedSuggestion)"
+              :class="{ pending: selectedManualSuggestion.pending, disabled: !selectedManualSuggestion.canSaveDirectly }"
+              :disabled="!selectedManualSuggestion.canSaveDirectly"
+              @click="openQuickCreate(selectedManualSuggestion)"
             >
               <span class="suggestion-icon" aria-hidden="true">+</span>
               <span class="suggestion-main">
-                <span class="suggestion-title">{{ selectedSuggestion.title }}</span>
-                <span class="suggestion-detail">{{ selectedSuggestion.detail }}</span>
+                <span class="suggestion-title">{{ selectedManualSuggestion.title }}</span>
+                <span class="suggestion-detail">{{ selectedManualSuggestion.detail }}</span>
               </span>
-              <NTag v-if="selectedSuggestion.pending" size="small" type="info">确认中</NTag>
-              <NTag v-else-if="!selectedSuggestion.canSaveDirectly" size="small" type="warning">需确认</NTag>
+              <NTag v-if="selectedManualSuggestion.pending" size="small" type="info">确认中</NTag>
+              <NTag v-else-if="!selectedManualSuggestion.canSaveDirectly" size="small" type="warning">需确认</NTag>
             </button>
 
-            <div v-else class="state-panel empty">
+            <div v-else-if="!contextSuggestions.length" class="state-panel empty">
               <span class="empty-icon" aria-hidden="true"></span>
               <span>没有匹配的启用事项</span>
             </div>
-
-            <p v-if="quickCreateStatus" class="quick-create-status">{{ quickCreateStatus }}</p>
           </div>
+
+          <p v-if="quickCreateStatus" class="quick-create-status">{{ quickCreateStatus }}</p>
         </template>
       </section>
 

@@ -11,6 +11,7 @@ import type { AppConfig, TaskItem } from '@/types/domain'
 
 const executeMock = vi.hoisted(() => vi.fn())
 const openMainWindowCreateTaskMock = vi.hoisted(() => vi.fn())
+const getClipboardContextMock = vi.hoisted(() => vi.fn())
 const inspectPathInputMock = vi.hoisted(() => vi.fn())
 const getDefaultWorkingDirMock = vi.hoisted(() => vi.fn())
 const saveConfigMock = vi.hoisted(() => vi.fn(async (config: AppConfig) => config))
@@ -30,7 +31,9 @@ vi.mock('@tauri-apps/api/window', () => ({
 vi.mock('@/api/tauri', () => ({
   tauriApi: {
     openMainWindowCreateTask: openMainWindowCreateTaskMock,
+    getClipboardContext: getClipboardContextMock,
     inspectPathInput: inspectPathInputMock,
+    inspectClipboardPathInput: inspectPathInputMock,
     getDefaultWorkingDir: getDefaultWorkingDirMock,
     saveConfig: saveConfigMock,
     loadKeybindings: loadKeybindingsMock
@@ -165,6 +168,14 @@ describe('QuickSearchPanel keyboard navigation', () => {
     executeMock.mockClear()
     openMainWindowCreateTaskMock.mockReset()
     openMainWindowCreateTaskMock.mockResolvedValue(undefined)
+    getClipboardContextMock.mockReset()
+    getClipboardContextMock.mockResolvedValue({
+      source: 'clipboard',
+      capturedAt: '2026-07-11T00:00:00.000Z',
+      status: 'empty',
+      text: '',
+      truncated: false
+    })
     inspectPathInputMock.mockReset()
     inspectPathInputMock.mockResolvedValue({
       input: 'D:\\Project\\anythingFast',
@@ -487,8 +498,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
     const wrapper = await mountPanel([])
 
     await wrapper.find('input').setValue('D:\\Project\\anythingFast')
-    vi.advanceTimersByTime(180)
-    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(180)
     await nextTick()
     await nextTick()
 
@@ -496,6 +506,97 @@ describe('QuickSearchPanel keyboard navigation', () => {
     expect(wrapper.text()).toContain('创建打开文件夹事项')
 
     vi.useRealTimers()
+  })
+
+  it('shows a clipboard suggestion before task results and opens confirmation with Enter', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', { transformCallback: () => 1, invoke: vi.fn() })
+    getClipboardContextMock.mockResolvedValueOnce({
+      source: 'clipboard',
+      capturedAt: '2026-07-11T00:00:00.000Z',
+      status: 'available',
+      text: 'https://clipboard.example',
+      truncated: false
+    })
+    const wrapper = await mountPanel([makeTask(1)])
+    await Promise.resolve()
+    await nextTick()
+    await vi.waitFor(() => expect(onFocusChangedMock).toHaveBeenCalledTimes(1))
+    await nextTick()
+
+    const contextSuggestion = wrapper.find('.context-suggestion')
+    expect(contextSuggestion.exists()).toBe(true)
+    expect(contextSuggestion.text()).toContain('来自剪贴板')
+    expect(contextSuggestion.attributes('aria-selected')).toBe('true')
+    expect(resultItems(wrapper)[0].attributes('aria-selected')).toBe('false')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe(contextSuggestion.attributes('id'))
+
+    await pressKey('Enter')
+
+    expect(wrapper.text()).toContain('确认事项信息')
+    expect(executeMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps a non-saveable clipboard path out of the Enter target', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', { transformCallback: () => 1, invoke: vi.fn() })
+    getClipboardContextMock.mockResolvedValueOnce({
+      source: 'clipboard',
+      capturedAt: '2026-07-11T00:00:00.000Z',
+      status: 'available',
+      text: 'D:\\missing\\path',
+      truncated: false
+    })
+    inspectPathInputMock.mockResolvedValueOnce({
+      input: 'D:\\missing\\path',
+      exists: false,
+      kind: 'unknown',
+      normalizedPath: 'D:\\missing\\path',
+      message: '路径不存在，不能创建'
+    })
+    const wrapper = await mountPanel([makeTask(1)])
+    await Promise.resolve()
+    await nextTick()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('路径不存在，不能创建')
+    expect(wrapper.find('.context-suggestion').attributes('aria-selected')).toBe('false')
+    expect(resultItems(wrapper)[0].attributes('aria-selected')).toBe('true')
+
+    await pressKey('Enter')
+
+    expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-1' }))
+  })
+
+  it('resets the panel and refreshes clipboard context after focus returns', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', { transformCallback: () => 1, invoke: vi.fn() })
+    getClipboardContextMock
+      .mockResolvedValueOnce({
+        source: 'clipboard',
+        capturedAt: '2026-07-11T00:00:00.000Z',
+        status: 'available',
+        text: 'https://first.example',
+        truncated: false
+      })
+      .mockResolvedValueOnce({
+        source: 'clipboard',
+        capturedAt: '2026-07-11T00:01:00.000Z',
+        status: 'available',
+        text: 'https://second.example',
+        truncated: false
+      })
+    const wrapper = await mountPanel([makeTask(1)])
+    await Promise.resolve()
+    await nextTick()
+    await wrapper.find('input').setValue('事项')
+
+    focusChangedHandlers[0]?.({ payload: false })
+    focusChangedHandlers[0]?.({ payload: true })
+    await Promise.resolve()
+    await nextTick()
+    await nextTick()
+
+    expect(wrapper.find('input').element).toHaveProperty('value', '')
+    expect(getClipboardContextMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('https://second.example/')
   })
 
   it('updates recent ranking and metadata after task run metadata sync', async () => {

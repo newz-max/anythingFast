@@ -71,6 +71,40 @@ describe('tauriApi', () => {
     expect(invokeMock).toHaveBeenCalledWith('inspect_path_input', { input: 'D:\\Project' })
   })
 
+  it('invokes the clipboard context command without arguments', async () => {
+    invokeMock.mockResolvedValueOnce({
+      source: 'clipboard',
+      capturedAt: '2026-07-11T00:00:00.000Z',
+      status: 'available',
+      text: 'https://example.com',
+      truncated: false
+    })
+
+    await expect(tauriApi.getClipboardContext()).resolves.toMatchObject({
+      source: 'clipboard',
+      status: 'available'
+    })
+
+    expect(invokeMock).toHaveBeenCalledWith('get_clipboard_context', undefined)
+  })
+
+  it('sanitizes clipboard path inspection errors without logging the path', async () => {
+    const secretPath = 'D:\\sensitive\\accounting.xlsx'
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    invokeMock.mockRejectedValueOnce(new Error(`无法读取 ${secretPath}`))
+
+    await expect(tauriApi.inspectClipboardPathInput(secretPath)).rejects.toThrow(secretPath)
+
+    expect(consoleError).toHaveBeenCalledWith(
+      '[anythingFast] Tauri command failed: inspect_path_input',
+      expect.objectContaining({
+        message: '剪贴板路径检查失败',
+        extra: { source: 'clipboard', kind: 'path', textLength: secretPath.length }
+      })
+    )
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(secretPath)
+  })
+
   it('invokes default working directory command', async () => {
     invokeMock.mockResolvedValueOnce('C:\\Users\\Administrator')
 

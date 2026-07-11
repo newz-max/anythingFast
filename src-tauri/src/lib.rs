@@ -1,4 +1,5 @@
 mod commands;
+mod context;
 mod diagnostics;
 mod domain;
 mod executor;
@@ -169,6 +170,7 @@ pub fn run() {
             confirm_import_bundle_file,
             create_task_from_template,
             open_main_window_create_task,
+            get_clipboard_context,
             inspect_path_input,
             get_default_working_dir,
             load_execution_logs,
