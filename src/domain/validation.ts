@@ -50,8 +50,8 @@ export function validateTaskLocal(task: TaskItem, allTasks: TaskItem[] = []): Va
       }
     })
     validateActionVariableReferences(action, variableKeys, `actions.${index}`, issues)
-    if (action.enabled && action.type === 'runCommand') {
-      scanActionVariableReferences(action).outputBindingKeys.forEach(({ key }) => {
+    if (action.enabled) {
+      scanActionVariableReferences(action).producedVariableKeys.forEach(({ key }) => {
         if (isValidVariableKey(key)) variableKeys.add(key)
       })
     }

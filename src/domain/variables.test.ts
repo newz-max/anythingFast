@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { collectActionStringValues, collectConditionStringValues, collectConditionVariableKeys, collectOutputBindingKeys, extractVariableReferences, maskSecretVariableText, scanActionVariableReferences, variablesNeedingInput } from '@/domain/variables'
+import { collectActionProducedVariableKeys, collectActionStringValues, collectConditionStringValues, collectConditionVariableKeys, collectOutputBindingKeys, extractVariableReferences, inferMissingInputVariableKeys, maskSecretVariableText, scanActionVariableReferences, variablesNeedingInput } from '@/domain/variables'
 import type { TaskAction, TaskVariable } from '@/types/domain'
 
 describe('variables', () => {
@@ -92,5 +92,29 @@ describe('variables', () => {
         { field: 'outputBinding.exitCodeVariable', key: 'lastExitCode' }
       ]
     })
+  })
+
+  it('makes a clipboard output available only to later actions without requesting it as input', () => {
+    const readClipboard: TaskAction = {
+      id: 'read',
+      type: 'readClipboard',
+      name: 'read clipboard',
+      params: { targetVariable: 'clipboardText' },
+      enabled: true,
+      riskLevel: 'high'
+    }
+    const laterAction: TaskAction = {
+      id: 'open',
+      type: 'openUrl',
+      name: 'open',
+      params: { url: 'https://example.com/?q={{clipboardText}}' },
+      enabled: true,
+      riskLevel: 'low'
+    }
+
+    expect(collectActionProducedVariableKeys(readClipboard)).toEqual([{ field: 'targetVariable', key: 'clipboardText' }])
+    expect(scanActionVariableReferences(readClipboard).producedVariableKeys).toEqual([{ field: 'targetVariable', key: 'clipboardText' }])
+    expect(inferMissingInputVariableKeys([readClipboard, laterAction])).toEqual([])
+    expect(inferMissingInputVariableKeys([laterAction, readClipboard])).toEqual(['clipboardText'])
   })
 })

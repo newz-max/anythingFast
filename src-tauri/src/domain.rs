@@ -18,6 +18,10 @@ pub enum ActionType {
     OpenFolder,
     RunCommand,
     Delay,
+    WriteClipboard,
+    ReadClipboard,
+    ShowNotification,
+    WaitForPort,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -73,7 +73,8 @@ function patchParams(patch: MutableParams) {
 function setActionType(type: ActionType) {
   patchAction({
     type,
-    params: createDefaultActionParams(type)
+    params: createDefaultActionParams(type),
+    timeoutMs: type === 'waitForPort' ? 60000 : null
   })
 }
 
@@ -148,12 +149,13 @@ function updateTerminalHost(value: string) {
         </NFormItem>
       </NGi>
       <NGi>
-        <NFormItem label="超时时间 ms">
+        <NFormItem label="超时时间 ms" :required="action.type === 'waitForPort'">
           <NInputNumber
             :value="action.timeoutMs ?? null"
-            clearable
-            :min="0"
-            placeholder="0 或留空表示不限时"
+            :clearable="action.type !== 'waitForPort'"
+            :min="action.type === 'waitForPort' ? 1000 : 0"
+            :max="action.type === 'waitForPort' ? 600000 : undefined"
+            :placeholder="action.type === 'waitForPort' ? '1000-600000，必填' : '0 或留空表示不限时'"
             @update:value="(value: number | null) => patchAction({ timeoutMs: value })"
           />
         </NFormItem>
@@ -324,6 +326,61 @@ function updateTerminalHost(value: string) {
           @update:value="(value: number | null) => patchParams({ durationMs: value })"
         />
       </NFormItem>
+    </template>
+
+    <template v-else-if="action.type === 'writeClipboard'">
+      <NFormItem label="写入文本" required>
+        <NInput
+          :value="textParam('text')"
+          type="textarea"
+          :autosize="{ minRows: 2, maxRows: 4 }"
+          placeholder="支持 {{variable}}"
+          @update:value="(value: string) => patchParams({ text: value })"
+        />
+      </NFormItem>
+    </template>
+
+    <template v-else-if="action.type === 'readClipboard'">
+      <NFormItem label="目标变量 key" required>
+        <NInput
+          :value="textParam('targetVariable')"
+          placeholder="clipboardText"
+          @update:value="(value: string) => patchParams({ targetVariable: value })"
+        />
+      </NFormItem>
+      <NAlert type="warning" :show-icon="false">
+        执行时从系统剪贴板读取，结果按密文处理，只能供后续动作使用。
+      </NAlert>
+    </template>
+
+    <template v-else-if="action.type === 'showNotification'">
+      <NFormItem label="通知标题" required>
+        <NInput :value="textParam('title')" placeholder="支持 {{variable}}" @update:value="(value: string) => patchParams({ title: value })" />
+      </NFormItem>
+      <NFormItem label="通知正文">
+        <NInput
+          :value="textParam('body')"
+          type="textarea"
+          :autosize="{ minRows: 2, maxRows: 4 }"
+          placeholder="可选，支持 {{variable}}"
+          @update:value="(value: string) => patchParams({ body: value })"
+        />
+      </NFormItem>
+    </template>
+
+    <template v-else-if="action.type === 'waitForPort'">
+      <NGrid :cols="2" :x-gap="12" responsive="screen">
+        <NGi>
+          <NFormItem label="主机" required>
+            <NInput :value="textParam('host')" placeholder="127.0.0.1" @update:value="(value: string) => patchParams({ host: value })" />
+          </NFormItem>
+        </NGi>
+        <NGi>
+          <NFormItem label="端口" required>
+            <NInputNumber :value="numberParam('port')" :min="1" :max="65535" @update:value="(value: number | null) => patchParams({ port: value ?? 0 })" />
+          </NFormItem>
+        </NGi>
+      </NGrid>
     </template>
 
     <NCollapse class="advanced-condition" display-directive="show">

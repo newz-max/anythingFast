@@ -173,6 +173,7 @@ export function createActionDraft(type: ActionType): TaskAction {
     type,
     name: defaultActionName(type),
     params: createDefaultActionParams(type),
+    timeoutMs: type === 'waitForPort' ? 60000 : null,
     enabled: true,
     continueOnError: false,
     outputBinding: null,
@@ -245,5 +246,6 @@ export function defaultActionName(type: ActionType) {
 }
 
 function defaultRisk(type: ActionType): RiskLevel {
+  if (type === 'readClipboard') return 'high'
   return type === 'runCommand' ? 'medium' : 'low'
 }

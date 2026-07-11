@@ -72,19 +72,34 @@ impl RuntimeVariableContext {
         action: &TaskAction,
         output: &ActionOutputSnapshot,
     ) -> Result<(), String> {
-        if action.action_type != ActionType::RunCommand {
-            return Ok(());
+        match action.action_type {
+            ActionType::RunCommand => {
+                let Some(binding) = &action.output_binding else {
+                    return Ok(());
+                };
+                self.bind_optional(&binding.stdout_variable, output.stdout.clone())?;
+                self.bind_optional(&binding.stderr_variable, output.stderr.clone())?;
+                self.bind_optional(
+                    &binding.exit_code_variable,
+                    output.exit_code.map(|code| code.to_string()),
+                )?;
+            }
+            ActionType::ReadClipboard => {
+                let key = action
+                    .params
+                    .get("targetVariable")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|key| !key.is_empty())
+                    .ok_or_else(|| "缺少参数：targetVariable".to_string())?;
+                let value = output
+                    .clipboard_text
+                    .clone()
+                    .ok_or_else(|| "读取剪贴板未返回文本".to_string())?;
+                self.bind_secret(key, value)?;
+            }
+            _ => {}
         }
-        let Some(binding) = &action.output_binding else {
-            return Ok(());
-        };
-
-        self.bind_optional(&binding.stdout_variable, output.stdout.clone())?;
-        self.bind_optional(&binding.stderr_variable, output.stderr.clone())?;
-        self.bind_optional(
-            &binding.exit_code_variable,
-            output.exit_code.map(|code| code.to_string()),
-        )?;
         Ok(())
     }
 
@@ -132,6 +147,15 @@ impl RuntimeVariableContext {
         Ok(())
     }
 
+    fn bind_secret(&mut self, key: &str, value: String) -> Result<(), String> {
+        if !is_valid_variable_key(key) {
+            return Err(format!("输出绑定变量 key 无效：{key}"));
+        }
+        self.secret_keys.insert(key.to_string());
+        self.values.insert(key.to_string(), value);
+        Ok(())
+    }
+
     fn secret_values(&self) -> impl Iterator<Item = (&str, &str)> {
         self.secret_keys.iter().filter_map(|key| {
             self.values
@@ -146,6 +170,7 @@ pub struct ActionOutputSnapshot {
     pub exit_code: Option<i32>,
     pub stdout: Option<String>,
     pub stderr: Option<String>,
+    pub clipboard_text: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +184,7 @@ pub struct ActionVariableReferenceScan {
     pub text_references: Vec<VariableReference>,
     pub condition_variable_keys: Vec<VariableReference>,
     pub output_binding_keys: Vec<VariableReference>,
+    pub produced_variable_keys: Vec<VariableReference>,
 }
 
 pub fn is_valid_variable_key(key: &str) -> bool {
@@ -242,7 +268,17 @@ pub fn resolve_action(
             resolve_string_array_param(&mut resolved.params, "scriptArgs", context)?;
             resolve_env_param(&mut resolved.params, context)?;
         }
-        ActionType::Delay => {}
+        ActionType::WriteClipboard => {
+            resolve_string_param(&mut resolved.params, "text", context)?;
+        }
+        ActionType::ShowNotification => {
+            resolve_string_param(&mut resolved.params, "title", context)?;
+            resolve_string_param(&mut resolved.params, "body", context)?;
+        }
+        ActionType::WaitForPort => {
+            resolve_string_param(&mut resolved.params, "host", context)?;
+        }
+        ActionType::ReadClipboard | ActionType::Delay => {}
     }
     Ok(resolved)
 }
@@ -287,7 +323,17 @@ pub fn collect_action_string_values(action: &TaskAction) -> Vec<(String, String)
             collect_owned_string_array_param(&action.params, "scriptArgs", &mut values);
             collect_owned_env_values(&action.params, &mut values);
         }
-        ActionType::Delay => {}
+        ActionType::WriteClipboard => {
+            collect_owned_string_param(&action.params, "text", &mut values);
+        }
+        ActionType::ShowNotification => {
+            collect_owned_string_param(&action.params, "title", &mut values);
+            collect_owned_string_param(&action.params, "body", &mut values);
+        }
+        ActionType::WaitForPort => {
+            collect_owned_string_param(&action.params, "host", &mut values);
+        }
+        ActionType::ReadClipboard | ActionType::Delay => {}
     }
     values
 }
@@ -351,6 +397,24 @@ pub fn collect_output_binding_keys(action: &TaskAction) -> Vec<VariableReference
     .collect()
 }
 
+pub fn collect_action_produced_variable_keys(action: &TaskAction) -> Vec<VariableReference> {
+    if action.action_type == ActionType::ReadClipboard {
+        return action
+            .params
+            .get("targetVariable")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .map(|key| VariableReference {
+                field: "targetVariable".to_string(),
+                key: key.to_string(),
+            })
+            .into_iter()
+            .collect();
+    }
+    collect_output_binding_keys(action)
+}
+
 pub fn scan_action_variable_references(
     action: &TaskAction,
 ) -> Result<ActionVariableReferenceScan, String> {
@@ -370,6 +434,7 @@ pub fn scan_action_variable_references(
         text_references,
         condition_variable_keys: collect_condition_variable_keys(&action.condition),
         output_binding_keys: collect_output_binding_keys(action),
+        produced_variable_keys: collect_action_produced_variable_keys(action),
     })
 }
 
@@ -392,8 +457,8 @@ pub fn infer_missing_input_variable_keys(
             for reference in scan.condition_variable_keys {
                 add_missing_input_key(&mut available_keys, &mut missing_keys, &reference.key);
             }
-            if action.enabled && action.action_type == ActionType::RunCommand {
-                for reference in scan.output_binding_keys {
+            if action.enabled {
+                for reference in scan.produced_variable_keys {
                     if is_valid_variable_key(&reference.key) {
                         available_keys.insert(reference.key);
                     }
@@ -405,8 +470,8 @@ pub fn infer_missing_input_variable_keys(
         for reference in collect_condition_variable_keys(&action.condition) {
             add_missing_input_key(&mut available_keys, &mut missing_keys, &reference.key);
         }
-        if action.enabled && action.action_type == ActionType::RunCommand {
-            for reference in collect_output_binding_keys(action) {
+        if action.enabled {
+            for reference in collect_action_produced_variable_keys(action) {
                 if is_valid_variable_key(&reference.key) {
                     available_keys.insert(reference.key);
                 }
@@ -764,6 +829,7 @@ mod tests {
                     exit_code: Some(0),
                     stdout: Some("D:\\Generated".into()),
                     stderr: None,
+                    clipboard_text: None,
                 },
             )
             .expect("bind");
@@ -778,6 +844,34 @@ mod tests {
 
         assert_eq!(later.params["path"], json!("D:\\Generated"));
         assert_eq!(task.variables[0].default_value, "");
+    }
+
+    #[test]
+    fn clipboard_output_is_secret_and_available_only_after_its_action() {
+        let task = task_with_variables(Vec::new());
+        let mut context = RuntimeVariableContext::from_task(&task, &HashMap::new()).expect("context");
+        let read = action(ActionType::ReadClipboard, json!({ "targetVariable": "clipboardText" }));
+
+        context
+            .bind_output(
+                &read,
+                &ActionOutputSnapshot {
+                    clipboard_text: Some("private clipboard value".into()),
+                    ..Default::default()
+                },
+            )
+            .expect("bind clipboard output");
+        let later = resolve_action(
+            &action(
+                ActionType::OpenUrl,
+                json!({ "url": "https://example.test/?q={{clipboardText}}" }),
+            ),
+            &context,
+        )
+        .expect("resolve later action");
+
+        assert_eq!(later.params["url"], json!("https://example.test/?q=private clipboard value"));
+        assert_eq!(context.mask_text("private clipboard value"), MASK);
     }
 
     #[test]
@@ -843,6 +937,7 @@ mod tests {
                 },
             ]
         );
+        assert_eq!(scan.produced_variable_keys, scan.output_binding_keys);
     }
 
     fn task_with_variables(variables: Vec<TaskVariable>) -> TaskItem {

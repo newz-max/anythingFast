@@ -1,5 +1,19 @@
-import type { ActionParams, ActionType, CommandParams, DelayParams, FieldIssue, OpenProgramParams, OpenUrlParams, PathParams, RiskLevel, TaskAction } from '@/types/domain'
-import { hasVariableSyntax } from '@/domain/variables'
+import type {
+  ActionParams,
+  ActionType,
+  CommandParams,
+  DelayParams,
+  FieldIssue,
+  OpenProgramParams,
+  OpenUrlParams,
+  PathParams,
+  ReadClipboardParams,
+  RiskLevel,
+  ShowNotificationParams,
+  TaskAction,
+  WaitForPortParams
+} from '@/types/domain'
+import { hasVariableSyntax, isValidVariableKey } from '@/domain/variables'
 
 export interface ActionTypeOption {
   label: string
@@ -139,6 +153,66 @@ export const actionTypeDefinitions: Record<ActionType, ActionTypeDefinition> = {
     validate: (action, issues) => {
       if ('durationMs' in action.params && action.params.durationMs !== undefined && action.params.durationMs !== null && action.params.durationMs <= 0) {
         issues.push({ field: 'durationMs', message: '等待时长必须大于 0' })
+      }
+    }
+  },
+  writeClipboard: {
+    label: '写入剪贴板',
+    description: '将文本写入系统剪贴板，可引用运行变量。',
+    createDefaultParams: () => ({ text: '' }),
+    describe: () => '写入剪贴板文本',
+    inferRisk: () => 'low',
+    validate: (action, issues) => {
+      if (!('text' in action.params) || !textParam(action.params.text)) {
+        issues.push({ field: 'text', message: '剪贴板文本不能为空' })
+      }
+    }
+  },
+  readClipboard: {
+    label: '读取剪贴板',
+    description: '读取系统剪贴板文本并作为密文运行时变量提供给后续动作。',
+    createDefaultParams: () => ({ targetVariable: 'clipboardText' }),
+    describe: (action) => `读取剪贴板到变量：${textParam((action.params as ReadClipboardParams).targetVariable) || '未设置'}`,
+    inferRisk: () => 'high',
+    validate: (action, issues) => {
+      const targetVariable = 'targetVariable' in action.params ? action.params.targetVariable.trim() : ''
+      if (!isValidVariableKey(targetVariable)) {
+        issues.push({ field: 'targetVariable', message: '目标变量 key 无效' })
+      }
+    }
+  },
+  showNotification: {
+    label: '系统通知',
+    description: '向系统通知中心发送一条最佳努力提醒。',
+    createDefaultParams: () => ({ title: '', body: '' }),
+    describe: () => '发送系统通知',
+    inferRisk: () => 'low',
+    validate: (action, issues) => {
+      if (!('title' in action.params) || !textParam((action.params as ShowNotificationParams).title)) {
+        issues.push({ field: 'title', message: '通知标题不能为空' })
+      }
+    }
+  },
+  waitForPort: {
+    label: '等待端口',
+    description: '等待指定主机的 TCP 端口可连接后继续。',
+    createDefaultParams: () => ({ host: '127.0.0.1', port: 3000 }),
+    describe: (action) => {
+      const params = action.params as WaitForPortParams
+      const host = textParam(params.host) || '未设置主机'
+      return `等待 ${host}:${numberParam(params.port, 0) || '未设置端口'}`
+    },
+    inferRisk: () => 'low',
+    validate: (action, issues) => {
+      const params = action.params as WaitForPortParams
+      if (!textParam(params.host)) {
+        issues.push({ field: 'host', message: '主机不能为空' })
+      }
+      if (!Number.isInteger(params.port) || params.port < 1 || params.port > 65535) {
+        issues.push({ field: 'port', message: '端口必须在 1 到 65535 之间' })
+      }
+      if (!Number.isInteger(action.timeoutMs) || !action.timeoutMs || action.timeoutMs < 1000 || action.timeoutMs > 600000) {
+        issues.push({ field: 'timeoutMs', message: '端口等待超时时间必须在 1000 到 600000 ms 之间' })
       }
     }
   }

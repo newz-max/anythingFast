@@ -43,6 +43,30 @@ describe('validation', () => {
     expect(result.riskLevel).toBe('high')
   })
 
+  it('requires bounded port waiting and marks clipboard reads high risk', () => {
+    const portAction: TaskAction = {
+      id: 'wait-port',
+      type: 'waitForPort',
+      name: 'wait port',
+      params: { host: '127.0.0.1', port: 3000 },
+      enabled: true,
+      timeoutMs: 0,
+      riskLevel: 'low'
+    }
+    const readAction: TaskAction = {
+      id: 'read-clipboard',
+      type: 'readClipboard',
+      name: 'read clipboard',
+      params: { targetVariable: 'clipboardText' },
+      enabled: true,
+      riskLevel: 'low'
+    }
+
+    expect(validateActionLocal(portAction).issues.map((issue) => issue.field)).toContain('timeoutMs')
+    expect(validateActionLocal({ ...portAction, timeoutMs: 60000 }).valid).toBe(true)
+    expect(validateActionLocal(readAction).riskLevel).toBe('high')
+  })
+
   it('validates script command parameters locally', () => {
     const action: TaskAction = {
       id: 'action-1',

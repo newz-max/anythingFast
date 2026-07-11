@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDefaultConfig, normalizeConfig, normalizeTemplate } from '@/domain/taskFactory'
+import { createActionDraft, createDefaultConfig, normalizeConfig, normalizeTemplate } from '@/domain/taskFactory'
 import type { CommandParams, TaskItem } from '@/types/domain'
 
 describe('taskFactory config defaults', () => {
@@ -128,5 +128,13 @@ describe('taskFactory config defaults', () => {
     expect(template.variables).toEqual([
       { key: 'projectDir', label: '项目目录', defaultValue: 'D:\\Project', required: true, secret: true }
     ])
+  })
+
+  it('creates port waiting actions with a required finite timeout', () => {
+    const action = createActionDraft('waitForPort')
+
+    expect(action.timeoutMs).toBe(60000)
+    expect(action.params).toEqual({ host: '127.0.0.1', port: 3000 })
+    expect(action.riskLevel).toBe('low')
   })
 })

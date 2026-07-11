@@ -64,5 +64,63 @@
       "riskLevel": "medium"
     },
     "expectedRisk": "high"
+  },
+  {
+    "name": "clipboard read is high risk",
+    "action": {
+      "id": "action-read-clipboard",
+      "type": "readClipboard",
+      "name": "Read clipboard",
+      "params": {
+        "targetVariable": "clipboardText"
+      },
+      "enabled": true,
+      "riskLevel": "low"
+    },
+    "expectedRisk": "high"
+  },
+  {
+    "name": "clipboard write is low risk",
+    "action": {
+      "id": "action-write-clipboard",
+      "type": "writeClipboard",
+      "name": "Write clipboard",
+      "params": {
+        "text": "hello"
+      },
+      "enabled": true,
+      "riskLevel": "high"
+    },
+    "expectedRisk": "low"
+  },
+  {
+    "name": "notification is low risk",
+    "action": {
+      "id": "action-notify",
+      "type": "showNotification",
+      "name": "Notify",
+      "params": {
+        "title": "done"
+      },
+      "enabled": true,
+      "riskLevel": "high"
+    },
+    "expectedRisk": "low"
+  },
+  {
+    "name": "port wait is low risk",
+    "action": {
+      "id": "action-wait-port",
+      "type": "waitForPort",
+      "name": "Wait port",
+      "params": {
+        "host": "127.0.0.1",
+        "port": 3000
+      },
+      "enabled": true,
+      "timeoutMs": 60000,
+      "riskLevel": "high"
+    },
+    "expectedRisk": "low"
   }
 ]

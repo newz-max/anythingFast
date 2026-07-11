@@ -42,7 +42,11 @@ function actionIcon(type: ActionType) {
     openFile: '▤',
     openFolder: '▰',
     runCommand: '>_',
-    delay: '◷'
+    delay: '◷',
+    writeClipboard: '▣',
+    readClipboard: '▤',
+    showNotification: '◉',
+    waitForPort: '⌁'
   }
   return icons[type]
 }

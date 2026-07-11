@@ -14,6 +14,7 @@ export interface ActionVariableReferenceScan {
   textReferences: VariableReference[]
   conditionVariableKeys: VariableReference[]
   outputBindingKeys: VariableReference[]
+  producedVariableKeys: VariableReference[]
 }
 
 export type VariableScannableAction = Pick<TaskAction, 'type' | 'params' | 'enabled' | 'condition' | 'outputBinding'>
@@ -89,6 +90,19 @@ export function collectActionStringValues(action: VariableScannableAction) {
       addList('scriptArgs')
       collectEnvValues(action.params, values)
       break
+    case 'writeClipboard':
+      add('text')
+      break
+    case 'showNotification':
+      add('title')
+      add('body')
+      break
+    case 'waitForPort':
+      add('host')
+      break
+    case 'readClipboard':
+    case 'delay':
+      break
   }
 
   return values
@@ -127,6 +141,16 @@ export function collectOutputBindingKeys(action: VariableScannableAction) {
     .map(([field, key]) => ({ field, key: key!.trim() }))
 }
 
+export function collectActionProducedVariableKeys(action: VariableScannableAction) {
+  if (action.type === 'readClipboard') {
+    const targetVariable = (action.params as Record<string, unknown>).targetVariable
+    return typeof targetVariable === 'string' && targetVariable.trim()
+      ? [{ field: 'targetVariable', key: targetVariable.trim() }]
+      : []
+  }
+  return collectOutputBindingKeys(action)
+}
+
 export function scanActionVariableReferences(action: VariableScannableAction): ActionVariableReferenceScan {
   const textReferences = [...collectActionStringValues(action), ...collectConditionStringValues(action.condition)]
     .flatMap(({ field, value }) => extractVariableReferences(value).map((key) => ({ field, key, value })))
@@ -134,7 +158,8 @@ export function scanActionVariableReferences(action: VariableScannableAction): A
   return {
     textReferences,
     conditionVariableKeys: collectConditionVariableKeys(action.condition),
-    outputBindingKeys: collectOutputBindingKeys(action)
+    outputBindingKeys: collectOutputBindingKeys(action),
+    producedVariableKeys: collectActionProducedVariableKeys(action)
   }
 }
 
@@ -151,8 +176,8 @@ export function inferMissingInputVariableKeys(actions: VariableScannableAction[]
     const scan = scanActionVariableReferences(action)
     scan.textReferences.forEach(({ key }) => addMissing(key))
     scan.conditionVariableKeys.forEach(({ key }) => addMissing(key))
-    if (action.enabled && action.type === 'runCommand') {
-      scan.outputBindingKeys.forEach(({ key }) => {
+    if (action.enabled) {
+      scan.producedVariableKeys.forEach(({ key }) => {
         if (isValidVariableKey(key)) availableKeys.add(key)
       })
     }

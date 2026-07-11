@@ -1,3 +1,4 @@
+use crate::context;
 use crate::diagnostics::dev_log_error;
 use crate::domain::{
     ActionCondition, ActionExecutionResult, ActionType, ExecutionLogSummary, ExecutionScope,
@@ -12,6 +13,7 @@ use chrono::Utc;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
@@ -21,6 +23,7 @@ use uuid::Uuid;
 
 const OUTPUT_LIMIT_CHARS: usize = 8192;
 const WINDOWS_CONTROL_C_EXIT_CODE: i32 = -1073741510;
+const PORT_WAIT_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 
 pub fn execute_task(
     app: &AppHandle,
@@ -197,7 +200,7 @@ pub fn execute_task(
         );
         let action_started_at = Utc::now();
         let timer = Instant::now();
-        match execute_action(&resolved_action) {
+        match execute_action(app, &resolved_action) {
             Ok(output) => {
                 let finished_at = Utc::now();
                 let binding_snapshot = output.snapshot();
@@ -430,7 +433,7 @@ pub fn execute_task_action(
 
     let action_started_at = Utc::now();
     let timer = Instant::now();
-    let result = match execute_action(&resolved_action) {
+    let result = match execute_action(app, &resolved_action) {
         Ok(output) => {
             let finished_at = Utc::now();
             let binding_snapshot = output.snapshot();
@@ -538,7 +541,7 @@ pub fn execute_task_action(
     Ok(summary)
 }
 
-fn execute_action(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> {
+fn execute_action(app: &AppHandle, action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> {
     match action.action_type {
         ActionType::OpenProgram => open_program(action).map(ok_output).map_err(failed_output),
         ActionType::OpenUrl => open_url(action).map(ok_output).map_err(failed_output),
@@ -546,6 +549,10 @@ fn execute_action(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutpu
         ActionType::OpenFolder => open_folder(action).map(ok_output).map_err(failed_output),
         ActionType::RunCommand => run_command(action),
         ActionType::Delay => delay(action).map(ok_output).map_err(failed_output),
+        ActionType::WriteClipboard => write_clipboard(action),
+        ActionType::ReadClipboard => read_clipboard(action),
+        ActionType::ShowNotification => show_notification(app, action),
+        ActionType::WaitForPort => wait_for_port(action).map(ok_output).map_err(failed_output),
     }
 }
 
@@ -2135,6 +2142,102 @@ fn delay(action: &TaskAction) -> Result<String, String> {
     Ok(format!("已等待 {duration} ms"))
 }
 
+fn write_clipboard(action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> {
+    let text = string_param(action, "text").map_err(failed_output)?;
+    context::write_action_clipboard_text(text)
+        .map(|_| ok_output("已写入剪贴板文本".into()))
+        .map_err(failed_output)
+}
+
+fn read_clipboard(_action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> {
+    context::read_action_clipboard_text()
+        .map(|text| ActionRunOutput {
+            message: "已读取剪贴板文本".into(),
+            clipboard_text: Some(text),
+            ..Default::default()
+        })
+        .map_err(failed_output)
+}
+
+fn wait_for_port(action: &TaskAction) -> Result<String, String> {
+    let host = string_param(action, "host")?;
+    let port = action
+        .params
+        .get("port")
+        .and_then(|value| value.as_u64())
+        .filter(|port| (1..=65535).contains(port))
+        .ok_or_else(|| "端口必须在 1 到 65535 之间".to_string())? as u16;
+    let timeout_ms = action
+        .timeout_ms
+        .filter(|timeout| (1000..=600000).contains(timeout))
+        .ok_or_else(|| "端口等待超时时间必须在 1000 到 600000 ms 之间".to_string())?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let address = if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("等待端口超时：{host}:{port}"));
+        }
+
+        if let Ok(addresses) = address.to_socket_addrs() {
+            if addresses
+                .into_iter()
+                .any(|socket| TcpStream::connect_timeout(&socket, remaining).is_ok())
+            {
+                return Ok(format!("端口已可用：{host}:{port}"));
+            }
+        }
+
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("等待端口超时：{host}:{port}"));
+        }
+        thread::sleep(PORT_WAIT_RETRY_INTERVAL.min(remaining));
+    }
+}
+
+trait NotificationSender {
+    fn send(&self, title: &str, body: Option<&str>) -> Result<(), String>;
+}
+
+struct SystemNotificationSender<'a> {
+    app: &'a AppHandle,
+}
+
+impl NotificationSender for SystemNotificationSender<'_> {
+    fn send(&self, title: &str, body: Option<&str>) -> Result<(), String> {
+        use tauri_plugin_notification::NotificationExt;
+
+        let mut builder = self.app.notification().builder().title(title);
+        if let Some(body) = body.filter(|body| !body.is_empty()) {
+            builder = builder.body(body);
+        }
+        builder.show().map_err(|err| err.to_string())
+    }
+}
+
+fn show_notification(app: &AppHandle, action: &TaskAction) -> Result<ActionRunOutput, ActionRunOutput> {
+    let sender = SystemNotificationSender { app };
+    show_notification_with_sender(action, &sender)
+}
+
+fn show_notification_with_sender(
+    action: &TaskAction,
+    sender: &impl NotificationSender,
+) -> Result<ActionRunOutput, ActionRunOutput> {
+    let title = string_param(action, "title").map_err(failed_output)?;
+    let body = action.params.get("body").and_then(|value| value.as_str());
+    match sender.send(title, body) {
+        Ok(()) => Ok(ok_output("系统通知已发送".into())),
+        Err(_) => Ok(ok_output("未发送，系统通知不可用".into())),
+    }
+}
+
 fn string_param<'a>(action: &'a TaskAction, key: &str) -> Result<&'a str, String> {
     action
         .params
@@ -2182,6 +2285,7 @@ struct ActionRunOutput {
     exit_code: Option<i32>,
     stdout: Option<String>,
     stderr: Option<String>,
+    clipboard_text: Option<String>,
     failure_status: Option<ExecutionStatus>,
 }
 
@@ -2191,6 +2295,7 @@ impl ActionRunOutput {
             exit_code: self.exit_code,
             stdout: self.stdout.clone(),
             stderr: self.stderr.clone(),
+            clipboard_text: self.clipboard_text.clone(),
         }
     }
 }
@@ -2220,6 +2325,7 @@ fn cancelled_output(
         exit_code,
         stdout,
         stderr,
+        clipboard_text: None,
         failure_status: Some(ExecutionStatus::Cancelled),
     }
 }
@@ -2234,6 +2340,7 @@ fn timeout_output(
         exit_code: None,
         stdout,
         stderr,
+        clipboard_text: None,
         failure_status: Some(ExecutionStatus::Cancelled),
     }
 }
@@ -2382,7 +2489,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_action_dispatch_preserves_representative_action_behavior() {
+    fn action_helpers_preserve_representative_action_behavior() {
         let delay_action = TaskAction {
             id: "delay".into(),
             action_type: ActionType::Delay,
@@ -2421,21 +2528,166 @@ mod tests {
         };
 
         assert_eq!(
-            execute_action(&delay_action).unwrap().message,
+            delay(&delay_action).unwrap(),
             "已等待 1 ms"
         );
         assert!(
-            execute_action(&missing_file_action)
+            open_file(&missing_file_action)
                 .unwrap_err()
-                .message
                 .contains("文件不存在")
         );
         assert!(
-            execute_action(&missing_folder_action)
+            open_folder(&missing_folder_action)
                 .unwrap_err()
-                .message
                 .contains("文件夹不存在")
         );
+    }
+
+    #[test]
+    fn port_wait_succeeds_for_listener_and_times_out_after_listener_closes() {
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
+        let port = listener.local_addr().expect("listener address").port();
+        let action = TaskAction {
+            id: "wait-port".into(),
+            action_type: ActionType::WaitForPort,
+            name: None,
+            params: json!({ "host": "127.0.0.1", "port": port }),
+            enabled: true,
+            timeout_ms: Some(1000),
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: crate::domain::RiskLevel::Low,
+        };
+
+        assert_eq!(
+            wait_for_port(&action),
+            Ok(format!("端口已可用：127.0.0.1:{port}"))
+        );
+        drop(listener);
+        assert!(wait_for_port(&action).unwrap_err().contains("等待端口超时"));
+    }
+
+    #[test]
+    fn unavailable_notification_is_non_blocking_and_hides_content() {
+        struct UnavailableSender;
+        impl NotificationSender for UnavailableSender {
+            fn send(&self, _title: &str, _body: Option<&str>) -> Result<(), String> {
+                Err("system disabled".into())
+            }
+        }
+
+        let action = TaskAction {
+            id: "notify".into(),
+            action_type: ActionType::ShowNotification,
+            name: None,
+            params: json!({ "title": "private title", "body": "private body" }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: crate::domain::RiskLevel::Low,
+        };
+
+        let output = show_notification_with_sender(&action, &UnavailableSender).expect("non-blocking notification");
+        assert_eq!(output.message, "未发送，系统通知不可用");
+        assert!(!output.message.contains("private"));
+    }
+
+    #[test]
+    fn available_notification_returns_non_content_success() {
+        struct AvailableSender;
+        impl NotificationSender for AvailableSender {
+            fn send(&self, _title: &str, _body: Option<&str>) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        let action = TaskAction {
+            id: "notify".into(),
+            action_type: ActionType::ShowNotification,
+            name: None,
+            params: json!({ "title": "private title", "body": "private body" }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: crate::domain::RiskLevel::Low,
+        };
+
+        let output = show_notification_with_sender(&action, &AvailableSender).expect("available notification");
+        assert_eq!(output.message, "系统通知已发送");
+        assert!(!output.message.contains("private"));
+    }
+
+    #[test]
+    fn notification_with_empty_resolved_title_fails_before_delivery() {
+        struct AvailableSender;
+        impl NotificationSender for AvailableSender {
+            fn send(&self, _title: &str, _body: Option<&str>) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        let action = TaskAction {
+            id: "notify".into(),
+            action_type: ActionType::ShowNotification,
+            name: None,
+            params: json!({ "title": "", "body": "body" }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: crate::domain::RiskLevel::Low,
+        };
+
+        assert!(show_notification_with_sender(&action, &AvailableSender)
+            .unwrap_err()
+            .message
+            .contains("缺少参数：title"));
+    }
+
+    #[test]
+    fn clipboard_action_output_is_not_serialized_into_execution_results() {
+        let task = test_task(Vec::new());
+        let mut context = RuntimeVariableContext::from_task(&task, &HashMap::new()).expect("context");
+        let action = TaskAction {
+            id: "read".into(),
+            action_type: ActionType::ReadClipboard,
+            name: None,
+            params: json!({ "targetVariable": "clipboardText" }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: crate::domain::RiskLevel::High,
+        };
+        let output = ActionRunOutput {
+            message: "已读取剪贴板文本".into(),
+            clipboard_text: Some("private clipboard value".into()),
+            ..Default::default()
+        };
+        context.bind_output(&action, &output.snapshot()).expect("bind");
+        let result = action_result(
+            &action,
+            ExecutionStatus::Success,
+            Some(output.message.clone()),
+            None,
+            None,
+            None,
+            output,
+            &context,
+        );
+
+        assert!(!serde_json::to_string(&result)
+            .expect("serialize result")
+            .contains("private clipboard value"));
     }
 
     #[test]
@@ -2536,6 +2788,7 @@ mod tests {
                     exit_code: Some(0),
                     stdout: Some("D:\\Generated".into()),
                     stderr: None,
+                    clipboard_text: None,
                 },
             )
             .unwrap();

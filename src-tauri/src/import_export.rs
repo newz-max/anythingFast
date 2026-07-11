@@ -459,7 +459,12 @@ fn collect_action_path_hints(
                 push_path_hint(hints, owner_id, owner_name, action, "scriptPath");
             }
         }
-        ActionType::OpenUrl | ActionType::Delay => {}
+        ActionType::OpenUrl
+        | ActionType::Delay
+        | ActionType::WriteClipboard
+        | ActionType::ReadClipboard
+        | ActionType::ShowNotification
+        | ActionType::WaitForPort => {}
     }
 }
 
@@ -596,6 +601,60 @@ mod tests {
             created_at: "2026-07-01T00:00:00Z".into(),
             updated_at: "2026-07-01T00:00:00Z".into(),
         }
+    }
+
+    #[test]
+    fn import_preview_normalizes_clipboard_read_risk_without_path_hints() {
+        let mut task = sample_url_task("clipboard-task", "clipboard-read", "https://example.test");
+        task.actions = vec![TaskAction {
+            id: "clipboard-read".into(),
+            action_type: ActionType::ReadClipboard,
+            name: Some("读取剪贴板".into()),
+            params: json!({ "targetVariable": "clipboardText" }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: RiskLevel::Low,
+        }];
+        let bundle = TaskExportBundle {
+            schema_version: BUNDLE_SCHEMA_VERSION,
+            exported_at: "2026-07-11T00:00:00Z".into(),
+            source_app: SOURCE_APP.into(),
+            tasks: vec![task],
+            templates: vec![TaskTemplate {
+                id: "clipboard-template".into(),
+                name: "剪贴板模板".into(),
+                category: None,
+                keywords: None,
+                description: None,
+                variables: Vec::new(),
+                actions: vec![TaskTemplateAction {
+                    action_type: ActionType::WriteClipboard,
+                    name: Some("写入剪贴板".into()),
+                    params: json!({ "text": "{{message}}" }),
+                    enabled: true,
+                    timeout_ms: None,
+                    continue_on_error: None,
+                    output_binding: None,
+                    condition: None,
+                    risk_level: RiskLevel::High,
+                }],
+            }],
+        };
+
+        let processed = process_import(
+            &bundle_to_json(&bundle).expect("bundle json"),
+            &AppConfig::default(),
+        )
+        .expect("process import");
+
+        assert_eq!(processed.preview.tasks[0].action_types, vec![ActionType::ReadClipboard]);
+        assert_eq!(processed.preview.tasks[0].risk_level, RiskLevel::High);
+        assert!(processed.preview.path_hints.is_empty());
+        assert_eq!(processed.preview.templates[0].action_types, vec![ActionType::WriteClipboard]);
+        assert_eq!(processed.preview.templates[0].risk_level, RiskLevel::Low);
     }
 
     fn sample_template(id: &str) -> TaskTemplate {

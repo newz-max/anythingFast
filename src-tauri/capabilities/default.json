@@ -15,6 +15,7 @@
     "autostart:allow-is-enabled",
     "dialog:allow-open",
     "global-shortcut:default",
-    "opener:default"
+    "opener:default",
+    "notification:default"
   ]
 }

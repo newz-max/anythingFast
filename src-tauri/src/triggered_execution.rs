@@ -379,6 +379,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn clipboard_read_requires_unattended_confirmation() {
+        let mut task = task_with_variables(Vec::new());
+        task.actions = vec![TaskAction {
+            id: "read-clipboard".into(),
+            action_type: ActionType::ReadClipboard,
+            name: Some("读取剪贴板".into()),
+            params: json!({ "targetVariable": "clipboardText" }),
+            enabled: true,
+            timeout_ms: None,
+            continue_on_error: None,
+            output_binding: None,
+            condition: None,
+            risk_level: RiskLevel::Low,
+        }];
+
+        let risk = analyze_task_risk_for_unattended(&task, HashMap::new());
+
+        assert!(risk.requires_confirmation);
+        assert_eq!(risk.high_risk_actions.len(), 1);
+        assert_eq!(risk.high_risk_actions[0].action_type, ActionType::ReadClipboard);
+    }
+
     fn task_with_variables(variables: Vec<TaskVariable>) -> TaskItem {
         TaskItem {
             id: "task".into(),

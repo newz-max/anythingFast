@@ -5,6 +5,9 @@ use crate::domain::{
 use regex::Regex;
 
 pub fn derive_action_risk(action: &TaskAction) -> RiskLevel {
+    if action.action_type == ActionType::ReadClipboard {
+        return RiskLevel::High;
+    }
     if action.action_type != ActionType::RunCommand {
         return RiskLevel::Low;
     }
@@ -150,6 +153,30 @@ pub fn action_detail(action: &TaskAction) -> String {
             .and_then(|value| value.as_u64())
             .map(|duration| format!("{duration} ms"))
             .unwrap_or_default(),
+        ActionType::WriteClipboard => "写入剪贴板文本".to_string(),
+        ActionType::ReadClipboard => format!(
+            "读取剪贴板到变量：{}",
+            action
+                .params
+                .get("targetVariable")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+        ),
+        ActionType::ShowNotification => "发送系统通知".to_string(),
+        ActionType::WaitForPort => format!(
+            "等待 {}:{}",
+            action
+                .params
+                .get("host")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default(),
+            action
+                .params
+                .get("port")
+                .and_then(|value| value.as_u64())
+                .map(|value| value.to_string())
+                .unwrap_or_default()
+        ),
         _ => action
             .params
             .get("path")

@@ -9,7 +9,7 @@ import {
 } from '@/domain/actionTypes'
 import type { ActionType, FieldIssue, TaskAction } from '@/types/domain'
 
-const actionTypes: ActionType[] = ['openProgram', 'openUrl', 'openFile', 'openFolder', 'runCommand', 'delay']
+const actionTypes: ActionType[] = ['openProgram', 'openUrl', 'openFile', 'openFolder', 'runCommand', 'delay', 'writeClipboard', 'readClipboard', 'showNotification', 'waitForPort']
 
 function makeAction(type: ActionType, params = createDefaultActionParams(type)): TaskAction {
   return {
@@ -18,6 +18,7 @@ function makeAction(type: ActionType, params = createDefaultActionParams(type)):
     name: getActionTypeLabel(type),
     params,
     enabled: true,
+    timeoutMs: type === 'waitForPort' ? 60000 : null,
     riskLevel: 'low'
   }
 }
@@ -31,7 +32,11 @@ describe('action type definitions', () => {
       '打开文件',
       '打开文件夹',
       '执行命令',
-      '延时等待'
+      '延时等待',
+      '写入剪贴板',
+      '读取剪贴板',
+      '系统通知',
+      '等待端口'
     ])
     expect(actionTypeOptions.every((option) => option.description.length > 0)).toBe(true)
   })
@@ -54,6 +59,10 @@ describe('action type definitions', () => {
       scriptArgs: []
     })
     expect(createDefaultActionParams('delay')).toEqual({ durationMs: 1000 })
+    expect(createDefaultActionParams('writeClipboard')).toEqual({ text: '' })
+    expect(createDefaultActionParams('readClipboard')).toEqual({ targetVariable: 'clipboardText' })
+    expect(createDefaultActionParams('showNotification')).toEqual({ title: '', body: '' })
+    expect(createDefaultActionParams('waitForPort')).toEqual({ host: '127.0.0.1', port: 3000 })
   })
 
   it('describes every supported action type from its definition', () => {
@@ -73,6 +82,10 @@ describe('action type definitions', () => {
       )
     ).toBe('yarn test · 后台运行')
     expect(describeActionByDefinition(makeAction('delay', { durationMs: 500 }))).toBe('等待 500 ms')
+    expect(describeActionByDefinition(makeAction('writeClipboard', { text: 'sensitive value' }))).toBe('写入剪贴板文本')
+    expect(describeActionByDefinition(makeAction('readClipboard', { targetVariable: 'clipboardText' }))).toBe('读取剪贴板到变量：clipboardText')
+    expect(describeActionByDefinition(makeAction('showNotification', { title: 'sensitive value', body: 'hidden' }))).toBe('发送系统通知')
+    expect(describeActionByDefinition(makeAction('waitForPort', { host: '127.0.0.1', port: 3000 }))).toBe('等待 127.0.0.1:3000')
   })
 
   it('validates action params through definitions', () => {
@@ -87,7 +100,11 @@ describe('action type definitions', () => {
         workingDir: 'D:\\Project\\anythingFast',
         shell: 'powershell'
       }),
-      makeAction('delay', { durationMs: 1000 })
+      makeAction('delay', { durationMs: 1000 }),
+      makeAction('writeClipboard', { text: '{{message}}' }),
+      makeAction('readClipboard', { targetVariable: 'clipboardText' }),
+      makeAction('showNotification', { title: '{{title}}', body: '{{body}}' }),
+      makeAction('waitForPort', { host: '{{host}}', port: 3000 })
     ]
 
     validActions.forEach((action) => {
@@ -159,5 +176,6 @@ describe('action type definitions', () => {
         })
       )
     ).toBe('high')
+    expect(inferActionRiskByDefinition(makeAction('readClipboard', { targetVariable: 'clipboardText' }))).toBe('high')
   })
 })

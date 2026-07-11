@@ -6,7 +6,7 @@ use crate::domain::{
 use crate::risk::{derive_action_risk, derive_task_risk, normalize_task_risk};
 use crate::variables::{
     collect_action_string_values, collect_condition_string_values, collect_condition_variable_keys,
-    collect_output_binding_keys, extract_variable_references, is_valid_variable_key,
+    collect_action_produced_variable_keys, extract_variable_references, is_valid_variable_key,
     validate_action_output_binding, validate_task_variables,
 };
 use std::collections::HashSet;
@@ -197,6 +197,10 @@ fn validate_action_params(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
         ActionType::OpenFolder => validate_open_folder_action(action, issues),
         ActionType::RunCommand => validate_run_command_action(action, issues),
         ActionType::Delay => validate_delay_action(action, issues),
+        ActionType::WriteClipboard => validate_write_clipboard_action(action, issues),
+        ActionType::ReadClipboard => validate_read_clipboard_action(action, issues),
+        ActionType::ShowNotification => validate_show_notification_action(action, issues),
+        ActionType::WaitForPort => validate_wait_for_port_action(action, issues),
     }
 }
 
@@ -293,6 +297,49 @@ fn validate_delay_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
     }
 }
 
+fn validate_write_clipboard_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    if string_param(action, "text").trim().is_empty() {
+        issues.push(issue("text", "剪贴板文本不能为空"));
+    }
+}
+
+fn validate_read_clipboard_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    let target = string_param(action, "targetVariable").trim();
+    if !is_valid_variable_key(target) {
+        issues.push(issue("targetVariable", "目标变量 key 无效"));
+    }
+}
+
+fn validate_show_notification_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    if string_param(action, "title").trim().is_empty() {
+        issues.push(issue("title", "通知标题不能为空"));
+    }
+}
+
+fn validate_wait_for_port_action(action: &TaskAction, issues: &mut Vec<FieldIssue>) {
+    let host = string_param(action, "host").trim();
+    if host.is_empty() || host.contains("://") || host.contains('/') {
+        issues.push(issue("host", "主机必须是主机名或 IP 地址"));
+    }
+    if !action
+        .params
+        .get("port")
+        .and_then(|value| value.as_u64())
+        .is_some_and(|port| (1..=65535).contains(&port))
+    {
+        issues.push(issue("port", "端口必须在 1 到 65535 之间"));
+    }
+    if !action
+        .timeout_ms
+        .is_some_and(|timeout| (1000..=600000).contains(&timeout))
+    {
+        issues.push(issue(
+            "timeoutMs",
+            "端口等待超时时间必须在 1000 到 600000 ms 之间",
+        ));
+    }
+}
+
 fn validate_action_condition(condition: &Option<ActionCondition>) -> Vec<FieldIssue> {
     let mut issues = Vec::new();
     let Some(condition) = condition else {
@@ -365,10 +412,10 @@ fn validate_action_variable_references(
 }
 
 fn add_available_output_binding_keys(keys: &mut HashSet<String>, action: &TaskAction) {
-    if !action.enabled || action.action_type != ActionType::RunCommand {
+    if !action.enabled {
         return;
     }
-    for reference in collect_output_binding_keys(action) {
+    for reference in collect_action_produced_variable_keys(action) {
         if is_valid_variable_key(&reference.key) {
             keys.insert(reference.key);
         }

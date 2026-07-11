@@ -1,6 +1,16 @@
 export type RiskLevel = 'low' | 'medium' | 'high'
 
-export type ActionType = 'openProgram' | 'openUrl' | 'openFile' | 'openFolder' | 'runCommand' | 'delay'
+export type ActionType =
+  | 'openProgram'
+  | 'openUrl'
+  | 'openFile'
+  | 'openFolder'
+  | 'runCommand'
+  | 'delay'
+  | 'writeClipboard'
+  | 'readClipboard'
+  | 'showNotification'
+  | 'waitForPort'
 
 export type CommandShell = 'terminal' | 'powershell' | 'pwsh' | 'cmd'
 export type CommandTerminalHost = 'systemTerminal' | 'direct'
@@ -38,7 +48,34 @@ export interface DelayParams {
   durationMs?: number
 }
 
-export type ActionParams = OpenProgramParams | OpenUrlParams | PathParams | CommandParams | DelayParams
+export interface WriteClipboardParams {
+  text: string
+}
+
+export interface ReadClipboardParams {
+  targetVariable: string
+}
+
+export interface ShowNotificationParams {
+  title: string
+  body?: string
+}
+
+export interface WaitForPortParams {
+  host: string
+  port: number
+}
+
+export type ActionParams =
+  | OpenProgramParams
+  | OpenUrlParams
+  | PathParams
+  | CommandParams
+  | DelayParams
+  | WriteClipboardParams
+  | ReadClipboardParams
+  | ShowNotificationParams
+  | WaitForPortParams
 
 export interface TaskVariable {
   key: string
