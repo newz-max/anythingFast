@@ -6,6 +6,7 @@ import AppTitlebar from '@/components/layout/AppTitlebar.vue'
 import TaskListPanel from '@/components/tasks/TaskListPanel.vue'
 import TemplateCenter from '@/components/tasks/TemplateCenter.vue'
 import TemplateIntroPanel from '@/components/tasks/TemplateIntroPanel.vue'
+import TemplatePreviewModal from '@/components/tasks/TemplatePreviewModal.vue'
 import TaskImportPreviewModal from '@/components/tasks/TaskImportPreviewModal.vue'
 import TaskWizardDrawer from '@/components/tasks/TaskWizardDrawer.vue'
 import TaskDetailPanel from '@/components/tasks/TaskDetailPanel.vue'
@@ -86,6 +87,8 @@ const wizardVisible = shallowRef(false)
 const wizardMode = shallowRef<TaskWizardMode>('create')
 const wizardTask = shallowRef<TaskItem | null>(null)
 const wizardInitialStep = shallowRef(1)
+const templatePreviewVisible = shallowRef(false)
+const previewTemplate = shallowRef<TaskTemplate | null>(null)
 const activeTaskView = shallowRef<TaskView>('all')
 const activeActionView = shallowRef<ActionView>('list')
 const selectedTagId = shallowRef<string | null>(null)
@@ -327,6 +330,19 @@ async function saveTask(task: TaskItem) {
   }
 }
 
+async function saveTaskAndRun(task: TaskItem) {
+  let savedTask: TaskItem
+  try {
+    savedTask = await taskStore.upsertTask(task)
+    message.success('已保存')
+    wizardVisible.value = false
+  } catch (err) {
+    reportUiError('Save task before run failed', err, { taskId: task.id })
+    return
+  }
+  await execute(savedTask)
+}
+
 async function duplicateTask(task: TaskItem) {
   try {
     await taskStore.upsertTask(cloneTask(task))
@@ -371,6 +387,7 @@ function editSelectedTask(initialStep = 1) {
 function isMainShortcutSuspended() {
   return (
     wizardVisible.value ||
+    templatePreviewVisible.value ||
     tagModalVisible.value ||
     helpModalVisible.value ||
     settingsModalVisible.value ||
@@ -507,10 +524,30 @@ function isActionRunning(action: TaskAction) {
   return Boolean(executionStore.activeRunForTarget(executionStore.actionRunTargetKey(selectedTask.value.id, action.id)))
 }
 
-function createFromTemplate(template: TaskTemplate) {
+function openTemplatePreview(template: TaskTemplate) {
+  previewTemplate.value = template
+  templatePreviewVisible.value = true
+}
+
+function createFromTemplate(initialValues: Record<string, string>) {
+  const template = previewTemplate.value
+  if (!template) return
+  const firstConfigurationKeys = new Set(
+    (template.variables || [])
+      .filter((variable) => !variable.required && !variable.defaultValue)
+      .map((variable) => variable.key)
+  )
+  const task = createTaskFromTemplate(template)
+  task.variables = (task.variables || []).map((variable) => {
+    const value = initialValues[variable.key]
+    return firstConfigurationKeys.has(variable.key) && value?.trim()
+      ? { ...variable, defaultValue: value }
+      : variable
+  })
   wizardMode.value = 'create'
-  wizardTask.value = createTaskFromTemplate(template)
+  wizardTask.value = task
   wizardInitialStep.value = 1
+  templatePreviewVisible.value = false
   wizardVisible.value = true
 }
 
@@ -589,9 +626,10 @@ function reportUiError(context: string, err: unknown, extra?: Record<string, unk
 
         <TemplateCenter
           v-else
-          :templates="taskStore.templates"
-          :saved-template-count="taskStore.savedTemplates.length"
-          @use="createFromTemplate"
+          :built-in-templates="taskStore.builtInTemplates"
+          :saved-templates="taskStore.savedTemplates"
+          @preview="openTemplatePreview"
+          @use="openTemplatePreview"
           @import="openImportFile"
           @export="exportSavedTemplates"
         />
@@ -650,8 +688,15 @@ function reportUiError(context: string, err: unknown, extra?: Record<string, unk
       :saving="taskStore.saving"
       :initial-step="wizardInitialStep"
       @save="saveTask"
+      @save-and-run="saveTaskAndRun"
       @duplicate="duplicateTask"
       @delete="deleteTask"
+    />
+
+    <TemplatePreviewModal
+      v-model:show="templatePreviewVisible"
+      :template="previewTemplate"
+      @use="createFromTemplate"
     />
 
     <TaskImportPreviewModal

@@ -300,6 +300,73 @@ describe('wizard save feedback', () => {
     expect(wrapper.emitted('save')).toBeUndefined()
   })
 
+  it('uses normal validation before save and run', async () => {
+    const wrapper = trackWrapper(mount(TaskWizardDrawer, {
+      props: {
+        show: true,
+        mode: 'create',
+        task: makeTask([], 'task-invalid-run'),
+        allTasks: [],
+        saving: false
+      },
+      global: { stubs: taskWizardStubs }
+    }))
+
+    await nextTick()
+    await goToConfirmStep(wrapper)
+    await findButton(wrapper, '保存并运行').trigger('click')
+
+    expect(messageApi.warning).toHaveBeenCalledWith('至少需要一个动作')
+    expect(wrapper.emitted('save-and-run')).toBeUndefined()
+  })
+
+  it('emits save and run only in create mode and blocks submission while saving', async () => {
+    const action: TaskAction = {
+      id: 'action-save-run',
+      type: 'delay',
+      name: '等待',
+      params: { durationMs: 1000 },
+      enabled: true,
+      riskLevel: 'low'
+    }
+    const createWrapper = trackWrapper(mount(TaskWizardDrawer, {
+      props: {
+        show: true,
+        mode: 'create',
+        task: makeTask([action], 'task-save-run'),
+        allTasks: [],
+        saving: false
+      },
+      global: { stubs: taskWizardStubs }
+    }))
+
+    await nextTick()
+    await goToConfirmStep(createWrapper)
+    await findButton(createWrapper, '保存并运行').trigger('click')
+    expect(createWrapper.emitted('save-and-run')).toHaveLength(1)
+    expect(createWrapper.emitted('save')).toBeUndefined()
+
+    const editWrapper = trackWrapper(mount(TaskWizardDrawer, {
+      props: {
+        show: true,
+        mode: 'edit',
+        task: makeTask([action], 'task-edit'),
+        allTasks: [],
+        saving: false
+      },
+      global: { stubs: taskWizardStubs }
+    }))
+    await nextTick()
+    await goToConfirmStep(editWrapper)
+    expect(editWrapper.findAll('button').some((button) => button.text() === '保存并运行')).toBe(false)
+
+    await createWrapper.setProps({ saving: true })
+    const saveAndRunButton = findButton(createWrapper, '保存并运行')
+    expect(saveAndRunButton.attributes('disabled')).toBeDefined()
+    await saveAndRunButton.trigger('click')
+    expect(createWrapper.emitted('save-and-run')).toHaveLength(1)
+  })
+
   it('keeps the task draft after emitting save while the drawer remains open', async () => {
     const action: TaskAction = {
       id: 'action-1',

@@ -20,14 +20,14 @@ describe('useTaskWizardDraft', () => {
     expect(draft.value).not.toBe(sourceTask.value)
     expect(draft.value).toMatchObject({
       id: sourceTask.value.id,
-      name: '打开工作看板',
+      name: sourceTask.value.name,
       triggers: [{ type: 'manual', enabled: true }]
     })
-    expect(draft.value?.actions).toHaveLength(1)
-    expect(draft.value?.actions[0].name).toBe('打开看板')
+    expect(draft.value?.actions).toHaveLength(sourceTask.value.actions.length)
+    expect(draft.value?.actions[0].name).toBe(sourceTask.value.actions[0].name)
 
     draft.value!.name = '已编辑草稿'
-    expect(sourceTask.value.name).toBe('打开工作看板')
+    expect(sourceTask.value.name).toBe(builtInTaskTemplates[0].name)
 
     clearDraft()
   })

@@ -87,10 +87,41 @@ const TaskListPanelStub = defineComponent({
 
 const stubs = {
   TaskListPanel: TaskListPanelStub,
+  TemplateCenter: defineComponent({
+    name: 'TemplateCenter',
+    props: ['builtInTemplates', 'savedTemplates'],
+    emits: ['preview', 'use', 'import', 'export'],
+    template: `
+      <section class="template-center-stub">
+        <button class="template-preview-stub" type="button" @click="$emit('preview', builtInTemplates.find(template => template.id === 'switch-git-branch'))">预览模板</button>
+        <button class="template-use-stub" type="button" @click="$emit('use', builtInTemplates.find(template => template.id === 'switch-git-branch'))">使用模板</button>
+      </section>
+    `
+  }),
+  TemplatePreviewModal: defineComponent({
+    name: 'TemplatePreviewModal',
+    props: ['show', 'template'],
+    emits: ['update:show', 'use'],
+    template: `
+      <section v-if="show" class="template-preview-modal-stub">
+        <span>{{ template?.name }}</span>
+        <button class="preview-cancel-stub" type="button" @click="$emit('update:show', false)">取消预览</button>
+        <button class="preview-use-stub" type="button" @click="$emit('use', { projectDir: 'D:\\\\Configured', branchName: 'must-not-persist' })">确认使用</button>
+        <button class="preview-use-empty-stub" type="button" @click="$emit('use', { projectDir: '   ' })">跳过配置</button>
+      </section>
+    `
+  }),
   TaskWizardDrawer: defineComponent({
     name: 'TaskWizardDrawer',
-    props: ['show', 'mode', 'initialStep'],
-    template: '<section v-if="show" class="task-wizard-stub">{{ mode }}:{{ initialStep }}</section>'
+    props: ['show', 'mode', 'initialStep', 'task'],
+    emits: ['save', 'save-and-run'],
+    template: `
+      <section v-if="show" class="task-wizard-stub">
+        {{ mode }}:{{ initialStep }}
+        <button class="wizard-save-stub" type="button" @click="$emit('save', task)">保存</button>
+        <button v-if="mode === 'create'" class="wizard-save-run-stub" type="button" @click="$emit('save-and-run', task)">保存并运行</button>
+      </section>
+    `
   }),
   TaskImportPreviewModal: defineComponent({
     name: 'TaskImportPreviewModal',
@@ -248,6 +279,19 @@ async function pressKey(key: string, options: KeyboardEventInit = {}, target: Wi
   await nextTick()
 }
 
+function findTextButton(wrapper: VueWrapper, text: string) {
+  const button = wrapper.findAll('button').find((candidate) => candidate.text().includes(text))
+  if (!button) throw new Error(`Button not found: ${text}`)
+  return button
+}
+
+async function openTemplateDraft(wrapper: VueWrapper) {
+  await findTextButton(wrapper, '模板中心').trigger('click')
+  await wrapper.get('.template-use-stub').trigger('click')
+  await wrapper.get('.preview-use-stub').trigger('click')
+  await nextTick()
+}
+
 describe('MainLayout window keyboard shortcuts', () => {
   let wrapper: VueWrapper | null = null
 
@@ -264,9 +308,12 @@ describe('MainLayout window keyboard shortcuts', () => {
       }))
     })
     executeMock.mockClear()
+    executeMock.mockResolvedValue(undefined)
     focusSearchMock.mockClear()
     scrollTaskIntoViewMock.mockClear()
     messageApi.success.mockClear()
+    messageApi.error.mockClear()
+    messageApi.warning.mockClear()
     updaterApiMock.checkForUpdate.mockReset()
     updaterApiMock.downloadUpdate.mockReset()
     updaterApiMock.installUpdate.mockReset()
@@ -403,6 +450,101 @@ describe('MainLayout window keyboard shortcuts', () => {
 
     expect(focusSearchMock).not.toHaveBeenCalled()
     expect(settingsMount.taskStore.selectedTaskId).toBe('task-1')
+  })
+
+  it('opens template preview without creating a draft and cancellation keeps the wizard closed', async () => {
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+
+    await findTextButton(wrapper, '模板中心').trigger('click')
+    await wrapper.get('.template-preview-stub').trigger('click')
+
+    expect(wrapper.find('.template-preview-modal-stub').exists()).toBe(true)
+    expect(wrapper.find('.task-wizard-stub').exists()).toBe(false)
+
+    await wrapper.get('.preview-cancel-stub').trigger('click')
+    expect(wrapper.find('.template-preview-modal-stub').exists()).toBe(false)
+    expect(wrapper.find('.task-wizard-stub').exists()).toBe(false)
+  })
+
+  it('applies only non-empty first-configuration values to an independent template draft', async () => {
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+    const sourceTemplate = mounted.taskStore.builtInTemplates.find((template) => template.id === 'switch-git-branch')!
+
+    await findTextButton(wrapper, '模板中心').trigger('click')
+    await wrapper.get('.template-use-stub').trigger('click')
+    await wrapper.get('.preview-use-stub').trigger('click')
+    await nextTick()
+
+    const wizard = wrapper.findComponent({ name: 'TaskWizardDrawer' })
+    const draft = wizard.props('task') as TaskItem
+    expect(draft.variables?.find((variable) => variable.key === 'projectDir')?.defaultValue).toBe('D:\\Configured')
+    expect(draft.variables?.find((variable) => variable.key === 'branchName')?.defaultValue).toBe('')
+    expect(sourceTemplate.variables?.find((variable) => variable.key === 'projectDir')?.defaultValue).toBe('')
+    expect(sourceTemplate.variables?.find((variable) => variable.key === 'branchName')?.defaultValue).toBe('')
+    expect(wrapper.find('.template-preview-modal-stub').exists()).toBe(false)
+    expect(wrapper.find('.task-wizard-stub').exists()).toBe(true)
+  })
+
+  it('keeps skipped first-configuration values empty in the generated draft', async () => {
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+
+    await findTextButton(wrapper, '模板中心').trigger('click')
+    await wrapper.get('.template-use-stub').trigger('click')
+    await wrapper.get('.preview-use-empty-stub').trigger('click')
+    await nextTick()
+
+    const draft = wrapper.findComponent({ name: 'TaskWizardDrawer' }).props('task') as TaskItem
+    expect(draft.variables?.find((variable) => variable.key === 'projectDir')?.defaultValue).toBe('')
+  })
+
+  it('keeps ordinary save behavior without starting execution', async () => {
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+
+    await openTemplateDraft(wrapper)
+    const draft = wrapper.findComponent({ name: 'TaskWizardDrawer' }).props('task') as TaskItem
+    await wrapper.get('.wizard-save-stub').trigger('click')
+    await flushPromises()
+
+    expect(mounted.taskStore.tasks.some((task) => task.id === draft.id)).toBe(true)
+    expect(mounted.taskStore.selectedTaskId).toBe(draft.id)
+    expect(executeMock).not.toHaveBeenCalled()
+    expect(wrapper.find('.task-wizard-stub').exists()).toBe(false)
+  })
+
+  it('runs the actual persisted task only after save succeeds', async () => {
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+
+    await openTemplateDraft(wrapper)
+    const draft = wrapper.findComponent({ name: 'TaskWizardDrawer' }).props('task') as TaskItem
+    await wrapper.get('.wizard-save-run-stub').trigger('click')
+    await flushPromises()
+
+    const savedTask = mounted.taskStore.tasks.find((task) => task.id === draft.id)
+    expect(savedTask).toBeDefined()
+    expect(mounted.taskStore.selectedTaskId).toBe(draft.id)
+    expect(executeMock).toHaveBeenCalledTimes(1)
+    expect(executeMock).toHaveBeenCalledWith(savedTask)
+    expect(wrapper.find('.task-wizard-stub').exists()).toBe(false)
+  })
+
+  it('does not close or execute when save and run persistence fails', async () => {
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+    const saveError = new Error('保存失败')
+    vi.spyOn(mounted.taskStore, 'upsertTask').mockRejectedValueOnce(saveError)
+
+    await openTemplateDraft(wrapper)
+    await wrapper.get('.wizard-save-run-stub').trigger('click')
+    await flushPromises()
+
+    expect(executeMock).not.toHaveBeenCalled()
+    expect(wrapper.find('.task-wizard-stub').exists()).toBe(true)
+    expect(messageApi.error).toHaveBeenCalledWith('保存失败')
   })
 
   it('shows downloaded update action in titlebar and installs on click', async () => {

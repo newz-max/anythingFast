@@ -1,8 +1,51 @@
 import { describe, expect, it } from 'vitest'
 import { builtInTaskTemplates, createTaskFromTemplate, deriveTemplateRisk } from '@/domain/taskTemplates'
+import { collectActionStringValues } from '@/domain/variables'
+import { validateTaskLocal } from '@/domain/validation'
 import type { TaskTemplate } from '@/types/domain'
 
 describe('task templates', () => {
+  it('provides a portable catalog across all required scene categories', () => {
+    expect(builtInTaskTemplates).toHaveLength(12)
+    expect(new Set(builtInTaskTemplates.map((template) => template.category))).toEqual(
+      new Set(['开发者', '办公', '学习', '系统维护', '个人常用'])
+    )
+
+    builtInTaskTemplates.forEach((template) => {
+      const task = createTaskFromTemplate(template)
+      expect(validateTaskLocal(task).issues, template.name).toEqual([])
+      expect(task.triggers).toEqual([{ type: 'manual', enabled: true }])
+      expect(template.variables?.filter((variable) => variable.secret && variable.defaultValue)).toEqual([])
+    })
+  })
+
+  it('keeps environment-specific values variable-based and excludes destructive commands', () => {
+    const parameterValues = builtInTaskTemplates.flatMap((template) =>
+      template.actions.flatMap((action) => collectActionStringValues(action).map(({ value }) => value))
+    )
+    const commands = builtInTaskTemplates.flatMap((template) =>
+      template.actions
+        .filter((action) => action.type === 'runCommand' && 'command' in action.params)
+        .map((action) => ('command' in action.params ? action.params.command : ''))
+    )
+
+    expect(parameterValues).not.toContain('https://example.com')
+    expect(parameterValues.filter((value) => /^[A-Za-z]:\\/.test(value))).toEqual([])
+    expect(commands.join(' ')).not.toMatch(/\b(del|erase|rmdir|rd|format|remove-item|rm)\b/i)
+    expect(builtInTaskTemplates.some((template) => /清理|删除|覆盖/.test(template.name))).toBe(false)
+  })
+
+  it('derives every command template as at least medium risk', () => {
+    const commandTemplates = builtInTaskTemplates.filter((template) =>
+      template.actions.some((action) => action.type === 'runCommand')
+    )
+
+    expect(commandTemplates.length).toBeGreaterThan(0)
+    commandTemplates.forEach((template) => {
+      expect(['medium', 'high']).toContain(deriveTemplateRisk(template))
+    })
+  })
+
   it('creates an editable task draft from a built-in template', () => {
     const template = builtInTaskTemplates[0]
     const task = createTaskFromTemplate(template)

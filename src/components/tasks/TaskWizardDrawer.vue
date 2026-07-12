@@ -25,6 +25,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:show': [show: boolean]
   save: [task: TaskItem]
+  'save-and-run': [task: TaskItem]
   close: []
   delete: [task: TaskItem]
   duplicate: [task: TaskItem]
@@ -88,14 +89,28 @@ function previousStep() {
   currentStep.value -= 1
 }
 
-function save() {
+function submit(event: 'save' | 'save-and-run') {
+  if (props.saving) return
   if (!draft.value || validation.value?.valid === false) {
     currentStep.value = 3
     message.warning(validation.value?.issues[0]?.message || '保存前需要修正事项配置')
     return
   }
   const savedTask = clonePlainDto(draft.value)
-  emit('save', savedTask)
+  if (event === 'save') {
+    emit('save', savedTask)
+    return
+  }
+  emit('save-and-run', savedTask)
+}
+
+function save() {
+  submit('save')
+}
+
+function saveAndRun() {
+  if (props.mode !== 'create') return
+  submit('save-and-run')
 }
 
 function duplicate() {
@@ -212,9 +227,20 @@ function onEditorKeydown(event: KeyboardEvent) {
             <NButton v-if="currentStep < 3" class="nav-footer-button" type="primary" :disabled="!canGoNext" @click="nextStep">
               下一步
             </NButton>
-            <NButton v-else class="nav-footer-button" type="primary" :loading="saving" :disabled="!canSave" @click="save">
-              保存
-            </NButton>
+            <template v-else>
+              <NButton
+                v-if="mode === 'create'"
+                class="save-run-footer-button"
+                secondary
+                :disabled="!canSave || saving"
+                @click="saveAndRun"
+              >
+                保存并运行
+              </NButton>
+              <NButton class="nav-footer-button" type="primary" :loading="saving" :disabled="!canSave || saving" @click="save">
+                保存
+              </NButton>
+            </template>
           </div>
         </div>
       </template>
@@ -270,7 +296,7 @@ function onEditorKeydown(event: KeyboardEvent) {
 }
 
 .footer-primary {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
 }
 
 .footer :deep(.n-button) {

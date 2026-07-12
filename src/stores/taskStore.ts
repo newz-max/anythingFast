@@ -22,8 +22,9 @@ export const useTaskStore = defineStore('tasks', () => {
 
   const tasks = computed(() => config.value.tasks)
   const tags = computed(() => config.value.tags)
+  const builtInTemplates = computed(() => builtInTaskTemplates)
   const savedTemplates = computed(() => config.value.templates)
-  const templates = computed(() => [...builtInTaskTemplates, ...savedTemplates.value])
+  const templates = computed(() => [...builtInTemplates.value, ...savedTemplates.value])
   const settings = computed(() => config.value.settings)
   const selectedTask = computed(() => tasks.value.find((task) => task.id === selectedTaskId.value) || null)
   const categories = computed(() => {
@@ -295,6 +296,7 @@ export const useTaskStore = defineStore('tasks', () => {
     config,
     tasks,
     tags,
+    builtInTemplates,
     savedTemplates,
     templates,
     settings,
