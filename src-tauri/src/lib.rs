@@ -179,6 +179,7 @@ pub fn run() {
             save_keybindings,
             reset_keybindings,
             open_keybindings_file,
+            open_project_repository,
             resolve_update_proxy,
             update_settings
         ])

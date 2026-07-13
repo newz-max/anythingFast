@@ -35,6 +35,7 @@ import { useSelectedTaskDetailPanel } from '@/composables/useSelectedTaskDetailP
 import { useWindowControls } from '@/composables/useWindowControls'
 import { useShortcutStatus } from '@/composables/useShortcutStatus'
 import { useStartupUpdateCheck } from '@/composables/useStartupUpdateCheck'
+import { tauriApi } from '@/api/tauri'
 import { getErrorMessage, logDevError } from '@/utils/errors'
 import { keybindingScopeLabels } from '@/domain/keybindings'
 import type {
@@ -551,6 +552,14 @@ function createFromTemplate(initialValues: Record<string, string>) {
   wizardVisible.value = true
 }
 
+async function openProjectRepository() {
+  try {
+    await tauriApi.openProjectRepository()
+  } catch (err) {
+    reportUiError('Open project repository failed', err)
+  }
+}
+
 function reportUiError(context: string, err: unknown, extra?: Record<string, unknown>) {
   logDevError(context, err, extra)
   message.error(getErrorMessage(err))
@@ -573,6 +582,7 @@ function reportUiError(context: string, err: unknown, extra?: Record<string, unk
       @toggle-maximize="toggleMaximizeWindow"
       @close="closeWindow"
       @restart-update="restartDownloadedUpdateFromTitlebar"
+      @open-project-repository="openProjectRepository"
     />
 
     <div ref="content" class="app-content">

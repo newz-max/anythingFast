@@ -20,6 +20,8 @@ use std::path::PathBuf;
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 
+const PROJECT_REPOSITORY_URL: &str = "https://github.com/newz-max/anythingFast";
+
 #[tauri::command]
 pub fn load_config(app: AppHandle) -> Result<AppConfig, String> {
     storage::load_config(&app).map_err(|err| log_command_error("load_config failed", err))
@@ -457,6 +459,13 @@ pub fn open_keybindings_file(app: AppHandle) -> Result<(), String> {
     app.opener()
         .open_path(path.to_string_lossy().to_string(), None::<&str>)
         .map_err(|err| log_command_error("open_keybindings_file opener failed", err))
+}
+
+#[tauri::command]
+pub fn open_project_repository(app: AppHandle) -> Result<(), String> {
+    app.opener()
+        .open_url(PROJECT_REPOSITORY_URL, None::<&str>)
+        .map_err(|err| log_command_error("open_project_repository opener failed", err))
 }
 
 #[tauri::command]

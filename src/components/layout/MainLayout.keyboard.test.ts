@@ -7,6 +7,7 @@ import MainLayout from './MainLayout.vue'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
 import { useUpdateStore } from '@/stores/updateStore'
+import { tauriApi } from '@/api/tauri'
 import type { AppConfig, TaskItem } from '@/types/domain'
 
 const executeMock = vi.hoisted(() => vi.fn())
@@ -567,6 +568,30 @@ describe('MainLayout window keyboard shortcuts', () => {
 
     expect(updaterApiMock.installUpdate).toHaveBeenCalledWith(update)
     expect(updaterApiMock.relaunchApp).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens the project repository from the titlebar', async () => {
+    const openProjectRepository = vi.spyOn(tauriApi, 'openProjectRepository').mockResolvedValueOnce(undefined)
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+
+    await wrapper.get('.titlebar-github-link').trigger('click')
+    await flushPromises()
+
+    expect(openProjectRepository).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports project repository open failures', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(tauriApi, 'openProjectRepository').mockRejectedValueOnce(new Error('无法打开 GitHub'))
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+
+    await wrapper.get('.titlebar-github-link').trigger('click')
+    await flushPromises()
+
+    expect(messageApi.error).toHaveBeenCalledWith('无法打开 GitHub')
+    expect(consoleError).toHaveBeenCalled()
   })
 
   it('disables titlebar restart update action while execution interaction is pending', async () => {

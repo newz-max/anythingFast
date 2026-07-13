@@ -53,6 +53,14 @@ describe('tauriApi', () => {
     expect(invokeMock).toHaveBeenCalledWith('open_main_window_create_task', undefined)
   })
 
+  it('invokes the project repository command', async () => {
+    invokeMock.mockResolvedValueOnce(undefined)
+
+    await expect(tauriApi.openProjectRepository()).resolves.toBeUndefined()
+
+    expect(invokeMock).toHaveBeenCalledWith('open_project_repository', undefined)
+  })
+
   it('invokes path inspection command', async () => {
     invokeMock.mockResolvedValueOnce({
       input: 'D:\\Project',

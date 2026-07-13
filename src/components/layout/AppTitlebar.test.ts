@@ -37,6 +37,19 @@ describe('AppTitlebar', () => {
     for (const button of wrapper.findAll('.window-control')) {
       expect(button.attributes('data-tauri-drag-region')).toBeUndefined()
     }
+    expect(wrapper.get('.titlebar-github-link').attributes('data-tauri-drag-region')).toBeUndefined()
+  })
+
+  it('emits project repository intent from the GitHub link', async () => {
+    const wrapper = mountTitlebar()
+    const link = wrapper.get('.titlebar-github-link')
+
+    expect(link.attributes('aria-label')).toBe('打开 GitHub 项目主页')
+    expect(link.attributes('title')).toBe('打开 GitHub 项目主页')
+
+    await link.trigger('click')
+
+    expect(wrapper.emitted('open-project-repository')).toHaveLength(1)
   })
 
   it('renders compact update progress without a restart action', () => {

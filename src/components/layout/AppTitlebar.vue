@@ -19,6 +19,7 @@ const emit = defineEmits<{
   'toggle-maximize': []
   close: []
   'restart-update': []
+  'open-project-repository': []
 }>()
 </script>
 
@@ -31,6 +32,15 @@ const emit = defineEmits<{
       <span data-tauri-drag-region>{{ title }}</span>
     </div>
     <div class="titlebar-right">
+      <button
+        class="titlebar-github-link"
+        type="button"
+        aria-label="打开 GitHub 项目主页"
+        title="打开 GitHub 项目主页"
+        @click.stop="emit('open-project-repository')"
+      >
+        GitHub
+      </button>
       <section v-if="updateStatus" class="titlebar-update" :class="`titlebar-update-${updateStatus.tone}`" aria-label="更新状态">
         <div class="titlebar-update-copy">
           <span class="titlebar-update-label">{{ updateStatus.label }}</span>
@@ -124,6 +134,43 @@ const emit = defineEmits<{
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
+}
+
+.titlebar-github-link {
+  height: 32px;
+  flex: 0 0 auto;
+  margin-left: 16px;
+  border: 1px solid rgba(111, 135, 200, 0.34);
+  border-radius: 7px;
+  background: rgba(27, 35, 55, 0.56);
+  color: #dce5ff;
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.titlebar-github-link:hover {
+  border-color: rgba(121, 155, 255, 0.64);
+  background: rgba(82, 106, 171, 0.24);
+  color: #ffffff;
+}
+
+.titlebar-github-link:focus-visible {
+  outline: 2px solid rgba(121, 155, 255, 0.82);
+  outline-offset: 2px;
+}
+
+:global([data-app-theme="light"]) .titlebar-github-link {
+  border-color: rgba(72, 91, 140, 0.24);
+  background: rgba(255, 255, 255, 0.66);
+  color: #25304a;
+}
+
+:global([data-app-theme="light"]) .titlebar-github-link:hover {
+  border-color: rgba(58, 96, 190, 0.46);
+  background: rgba(82, 106, 171, 0.12);
+  color: #172033;
 }
 
 .titlebar-update {
@@ -300,6 +347,11 @@ const emit = defineEmits<{
 
   .titlebar-update-action {
     height: 26px;
+    padding: 0 8px;
+  }
+
+  .titlebar-github-link {
+    margin-left: 8px;
     padding: 0 8px;
   }
 
