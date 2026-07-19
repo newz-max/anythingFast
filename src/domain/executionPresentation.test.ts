@@ -33,7 +33,7 @@ describe('executionPresentation', () => {
   })
 
   it('keeps the current action running while the run is active', () => {
-    const currentRun: ExecutionRunSnapshot = {
+    const activeRun: ExecutionRunSnapshot = {
       runId: 'run-1',
       targetKey: 'task:task-1',
       taskId: 'task-1',
@@ -50,7 +50,7 @@ describe('executionPresentation', () => {
       message: '执行脚本'
     }
 
-    const states = deriveActionExecutionStates([event({ status: 'action-success', actionId: 'action-1' })], currentRun)
+    const states = deriveActionExecutionStates([event({ status: 'action-success', actionId: 'action-1' })], [activeRun])
 
     expect(states['action-1']).toMatchObject({ status: 'running', label: '执行中', type: 'info' })
   })

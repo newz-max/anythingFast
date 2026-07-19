@@ -75,7 +75,7 @@ describe('flowPreview', () => {
   })
 
   it('maps running and completed execution status by action id', () => {
-    const currentRun: ExecutionRunSnapshot = {
+    const activeRun: ExecutionRunSnapshot = {
       runId: 'run-1',
       targetKey: 'task:task-1',
       taskId: 'task-1',
@@ -99,7 +99,7 @@ describe('flowPreview', () => {
     const states = deriveFlowExecutionStates({
       taskId: 'task-1',
       latestSummary: summary,
-      currentRun
+      activeRuns: [activeRun]
     })
 
     expect(states['action-1']).toMatchObject({ status: 'success', label: '成功' })
@@ -109,7 +109,7 @@ describe('flowPreview', () => {
   it('maps multiple active runs for the same task by action id', () => {
     const states = deriveFlowExecutionStates({
       taskId: 'task-1',
-      currentRuns: [
+      activeRuns: [
         {
           runId: 'run-1',
           targetKey: 'action:task-1:action-1',

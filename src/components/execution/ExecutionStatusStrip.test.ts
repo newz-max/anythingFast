@@ -35,7 +35,7 @@ function run(patch: Partial<ExecutionRunSnapshot> = {}): ExecutionRunSnapshot {
 describe('ExecutionStatusStrip', () => {
   it('renders running task progress with processing state', () => {
     const wrapper = mount(ExecutionStatusStrip, {
-      props: { currentRun: run() },
+      props: { runs: [run()] },
       global: { stubs }
     })
 
@@ -48,11 +48,11 @@ describe('ExecutionStatusStrip', () => {
 
   it('renders success and failed status colors', () => {
     const success = mount(ExecutionStatusStrip, {
-      props: { currentRun: run({ status: 'success', completedActions: 2, progressPercent: 100, message: '执行完成' }) },
+      props: { runs: [run({ status: 'success', completedActions: 2, progressPercent: 100, message: '执行完成' })] },
       global: { stubs }
     })
     const failed = mount(ExecutionStatusStrip, {
-      props: { currentRun: run({ status: 'failed', message: '执行失败' }) },
+      props: { runs: [run({ status: 'failed', message: '执行失败' })] },
       global: { stubs }
     })
 
@@ -64,16 +64,42 @@ describe('ExecutionStatusStrip', () => {
 
   it('renders single action and unknown total fallbacks', () => {
     const singleAction = mount(ExecutionStatusStrip, {
-      props: { currentRun: run({ scope: 'action', totalActions: 1, completedActions: 0, taskName: '测试事项' }) },
+      props: { runs: [run({ scope: 'action', totalActions: 1, completedActions: 0, taskName: '测试事项' })] },
       global: { stubs }
     })
     const pending = mount(ExecutionStatusStrip, {
-      props: { currentRun: run({ totalActions: 0, completedActions: 0, progressPercent: 0, currentActionName: '' }) },
+      props: { runs: [run({ totalActions: 0, completedActions: 0, progressPercent: 0, currentActionName: '' })] },
       global: { stubs }
     })
 
     expect(singleAction.text()).toContain('测试事项 · 单动作')
     expect(singleAction.text()).toContain('0/1 个动作')
     expect(pending.text()).toContain('等待动作事件')
+  })
+
+  it('summarizes multiple active runs and uses the latest run details', () => {
+    const wrapper = mount(ExecutionStatusStrip, {
+      props: {
+        runs: [
+          run({ runId: 'run-1', taskName: '事项 A' }),
+          run({ runId: 'run-2', taskId: 'task-2', targetKey: 'action:task-2:action-2', taskName: '事项 B', scope: 'action' })
+        ],
+        compact: true
+      },
+      global: { stubs }
+    })
+
+    expect(wrapper.text()).toContain('2 个运行正在执行')
+    expect(wrapper.text()).toContain('2 项运行中')
+    expect(wrapper.text()).toContain('最新：事项 B · 单动作')
+  })
+
+  it('renders nothing without active or scoped runs', () => {
+    const wrapper = mount(ExecutionStatusStrip, {
+      props: { runs: [] },
+      global: { stubs }
+    })
+
+    expect(wrapper.find('.execution-status-strip').exists()).toBe(false)
   })
 })

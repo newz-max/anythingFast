@@ -572,10 +572,10 @@ function optionId(option: QuickSelectableOption) {
       <footer class="status">
         <span>{{ quickShortcutHint }}</span>
         <ExecutionStatusStrip
-          v-if="executionStore.currentRun"
+          v-if="executionStore.activeRuns.length > 0"
           class="quick-status-strip"
           compact
-          :current-run="executionStore.currentRun"
+          :runs="executionStore.activeRuns"
         />
       </footer>
     </div>

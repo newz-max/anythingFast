@@ -28,27 +28,37 @@ export interface ExecutionRunSnapshot {
   message: string
 }
 
+export interface ExecutionTimelineEntry {
+  sequence: number
+  receivedAt: number
+  payload: ExecutionEventPayload
+}
+
+const EXECUTION_EVENT_LIMIT = 200
+
 export const useExecutionStore = defineStore('execution', () => {
   const runsById = shallowRef<Record<string, ExecutionRunSnapshot>>({})
   const runOrder = shallowRef<string[]>([])
   const activeRunIds = shallowRef<string[]>([])
   const eventsByRunId = shallowRef<Record<string, ExecutionEventPayload[]>>({})
+  const eventTimeline = shallowRef<ExecutionTimelineEntry[]>([])
   const summariesByRunId = shallowRef<Record<string, TaskExecutionSummary>>({})
   const logs = shallowRef<ExecutionLogSummary[]>([])
   const error = shallowRef<string | null>(null)
+  const logLoadError = shallowRef<string | null>(null)
   const pendingRuntimeInputCount = shallowRef(0)
   const pendingRiskConfirmationCount = shallowRef(0)
   let executionUnlisten: UnlistenFn | null = null
+  let nextEventSequence = 0
+  let latestLogRequestId = 0
 
   const runs = computed(() => runOrder.value.map((runId) => runsById.value[runId]).filter(Boolean))
   const activeRuns = computed(() => activeRunIds.value.map((runId) => runsById.value[runId]).filter(Boolean))
-  const events = computed(() => runOrder.value.flatMap((runId) => eventsByRunId.value[runId] || []))
+  const latestActiveRun = computed(() => activeRuns.value.at(-1) || null)
+  const events = computed(() => eventTimeline.value.map((entry) => entry.payload))
   const summaries = computed(() => runOrder.value.map((runId) => summariesByRunId.value[runId]).filter(Boolean))
-  const currentRun = computed(() => activeRuns.value.at(-1) || runs.value.at(-1) || null)
   const lastSummary = computed(() => summaries.value.at(-1) || null)
   const running = computed(() => activeRunIds.value.length > 0)
-  const runningTaskId = computed(() => activeRuns.value.at(-1)?.taskId ?? null)
-  const runningActionId = computed(() => activeRuns.value.at(-1)?.currentActionId ?? null)
   const runtimeInputPending = computed(() => pendingRuntimeInputCount.value > 0)
   const riskConfirmationPending = computed(() => pendingRiskConfirmationCount.value > 0)
   const interactionPending = computed(() => runtimeInputPending.value || riskConfirmationPending.value)
@@ -86,34 +96,43 @@ export const useExecutionStore = defineStore('execution', () => {
     error.value = null
     const pendingRunId = pendingRun.runId || createPendingRunId(targetKey)
     upsertRun({ ...pendingRun, runId: pendingRunId, targetKey })
+    let summary: TaskExecutionSummary
 
     try {
       if (!isTauriRuntime()) {
         throw new Error('浏览器预览环境不能执行本地动作，请使用 Tauri 运行。')
       }
-      const summary = await dispatch()
+      summary = await dispatch()
       applySummary(summary, targetKey, pendingRunId)
-      await loadLogs(20)
-      return summary
     } catch (err) {
       logDevError(targetKey.startsWith('action:') ? 'Run task action failed' : 'Run task failed', err, logContext)
       error.value = getErrorMessage(err)
       markRunFailed(pendingRunId, getErrorMessage(err))
       throw err
     }
+
+    await loadLogs(20)
+    return summary
   }
 
   async function loadLogs(limit = 20) {
+    const requestId = ++latestLogRequestId
     if (!isTauriRuntime()) {
-      logs.value = []
+      if (requestId === latestLogRequestId) {
+        logs.value = []
+        logLoadError.value = null
+      }
       return
     }
     try {
-      logs.value = await tauriApi.loadExecutionLogs(limit)
+      const nextLogs = await tauriApi.loadExecutionLogs(limit)
+      if (requestId !== latestLogRequestId) return
+      logs.value = nextLogs
+      logLoadError.value = null
     } catch (err) {
+      if (requestId !== latestLogRequestId) return
       logDevError('Load execution logs failed', err, { limit })
-      error.value = getErrorMessage(err)
-      throw err
+      logLoadError.value = getErrorMessage(err)
     }
   }
 
@@ -214,8 +233,16 @@ export const useExecutionStore = defineStore('execution', () => {
   function appendEvent(runId: string, payload: ExecutionEventPayload) {
     eventsByRunId.value = {
       ...eventsByRunId.value,
-      [runId]: [...(eventsByRunId.value[runId] || []), payload]
+      [runId]: [...(eventsByRunId.value[runId] || []), payload].slice(-EXECUTION_EVENT_LIMIT)
     }
+    eventTimeline.value = [
+      ...eventTimeline.value,
+      {
+        sequence: ++nextEventSequence,
+        receivedAt: Date.now(),
+        payload
+      }
+    ].slice(-EXECUTION_EVENT_LIMIT)
     if (!runOrder.value.includes(runId)) {
       runOrder.value = [...runOrder.value, runId]
     }
@@ -227,6 +254,7 @@ export const useExecutionStore = defineStore('execution', () => {
     const { [runId]: _removedSummary, ...nextSummariesByRunId } = summariesByRunId.value
     runsById.value = nextRunsById
     eventsByRunId.value = nextEventsByRunId
+    eventTimeline.value = eventTimeline.value.filter((entry) => entry.payload.runId !== runId)
     summariesByRunId.value = nextSummariesByRunId
     runOrder.value = runOrder.value.filter((item) => item !== runId)
     syncActiveRunIds()
@@ -287,7 +315,11 @@ export const useExecutionStore = defineStore('execution', () => {
   }
 
   function eventsForTask(taskId: string) {
-    return events.value.filter((event) => event.taskId === taskId)
+    return timelineForTask(taskId).map((entry) => entry.payload)
+  }
+
+  function timelineForTask(taskId: string) {
+    return eventTimeline.value.filter((entry) => entry.payload.taskId === taskId)
   }
 
   function latestSummaryForTask(taskId: string) {
@@ -365,12 +397,12 @@ export const useExecutionStore = defineStore('execution', () => {
     runOrder,
     activeRunIds,
     activeRuns,
+    latestActiveRun,
     runs,
     eventsByRunId,
+    eventTimeline,
     summariesByRunId,
     summaries,
-    runningTaskId,
-    runningActionId,
     running,
     pendingRuntimeInputCount,
     pendingRiskConfirmationCount,
@@ -379,9 +411,9 @@ export const useExecutionStore = defineStore('execution', () => {
     interactionPending,
     events,
     logs,
+    logLoadError,
     lastSummary,
     error,
-    currentRun,
     setupListeners,
     runTask,
     runTaskAction,
@@ -396,6 +428,7 @@ export const useExecutionStore = defineStore('execution', () => {
     latestActiveRunForTask,
     eventsForRun,
     eventsForTask,
+    timelineForTask,
     latestSummaryForTask,
     beginRuntimeInput,
     endRuntimeInput,

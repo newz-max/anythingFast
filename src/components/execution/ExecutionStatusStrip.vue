@@ -13,32 +13,38 @@ import type { ExecutionRunSnapshot } from '@/stores/executionStore'
 
 const props = withDefaults(
   defineProps<{
-    currentRun: ExecutionRunSnapshot | null
+    runs: ExecutionRunSnapshot[]
     compact?: boolean
   }>(),
   {
+    runs: () => [],
     compact: false
   }
 )
 
-const active = computed(() => isRunActive(props.currentRun))
-const statusType = computed(() => runStatusType(props.currentRun?.status))
-const title = computed(() => (props.currentRun ? runTitle(props.currentRun) : '暂无执行'))
-const progressLabel = computed(() => (props.currentRun ? runProgressLabel(props.currentRun) : ''))
-const progressPercent = computed(() => (props.currentRun ? normalizedProgressPercent(props.currentRun) : 0))
-const message = computed(() => (props.currentRun ? runMessage(props.currentRun) : ''))
+const displayRun = computed(() => props.runs.at(-1) || null)
+const multiple = computed(() => props.runs.length > 1)
+const active = computed(() => props.runs.some(isRunActive))
+const statusType = computed(() => runStatusType(displayRun.value?.status))
+const title = computed(() => {
+  if (multiple.value) return `${props.runs.length} 个运行正在执行`
+  return displayRun.value ? runTitle(displayRun.value) : '暂无执行'
+})
+const progressLabel = computed(() => (displayRun.value ? runProgressLabel(displayRun.value) : ''))
+const progressPercent = computed(() => (displayRun.value ? normalizedProgressPercent(displayRun.value) : 0))
+const message = computed(() => (displayRun.value ? runMessage(displayRun.value) : ''))
 const currentActionLabel = computed(() => {
-  if (!props.currentRun) return ''
-  return props.currentRun.currentActionName || (active.value ? '等待动作事件' : '')
+  if (!displayRun.value) return ''
+  return displayRun.value.currentActionName || (active.value ? '等待动作事件' : '')
 })
 </script>
 
 <template>
   <section
-    v-if="currentRun"
+    v-if="displayRun"
     class="execution-status-strip"
     :class="[
-      `execution-status-${currentRun.status}`,
+      `execution-status-${displayRun.status}`,
       {
         compact,
         active
@@ -52,7 +58,7 @@ const currentActionLabel = computed(() => {
         <strong>{{ title }}</strong>
       </span>
       <NTag size="small" :type="statusType">
-        {{ statusLabel(currentRun.status) }}
+        {{ multiple ? `${runs.length} 项运行中` : statusLabel(displayRun.status) }}
       </NTag>
     </div>
 
@@ -67,6 +73,7 @@ const currentActionLabel = computed(() => {
 
     <div class="status-meta">
       <span>{{ progressLabel }}</span>
+      <span v-if="multiple">最新：{{ runTitle(displayRun) }}</span>
       <span v-if="currentActionLabel">当前：{{ currentActionLabel }}</span>
       <span>{{ message }}</span>
     </div>

@@ -1,14 +1,13 @@
-use crate::diagnostics::dev_log_error;
 use crate::domain::{AppConfig, ExecutionLogSummary, KeybindingOverride, KeybindingsLoadResult};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use tauri::{AppHandle, Manager};
 use thiserror::Error;
 
 static CONFIG_WRITE_LOCK: Mutex<()> = Mutex::new(());
 static KEYBINDINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
-static LOG_WRITE_LOCK: Mutex<()> = Mutex::new(());
+static LOG_FILE_LOCK: RwLock<()> = RwLock::new(());
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -189,10 +188,20 @@ fn read_config_file(path: &PathBuf) -> StorageResult<AppConfig> {
 
 pub fn load_logs(app: &AppHandle, limit: usize) -> StorageResult<Vec<ExecutionLogSummary>> {
     let path = logs_path(app)?;
-    read_logs_file(&path, limit)
+    load_logs_file(&path, limit)
 }
 
-fn read_logs_file(path: &PathBuf, limit: usize) -> StorageResult<Vec<ExecutionLogSummary>> {
+fn load_logs_file(path: &PathBuf, limit: usize) -> StorageResult<Vec<ExecutionLogSummary>> {
+    let _guard = LOG_FILE_LOCK
+        .read()
+        .map_err(|_| StorageError::Lock("logs"))?;
+    read_logs_file_unlocked(path, limit)
+}
+
+fn read_logs_file_unlocked(
+    path: &PathBuf,
+    limit: usize,
+) -> StorageResult<Vec<ExecutionLogSummary>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -212,20 +221,61 @@ pub fn append_log(app: &AppHandle, log: ExecutionLogSummary) -> StorageResult<()
 }
 
 fn append_log_file(path: &PathBuf, log: ExecutionLogSummary) -> StorageResult<()> {
-    let _guard = LOG_WRITE_LOCK
-        .lock()
+    let _guard = LOG_FILE_LOCK
+        .write()
         .map_err(|_| StorageError::Lock("logs"))?;
     ensure_parent(&path)?;
-    let mut logs = match read_logs_file(path, 200) {
-        Ok(logs) => logs,
-        Err(err) => {
-            dev_log_error("Read existing execution logs failed", &err);
-            Vec::new()
-        }
-    };
+    let mut logs = read_logs_file_unlocked(path, 200)?;
     logs.insert(0, log);
     logs.truncate(200);
-    fs::write(path, serde_json::to_string_pretty(&logs)?)?;
+    write_logs_file_unlocked(path, &logs)?;
+    Ok(())
+}
+
+fn write_logs_file_unlocked(path: &PathBuf, logs: &[ExecutionLogSummary]) -> StorageResult<()> {
+    ensure_parent(path)?;
+    let temp_path = path.with_extension("json.tmp");
+    let content = serde_json::to_string_pretty(logs)?;
+    if let Err(err) = fs::write(&temp_path, content) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(StorageError::Io(err));
+    }
+    if let Err(err) = replace_file(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn replace_file(source: &PathBuf, destination: &PathBuf) -> StorageResult<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source_wide: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination_wide: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let result = unsafe {
+        MoveFileExW(
+            source_wide.as_ptr(),
+            destination_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        return Err(StorageError::Io(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &PathBuf, destination: &PathBuf) -> StorageResult<()> {
+    fs::rename(source, destination)?;
     Ok(())
 }
 
@@ -389,10 +439,97 @@ mod tests {
         first.join().expect("join first");
         second.join().expect("join second");
 
-        let logs = read_logs_file(&path, 20).expect("read logs");
+        let logs = load_logs_file(&path, 20).expect("read logs");
         assert_eq!(logs.len(), 2);
         assert!(logs.iter().any(|log| log.id == "log-1"));
         assert!(logs.iter().any(|log| log.id == "log-2"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn concurrent_log_reads_and_appends_always_return_complete_snapshots() {
+        let dir = temp_storage_dir();
+        let path = dir.join("execution-logs.json");
+        append_log_file(&path, log("initial", "task-initial")).expect("write initial log");
+
+        let writer_path = path.clone();
+        let writer = thread::spawn(move || {
+            for index in 0..50 {
+                append_log_file(
+                    &writer_path,
+                    log(&format!("writer-{index}"), &format!("task-{index}")),
+                )
+                .expect("append log");
+            }
+        });
+        let reader_path = path.clone();
+        let reader = thread::spawn(move || {
+            for _ in 0..50 {
+                let snapshot = load_logs_file(&reader_path, 200).expect("read complete snapshot");
+                assert!(!snapshot.is_empty());
+                assert!(snapshot.len() <= 51);
+            }
+        });
+
+        writer.join().expect("join writer");
+        reader.join().expect("join reader");
+        let logs = load_logs_file(&path, 200).expect("read final logs");
+        assert_eq!(logs.len(), 51);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn log_write_replaces_existing_file_and_removes_temp_file() {
+        let dir = temp_storage_dir();
+        let path = dir.join("execution-logs.json");
+        append_log_file(&path, log("log-1", "task-1")).expect("append first log");
+        append_log_file(&path, log("log-2", "task-2")).expect("replace existing logs");
+
+        let logs = load_logs_file(&path, 20).expect("read logs");
+        assert_eq!(logs.len(), 2);
+        assert!(!path.with_extension("json.tmp").exists());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn failed_temp_log_write_preserves_formal_file() {
+        let dir = temp_storage_dir();
+        let path = dir.join("execution-logs.json");
+        append_log_file(&path, log("log-1", "task-1")).expect("append initial log");
+        let original = fs::read(&path).expect("read original file");
+        fs::create_dir(path.with_extension("json.tmp")).expect("block temp file creation");
+
+        let result = append_log_file(&path, log("log-2", "task-2"));
+
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).expect("read preserved file"), original);
+        let logs = load_logs_file(&path, 20).expect("read preserved logs");
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].id, "log-1");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn execution_logs_keep_only_latest_two_hundred_entries() {
+        let dir = temp_storage_dir();
+        let path = dir.join("execution-logs.json");
+
+        for index in 0..205 {
+            append_log_file(
+                &path,
+                log(&format!("log-{index}"), &format!("task-{index}")),
+            )
+            .expect("append bounded log");
+        }
+
+        let logs = load_logs_file(&path, 250).expect("read bounded logs");
+        assert_eq!(logs.len(), 200);
+        assert!(logs.iter().any(|entry| entry.id == "log-204"));
+        assert!(!logs.iter().any(|entry| entry.id == "log-0"));
 
         let _ = fs::remove_dir_all(dir);
     }

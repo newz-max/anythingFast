@@ -40,7 +40,7 @@ describe('useTaskExecutionPanel', () => {
     wrapper.unmount()
   })
 
-  it('toggles panel visibility and auto-opens for current run', async () => {
+  it('toggles panel visibility and auto-opens whenever a new run id becomes active', async () => {
     const store = useExecutionStore()
     const { controller, wrapper } = mountHarness(store)
 
@@ -49,6 +49,13 @@ describe('useTaskExecutionPanel', () => {
     controller.toggleExecutionPanel()
     expect(controller.showLogs.value).toBe(true)
     expect(controller.autoShowExecution.value).toBe(true)
+    expect(controller.showExecutionPanel.value).toBe(true)
+
+    controller.toggleExecutionPanel()
+    store.applyExecutionEvent(event({ runId: 'run-active', taskId: 'task-1', status: 'finished' }))
+    store.applyExecutionEvent(event({ runId: 'run-replacement', taskId: 'task-2', status: 'started' }))
+    await nextTick()
+
     expect(controller.showExecutionPanel.value).toBe(true)
 
     controller.toggleExecutionPanel()
@@ -102,6 +109,7 @@ describe('useTaskExecutionPanel', () => {
 
     expect(controller.selectedTaskActiveRun.value).toBeNull()
     expect(controller.selectedTaskEvents.value).toEqual([])
+    expect(controller.selectedTaskTimeline.value).toEqual([])
     expect(controller.flowExecutionStates.value).toEqual({})
 
     wrapper.unmount()

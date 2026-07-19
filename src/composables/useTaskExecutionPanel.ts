@@ -3,7 +3,7 @@ import type { ComputedRef, Ref } from 'vue'
 import type { ExecutionEventPayload } from '@/api/events'
 import { deriveActionExecutionStates, type ActionExecutionDisplay } from '@/domain/executionPresentation'
 import { deriveFlowExecutionStates, type FlowPreviewStatus } from '@/domain/flowPreview'
-import type { ExecutionRunSnapshot, useExecutionStore } from '@/stores/executionStore'
+import type { ExecutionRunSnapshot, ExecutionTimelineEntry, useExecutionStore } from '@/stores/executionStore'
 import type { TaskExecutionSummary, TaskItem } from '@/types/domain'
 
 type ActionExecutionStates = Record<string, ActionExecutionDisplay>
@@ -23,6 +23,7 @@ interface TaskExecutionPanelController {
   selectedTaskLatestRun: ComputedRef<ExecutionRunSnapshot | null>
   selectedTaskStatusRun: ComputedRef<ExecutionRunSnapshot | null>
   selectedTaskEvents: ComputedRef<ExecutionEventPayload[]>
+  selectedTaskTimeline: ComputedRef<ExecutionTimelineEntry[]>
   selectedTaskLatestSummary: ComputedRef<TaskExecutionSummary | null>
   actionExecutionStates: ComputedRef<ActionExecutionStates>
   flowExecutionStates: ComputedRef<FlowExecutionStates>
@@ -48,6 +49,9 @@ export function useTaskExecutionPanel(options: UseTaskExecutionPanelOptions): Ta
   const selectedTaskEvents = computed(() =>
     options.selectedTask.value ? options.executionStore.eventsForTask(options.selectedTask.value.id) : []
   )
+  const selectedTaskTimeline = computed(() =>
+    options.selectedTask.value ? options.executionStore.timelineForTask(options.selectedTask.value.id) : []
+  )
   const selectedTaskLatestSummary = computed(() =>
     options.selectedTask.value ? options.executionStore.latestSummaryForTask(options.selectedTask.value.id) : null
   )
@@ -59,15 +63,19 @@ export function useTaskExecutionPanel(options: UseTaskExecutionPanelOptions): Ta
     return deriveFlowExecutionStates({
       taskId: options.selectedTask.value.id,
       events: selectedTaskEvents.value,
-      currentRuns: selectedTaskActiveRuns.value,
+      activeRuns: selectedTaskActiveRuns.value,
       latestSummary: selectedTaskLatestSummary.value
     })
   })
 
+  let observedActiveRunIds = new Set(options.executionStore.activeRunIds)
   watch(
-    () => options.executionStore.currentRun,
-    (run) => {
-      if (run) autoShowExecution.value = true
+    () => options.executionStore.activeRunIds,
+    (runIds) => {
+      if (runIds.some((runId) => !observedActiveRunIds.has(runId))) {
+        autoShowExecution.value = true
+      }
+      observedActiveRunIds = new Set(runIds)
     }
   )
 
@@ -86,6 +94,7 @@ export function useTaskExecutionPanel(options: UseTaskExecutionPanelOptions): Ta
     selectedTaskLatestRun,
     selectedTaskStatusRun,
     selectedTaskEvents,
+    selectedTaskTimeline,
     selectedTaskLatestSummary,
     actionExecutionStates,
     flowExecutionStates,

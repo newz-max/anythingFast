@@ -12,6 +12,8 @@ describe('useSelectedTaskDetailPanel', () => {
       shortcutWarning: shallowRef(''),
       showExecutionPanel: shallowRef(false),
       selectedTaskStatusRun: shallowRef(null),
+      selectedTaskActiveRuns: shallowRef([]),
+      selectedTaskTimeline: shallowRef([]),
       actionExecutionStates: shallowRef({}),
       flowExecutionStates: shallowRef({}),
       executionStore: makeExecutionStore() as never,
@@ -48,6 +50,8 @@ describe('useSelectedTaskDetailPanel', () => {
       shortcutWarning: shallowRef('冲突'),
       showExecutionPanel: shallowRef(false),
       selectedTaskStatusRun: shallowRef(null),
+      selectedTaskActiveRuns: shallowRef([]),
+      selectedTaskTimeline: shallowRef([]),
       actionExecutionStates: shallowRef({}),
       flowExecutionStates: shallowRef({}),
       executionStore: makeExecutionStore() as never,
@@ -92,6 +96,8 @@ describe('useSelectedTaskDetailPanel', () => {
       shortcutWarning: shallowRef(''),
       showExecutionPanel: shallowRef(true),
       selectedTaskStatusRun: shallowRef(null),
+      selectedTaskActiveRuns: shallowRef([]),
+      selectedTaskTimeline: shallowRef([]),
       actionExecutionStates: shallowRef({}),
       flowExecutionStates: shallowRef({}),
       executionStore: makeExecutionStore({ activeRun: { status: 'running' } }) as never,
@@ -110,10 +116,8 @@ describe('useSelectedTaskDetailPanel', () => {
 
 function makeExecutionStore(options: { activeRun?: { status?: string } | null } = {}) {
   return {
-    currentRun: null,
-    activeRuns: [],
     logs: [],
-    events: [],
+    logLoadError: null,
     taskRunTargetKey: (taskId: string) => `task:${taskId}`,
     activeRunForTarget: vi.fn(() => options.activeRun ?? null)
   }

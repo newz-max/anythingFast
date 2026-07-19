@@ -106,7 +106,7 @@ function handleShareSelect(key: string | number) {
     <ExecutionStatusStrip
       v-if="props.execution.taskStatusRun"
       class="detail-status-strip"
-      :current-run="props.execution.taskStatusRun"
+      :runs="[props.execution.taskStatusRun]"
     />
 
     <section class="actions-section">
@@ -190,10 +190,10 @@ function handleShareSelect(key: string | number) {
     <ExecutionProgress
       v-if="props.execution.showExecutionPanel"
       class="logs"
-      :current-run="props.execution.currentRun"
-      :active-runs="props.execution.activeRuns"
+      :runs="props.execution.activeRuns"
       :logs="props.execution.logs"
-      :events="props.execution.events"
+      :timeline="props.execution.timeline"
+      :log-load-error="props.execution.logLoadError"
     />
   </section>
 </template>

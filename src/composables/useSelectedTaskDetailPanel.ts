@@ -1,11 +1,10 @@
 import { computed, type Ref } from 'vue'
 import type { DropdownOption } from 'naive-ui'
-import type { ExecutionEventPayload } from '@/api/events'
 import type { ActionView } from '@/domain/actionView'
 import type { ActionExecutionDisplay } from '@/domain/executionPresentation'
 import { statusLabel } from '@/domain/executionPresentation'
 import { deriveFlowPreviewModel, type FlowPreviewModel } from '@/domain/flowPreview'
-import type { ExecutionRunSnapshot, useExecutionStore } from '@/stores/executionStore'
+import type { ExecutionRunSnapshot, ExecutionTimelineEntry, useExecutionStore } from '@/stores/executionStore'
 import type {
   ExecutionLogSummary,
   ScheduleTaskTrigger,
@@ -43,10 +42,10 @@ export interface TaskDetailMetaView {
 export interface TaskDetailExecutionView {
   actionExecutionStates: Record<string, ActionExecutionDisplay>
   taskStatusRun: ExecutionRunSnapshot | null
-  currentRun: ExecutionRunSnapshot | null
   activeRuns: ExecutionRunSnapshot[]
   logs: ExecutionLogSummary[]
-  events: ExecutionEventPayload[]
+  timeline: ExecutionTimelineEntry[]
+  logLoadError: string | null
   runningTask: boolean
   runButtonLabel: string
   logsButtonLabel: string
@@ -68,6 +67,8 @@ export interface UseSelectedTaskDetailPanelOptions {
   shortcutWarning: Ref<string>
   showExecutionPanel: Ref<boolean>
   selectedTaskStatusRun: Ref<ExecutionRunSnapshot | null>
+  selectedTaskActiveRuns: Ref<ExecutionRunSnapshot[]>
+  selectedTaskTimeline: Ref<ExecutionTimelineEntry[]>
   actionExecutionStates: Ref<Record<string, ActionExecutionDisplay>>
   flowExecutionStates: Ref<Record<string, ActionExecutionDisplay>>
   executionStore: ExecutionStore
@@ -99,10 +100,10 @@ export function useSelectedTaskDetailPanel(options: UseSelectedTaskDetailPanelOp
     return {
       actionExecutionStates: options.actionExecutionStates.value,
       taskStatusRun: options.selectedTaskStatusRun.value,
-      currentRun: options.executionStore.currentRun,
-      activeRuns: options.executionStore.activeRuns,
+      activeRuns: options.selectedTaskActiveRuns.value,
       logs: options.executionStore.logs,
-      events: options.executionStore.events,
+      timeline: options.selectedTaskTimeline.value,
+      logLoadError: options.executionStore.logLoadError,
       runningTask: Boolean(run),
       runButtonLabel: run ? (run.status ? statusLabel(run.status) : '执行中') : '运行',
       logsButtonLabel: options.showExecutionPanel.value ? '隐藏执行日志' : options.running.value ? '查看执行进度' : '执行日志',

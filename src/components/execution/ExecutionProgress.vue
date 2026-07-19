@@ -8,21 +8,17 @@ import {
   runTitle as getRunTitle,
   statusLabel
 } from '@/domain/executionPresentation'
-import type { ExecutionRunSnapshot } from '@/stores/executionStore'
+import type { ExecutionRunSnapshot, ExecutionTimelineEntry } from '@/stores/executionStore'
 import type { ActionExecutionResult, ExecutionLogSummary } from '@/types/domain'
 
 const props = defineProps<{
-  currentRun: ExecutionRunSnapshot | null
-  activeRuns?: ExecutionRunSnapshot[]
-  events: ExecutionEventPayload[]
+  runs: ExecutionRunSnapshot[]
+  timeline: ExecutionTimelineEntry[]
   logs: ExecutionLogSummary[]
+  logLoadError?: string | null
 }>()
 
-const displayRuns = computed(() => {
-  if (props.activeRuns?.length) return props.activeRuns
-  return props.currentRun ? [props.currentRun] : []
-})
-const visibleEvents = computed(() => props.events.slice(-12))
+const visibleTimeline = computed(() => props.timeline.slice(-12))
 const latestSummary = computed(() => props.logs[0] ?? null)
 
 function attentionActionMessages(log: ExecutionLogSummary): ActionExecutionResult[] {
@@ -50,10 +46,6 @@ function eventContent(event: ExecutionEventPayload) {
   return `${prefix}${event.result?.message || event.message || eventStatusLabel(event.status)}`
 }
 
-function eventKey(event: ExecutionEventPayload, index: number) {
-  return `${event.runId}-${event.status}-${event.actionId || 'task'}-${event.currentIndex || index}`
-}
-
 function runStatusType(run: ExecutionRunSnapshot) {
   return getRunStatusType(run.status)
 }
@@ -71,8 +63,8 @@ function formatDuration(durationMs?: number) {
 
 <template>
   <NCard size="small" class="execution" title="执行反馈">
-    <section v-if="displayRuns.length > 0" class="run-list" aria-label="当前执行">
-      <article v-for="run in displayRuns" :key="run.runId || run.targetKey" class="run-card">
+    <section v-if="runs.length > 0" class="run-list" aria-label="当前执行">
+      <article v-for="run in runs" :key="run.runId || run.targetKey" class="run-card">
         <div class="run-heading">
           <span class="run-title">{{ runTitle(run) }}</span>
           <NTag size="small" :type="runStatusType(run)">{{ statusLabel(run.status) }}</NTag>
@@ -89,14 +81,14 @@ function formatDuration(durationMs?: number) {
     <NGrid :cols="2" :x-gap="14" responsive="screen">
       <NGi>
         <h3 class="subhead">当前事件</h3>
-        <NEmpty v-if="visibleEvents.length === 0" description="暂无执行事件" />
+        <NEmpty v-if="visibleTimeline.length === 0" description="暂无执行事件" />
         <NTimeline v-else>
           <NTimelineItem
-            v-for="(event, index) in visibleEvents"
-            :key="eventKey(event, index)"
-            :type="eventType(event)"
-            :title="eventTitle(event)"
-            :content="eventContent(event)"
+            v-for="entry in visibleTimeline"
+            :key="entry.sequence"
+            :type="eventType(entry.payload)"
+            :title="eventTitle(entry.payload)"
+            :content="eventContent(entry.payload)"
           />
         </NTimeline>
       </NGi>
@@ -140,6 +132,10 @@ function formatDuration(durationMs?: number) {
         </NList>
       </NGi>
     </NGrid>
+
+    <NAlert v-if="logLoadError" type="error" title="执行日志加载失败">
+      {{ logLoadError }}
+    </NAlert>
 
     <section v-if="latestSummary" class="latest-summary">
       <span>最近一次：{{ latestSummary.taskName }}</span>

@@ -44,8 +44,7 @@ export interface FlowPreviewModel {
 export interface FlowExecutionStateInput {
   taskId: string
   events?: ExecutionEventPayload[]
-  currentRun?: ExecutionRunSnapshot | null
-  currentRuns?: ExecutionRunSnapshot[]
+  activeRuns?: ExecutionRunSnapshot[]
   latestSummary?: TaskExecutionSummary | null
 }
 
@@ -94,8 +93,7 @@ export function deriveFlowExecutionStates(input: FlowExecutionStateInput): Recor
     states[event.actionId] = status
   })
 
-  const currentRuns = input.currentRuns ?? (input.currentRun ? [input.currentRun] : [])
-  currentRuns.forEach((run) => {
+  input.activeRuns?.forEach((run) => {
     if (run.taskId === input.taskId && run.currentActionId && isRunActive(run)) {
       states[run.currentActionId] = flowStatus('running', run.message)
     }

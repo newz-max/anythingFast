@@ -176,6 +176,8 @@ const navigationItems = computed(() => [
 const {
   showExecutionPanel,
   selectedTaskStatusRun,
+  selectedTaskActiveRuns,
+  selectedTaskTimeline,
   actionExecutionStates,
   flowExecutionStates,
   toggleExecutionPanel
@@ -244,6 +246,8 @@ const {
   shortcutWarning,
   showExecutionPanel,
   selectedTaskStatusRun,
+  selectedTaskActiveRuns,
+  selectedTaskTimeline,
   actionExecutionStates,
   flowExecutionStates,
   executionStore,
@@ -298,11 +302,7 @@ onMounted(async () => {
   } catch (err) {
     reportUiError('Setup shortcut status failed', err)
   }
-  try {
-    await executionStore.loadLogs()
-  } catch (err) {
-    reportUiError('Load execution logs failed', err)
-  }
+  await executionStore.loadLogs()
 })
 
 watch(

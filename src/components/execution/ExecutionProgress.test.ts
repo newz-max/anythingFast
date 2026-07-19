@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ExecutionProgress from './ExecutionProgress.vue'
 import type { ExecutionEventPayload } from '@/api/events'
-import type { ExecutionRunSnapshot } from '@/stores/executionStore'
+import type { ExecutionRunSnapshot, ExecutionTimelineEntry } from '@/stores/executionStore'
 import type { ExecutionLogSummary } from '@/types/domain'
 
 const stubs = {
@@ -12,16 +12,17 @@ const stubs = {
   NEmpty: { props: ['description'], template: '<div>{{ description }}</div>' },
   NProgress: { props: ['percentage'], template: '<div>进度 {{ percentage }}%</div>' },
   NTimeline: { template: '<div><slot /></div>' },
-  NTimelineItem: { props: ['title', 'content'], template: '<div>{{ title }} {{ content }}</div>' },
+  NTimelineItem: { props: ['title', 'content'], template: '<div class="timeline-item">{{ title }} {{ content }}</div>' },
   NList: { template: '<div><slot /></div>' },
   NListItem: { template: '<div><slot name="prefix" /><slot /></div>' },
   NTag: { template: '<span><slot /></span>' },
-  NThing: { props: ['title', 'description'], template: '<div><strong>{{ title }}</strong><span>{{ description }}</span></div>' }
+  NThing: { props: ['title', 'description'], template: '<div><strong>{{ title }}</strong><span>{{ description }}</span></div>' },
+  NAlert: { props: ['title'], template: '<div>{{ title }} <slot /></div>' }
 }
 
 describe('ExecutionProgress', () => {
   it('renders current progress events and command output from recent logs', () => {
-    const currentRun: ExecutionRunSnapshot = {
+    const activeRun: ExecutionRunSnapshot = {
       runId: 'run-1',
       targetKey: 'task:task-1',
       taskId: 'task-1',
@@ -129,8 +130,8 @@ describe('ExecutionProgress', () => {
 
     const wrapper = mount(ExecutionProgress, {
       props: {
-        currentRun,
-        events,
+        runs: [activeRun],
+        timeline: toTimeline(events),
         logs
       },
       global: { stubs }
@@ -152,8 +153,7 @@ describe('ExecutionProgress', () => {
   it('renders multiple active runs', () => {
     const wrapper = mount(ExecutionProgress, {
       props: {
-        currentRun: null,
-        activeRuns: [
+        runs: [
           {
             runId: 'run-1',
             targetKey: 'task:task-1',
@@ -187,7 +187,7 @@ describe('ExecutionProgress', () => {
             message: '动作 B'
           }
         ],
-        events: [],
+        timeline: [],
         logs: []
       },
       global: { stubs }
@@ -198,4 +198,59 @@ describe('ExecutionProgress', () => {
     expect(wrapper.text()).toContain('进度 50%')
     expect(wrapper.text()).toContain('进度 0%')
   })
+
+  it('renders only the latest 12 timeline entries in observed order', () => {
+    const entries = Array.from({ length: 13 }, (_, index) => event({
+      actionId: `action-${index + 1}`,
+      actionName: `事件 ${index + 1}`,
+      currentIndex: index + 1
+    }))
+    const wrapper = mount(ExecutionProgress, {
+      props: {
+        runs: [],
+        timeline: toTimeline(entries),
+        logs: []
+      },
+      global: { stubs }
+    })
+
+    expect(wrapper.findAll('.timeline-item').map((item) => item.text().split(' ')[0] + ' ' + item.text().split(' ')[1])).toEqual(
+      Array.from({ length: 12 }, (_, index) => `事件 ${index + 2}`)
+    )
+  })
+
+  it('shows a separate log loading error', () => {
+    const wrapper = mount(ExecutionProgress, {
+      props: {
+        runs: [],
+        timeline: [],
+        logs: [],
+        logLoadError: '日志文件暂时不可读'
+      },
+      global: { stubs }
+    })
+
+    expect(wrapper.text()).toContain('执行日志加载失败')
+    expect(wrapper.text()).toContain('日志文件暂时不可读')
+  })
 })
+
+function event(patch: Partial<ExecutionEventPayload> = {}): ExecutionEventPayload {
+  return {
+    runId: 'run-1',
+    taskId: 'task-1',
+    taskName: '测试事项',
+    scope: 'task',
+    status: 'action-started',
+    totalActions: 13,
+    ...patch
+  }
+}
+
+function toTimeline(events: ExecutionEventPayload[]): ExecutionTimelineEntry[] {
+  return events.map((payload, index) => ({
+    sequence: index + 1,
+    receivedAt: index,
+    payload
+  }))
+}
