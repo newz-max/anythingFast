@@ -190,9 +190,6 @@ const navigationItems = computed(() => [
 const {
   showExecutionPanel,
   selectedTaskStatusRun,
-  selectedTaskActiveRuns,
-  selectedTaskTimeline,
-  selectedTaskLogs,
   actionExecutionStates,
   flowExecutionStates,
   toggleExecutionPanel
@@ -261,9 +258,6 @@ const {
   shortcutWarning,
   showExecutionPanel,
   selectedTaskStatusRun,
-  selectedTaskActiveRuns,
-  selectedTaskTimeline,
-  selectedTaskLogs,
   actionExecutionStates,
   flowExecutionStates,
   executionStore,

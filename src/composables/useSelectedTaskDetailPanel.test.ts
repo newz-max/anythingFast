@@ -12,9 +12,6 @@ describe('useSelectedTaskDetailPanel', () => {
       shortcutWarning: shallowRef(''),
       showExecutionPanel: shallowRef(false),
       selectedTaskStatusRun: shallowRef(null),
-      selectedTaskActiveRuns: shallowRef([]),
-      selectedTaskTimeline: shallowRef([]),
-      selectedTaskLogs: shallowRef([]),
       actionExecutionStates: shallowRef({}),
       flowExecutionStates: shallowRef({}),
       executionStore: makeExecutionStore() as never,
@@ -51,9 +48,6 @@ describe('useSelectedTaskDetailPanel', () => {
       shortcutWarning: shallowRef('冲突'),
       showExecutionPanel: shallowRef(false),
       selectedTaskStatusRun: shallowRef(null),
-      selectedTaskActiveRuns: shallowRef([]),
-      selectedTaskTimeline: shallowRef([]),
-      selectedTaskLogs: shallowRef([]),
       actionExecutionStates: shallowRef({}),
       flowExecutionStates: shallowRef({}),
       executionStore: makeExecutionStore() as never,
@@ -98,9 +92,6 @@ describe('useSelectedTaskDetailPanel', () => {
       shortcutWarning: shallowRef(''),
       showExecutionPanel: shallowRef(true),
       selectedTaskStatusRun: shallowRef(null),
-      selectedTaskActiveRuns: shallowRef([]),
-      selectedTaskTimeline: shallowRef([]),
-      selectedTaskLogs: shallowRef([]),
       actionExecutionStates: shallowRef({}),
       flowExecutionStates: shallowRef({}),
       executionStore: makeExecutionStore({ activeRun: { status: 'running' } }) as never,
@@ -115,11 +106,57 @@ describe('useSelectedTaskDetailPanel', () => {
     expect(controller.execution.value.runButtonLabel).toBe('执行中')
     expect(controller.execution.value.logsButtonLabel).toBe('隐藏执行日志')
   })
+
+  it('keeps selected-task state scoped while exposing global execution feedback', () => {
+    const task = makeTask('task-1')
+    const selectedRun = { runId: 'run-selected', taskId: 'task-1', taskName: '所选事项' }
+    const unrelatedRun = { runId: 'run-unrelated', taskId: 'task-2', taskName: '其他事项' }
+    const globalTimeline = [
+      { sequence: 1, payload: { taskId: 'task-1' } },
+      { sequence: 2, payload: { taskId: 'task-2' } }
+    ]
+    const globalLogs = [
+      { id: 'log-selected', taskId: 'task-1' },
+      { id: 'log-unrelated', taskId: 'task-2' }
+    ]
+    const controller = useSelectedTaskDetailPanel({
+      selectedTask: shallowRef(task),
+      taskShortcutDraft: shallowRef(''),
+      globalShortcutDraft: shallowRef('Alt+Space'),
+      shortcutWarning: shallowRef(''),
+      showExecutionPanel: shallowRef(true),
+      selectedTaskStatusRun: shallowRef(selectedRun as never),
+      actionExecutionStates: shallowRef({}),
+      flowExecutionStates: shallowRef({}),
+      executionStore: makeExecutionStore({
+        activeRuns: [selectedRun, unrelatedRun],
+        eventTimeline: globalTimeline,
+        logs: globalLogs
+      }) as never,
+      running: shallowRef(true),
+      editSelectedTask: vi.fn(),
+      duplicateTask: vi.fn(),
+      saveSelectedTaskAsTemplate: vi.fn(),
+      deleteTask: vi.fn()
+    })
+
+    expect(controller.execution.value.taskStatusRun).toBe(selectedRun)
+    expect(controller.execution.value.globalRuns).toEqual([selectedRun, unrelatedRun])
+    expect(controller.execution.value.globalTimeline).toBe(globalTimeline)
+    expect(controller.execution.value.globalLogs).toBe(globalLogs)
+  })
 })
 
-function makeExecutionStore(options: { activeRun?: { status?: string } | null } = {}) {
+function makeExecutionStore(options: {
+  activeRun?: { status?: string } | null
+  activeRuns?: unknown[]
+  eventTimeline?: unknown[]
+  logs?: unknown[]
+} = {}) {
   return {
-    logs: [],
+    activeRuns: options.activeRuns ?? [],
+    eventTimeline: options.eventTimeline ?? [],
+    logs: options.logs ?? [],
     logLoadError: null,
     taskRunTargetKey: (taskId: string) => `task:${taskId}`,
     activeRunForTarget: vi.fn(() => options.activeRun ?? null)

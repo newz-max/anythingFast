@@ -194,9 +194,9 @@ function handleShareSelect(key: string | number) {
     <ExecutionProgress
       v-if="props.execution.showExecutionPanel"
       class="logs"
-      :runs="props.execution.activeRuns"
-      :logs="props.execution.logs"
-      :timeline="props.execution.timeline"
+      :runs="props.execution.globalRuns"
+      :logs="props.execution.globalLogs"
+      :timeline="props.execution.globalTimeline"
       :log-load-error="props.execution.logLoadError"
       @copy-error="emit('copy-execution-error', $event)"
       @retry-action="emit('retry-execution-action', $event)"

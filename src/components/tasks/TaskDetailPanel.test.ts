@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import TaskDetailPanel from './TaskDetailPanel.vue'
 import type { TaskDetailExecutionView, TaskDetailMetaView, TaskDetailTriggerView } from '@/composables/useSelectedTaskDetailPanel'
 import type { CopyExecutionErrorPayload, ExecutionResultActionTarget } from '@/domain/executionPresentation'
+import type { ExecutionRunSnapshot } from '@/stores/executionStore'
 import type { TaskItem } from '@/types/domain'
 
 const target: ExecutionResultActionTarget = {
@@ -15,6 +16,11 @@ const copyPayload: CopyExecutionErrorPayload = { ...target, diagnostic: '已遮�
 
 const ExecutionProgressStub = defineComponent({
   name: 'ExecutionProgress',
+  props: {
+    runs: { type: Array, required: true },
+    timeline: { type: Array, required: true },
+    logs: { type: Array, required: true }
+  },
   emits: ['copy-error', 'retry-action', 'edit-action'],
   template: `
     <div>
@@ -53,9 +59,48 @@ describe('TaskDetailPanel', () => {
     expect(wrapper.emitted('retry-execution-action')).toEqual([[target]])
     expect(wrapper.emitted('edit-execution-action')).toEqual([[target]])
   })
+
+  it('passes global execution feedback to the main progress surface', () => {
+    const selectedRun = makeRun('run-selected', 'task-1', '所选事项')
+    const unrelatedRun = makeRun('run-unrelated', 'task-2', '其他事项')
+    const props = makeProps()
+    props.execution.taskStatusRun = selectedRun
+    props.execution.globalRuns = [selectedRun, unrelatedRun]
+
+    const wrapper = shallowMount(TaskDetailPanel, {
+      props,
+      global: {
+        stubs: {
+          ExecutionProgress: ExecutionProgressStub,
+          NSpin: true,
+          NDropdown: true,
+          NInput: true,
+          NButton: true,
+          NInputGroup: true,
+          NSwitch: true
+        }
+      }
+    })
+
+    const progress = wrapper.getComponent(ExecutionProgressStub)
+    expect(progress.props('runs')).toEqual([selectedRun, unrelatedRun])
+  })
 })
 
 function makeProps() {
+  const execution: TaskDetailExecutionView = {
+    actionExecutionStates: {},
+    taskStatusRun: null,
+    globalRuns: [],
+    globalLogs: [],
+    globalTimeline: [],
+    logLoadError: null,
+    runningTask: false,
+    runButtonLabel: '运行',
+    logsButtonLabel: '隐藏执行日志',
+    showExecutionPanel: true
+  }
+
   return {
     task: makeTask(),
     meta: {
@@ -67,18 +112,7 @@ function makeProps() {
     } satisfies TaskDetailMetaView,
     actionView: 'list' as const,
     flowPreview: { nodes: [], edges: [] },
-    execution: {
-      actionExecutionStates: {},
-      taskStatusRun: null,
-      activeRuns: [],
-      logs: [],
-      timeline: [],
-      logLoadError: null,
-      runningTask: false,
-      runButtonLabel: '运行',
-      logsButtonLabel: '隐藏执行日志',
-      showExecutionPanel: true
-    } satisfies TaskDetailExecutionView,
+    execution,
     triggers: {
       shortcutTrigger: null,
       scheduleTrigger: null,
@@ -89,6 +123,25 @@ function makeProps() {
     shareOptions: [],
     taskMenuOptions: [],
     isActionRunning: () => false
+  }
+}
+
+function makeRun(runId: string, taskId: string, taskName: string): ExecutionRunSnapshot {
+  return {
+    runId,
+    targetKey: `task:${taskId}`,
+    taskId,
+    taskName,
+    scope: 'task',
+    status: 'running',
+    currentActionId: null,
+    currentActionName: '',
+    currentActionType: null,
+    currentIndex: 0,
+    totalActions: 1,
+    completedActions: 0,
+    progressPercent: 0,
+    message: '执行中'
   }
 }
 

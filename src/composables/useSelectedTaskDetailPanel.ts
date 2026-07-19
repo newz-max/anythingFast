@@ -42,9 +42,9 @@ export interface TaskDetailMetaView {
 export interface TaskDetailExecutionView {
   actionExecutionStates: Record<string, ActionExecutionDisplay>
   taskStatusRun: ExecutionRunSnapshot | null
-  activeRuns: ExecutionRunSnapshot[]
-  logs: ExecutionLogSummary[]
-  timeline: ExecutionTimelineEntry[]
+  globalRuns: ExecutionRunSnapshot[]
+  globalLogs: ExecutionLogSummary[]
+  globalTimeline: ExecutionTimelineEntry[]
   logLoadError: string | null
   runningTask: boolean
   runButtonLabel: string
@@ -67,9 +67,6 @@ export interface UseSelectedTaskDetailPanelOptions {
   shortcutWarning: Ref<string>
   showExecutionPanel: Ref<boolean>
   selectedTaskStatusRun: Ref<ExecutionRunSnapshot | null>
-  selectedTaskActiveRuns: Ref<ExecutionRunSnapshot[]>
-  selectedTaskTimeline: Ref<ExecutionTimelineEntry[]>
-  selectedTaskLogs: Ref<ExecutionLogSummary[]>
   actionExecutionStates: Ref<Record<string, ActionExecutionDisplay>>
   flowExecutionStates: Ref<Record<string, ActionExecutionDisplay>>
   executionStore: ExecutionStore
@@ -101,9 +98,9 @@ export function useSelectedTaskDetailPanel(options: UseSelectedTaskDetailPanelOp
     return {
       actionExecutionStates: options.actionExecutionStates.value,
       taskStatusRun: options.selectedTaskStatusRun.value,
-      activeRuns: options.selectedTaskActiveRuns.value,
-      logs: options.selectedTaskLogs.value,
-      timeline: options.selectedTaskTimeline.value,
+      globalRuns: options.executionStore.activeRuns,
+      globalLogs: options.executionStore.logs,
+      globalTimeline: options.executionStore.eventTimeline,
       logLoadError: options.executionStore.logLoadError,
       runningTask: Boolean(run),
       runButtonLabel: run ? (run.status ? statusLabel(run.status) : '执行中') : '运行',
