@@ -11,6 +11,7 @@ import { tauriApi } from '@/api/tauri'
 import type { AppConfig, TaskItem } from '@/types/domain'
 
 const executeMock = vi.hoisted(() => vi.fn())
+const executeActionMock = vi.hoisted(() => vi.fn())
 const focusSearchMock = vi.hoisted(() => vi.fn())
 const scrollTaskIntoViewMock = vi.hoisted(() => vi.fn())
 const messageApi = vi.hoisted(() => ({
@@ -46,7 +47,7 @@ vi.mock('@/composables/useTaskExecution', async () => {
   return {
     useTaskExecution: () => ({
       execute: executeMock,
-      executeAction: vi.fn(),
+      executeAction: executeActionMock,
       running: shallowRef(false)
     })
   }
@@ -114,11 +115,11 @@ const stubs = {
   }),
   TaskWizardDrawer: defineComponent({
     name: 'TaskWizardDrawer',
-    props: ['show', 'mode', 'initialStep', 'task'],
+    props: ['show', 'mode', 'initialStep', 'initialActionId', 'task'],
     emits: ['save', 'save-and-run'],
     template: `
       <section v-if="show" class="task-wizard-stub">
-        {{ mode }}:{{ initialStep }}
+        {{ mode }}:{{ initialStep }}:{{ initialActionId || '' }}
         <button class="wizard-save-stub" type="button" @click="$emit('save', task)">保存</button>
         <button v-if="mode === 'create'" class="wizard-save-run-stub" type="button" @click="$emit('save-and-run', task)">保存并运行</button>
       </section>
@@ -139,7 +140,13 @@ const stubs = {
   }),
   ExecutionProgress: defineComponent({
     name: 'ExecutionProgress',
-    template: '<section class="execution-progress-stub" />'
+    emits: ['retry-action', 'edit-action'],
+    template: `
+      <section class="execution-progress-stub">
+        <button class="retry-result-stub" type="button" @click="$emit('retry-action', { logId: 'log-1', taskId: 'task-1', actionId: 'action-task-1' })">重试结果</button>
+        <button class="edit-result-stub" type="button" @click="$emit('edit-action', { logId: 'log-1', taskId: 'task-1', actionId: 'action-task-1' })">编辑结果</button>
+      </section>
+    `
   }),
   ExecutionStatusStrip: defineComponent({
     name: 'ExecutionStatusStrip',
@@ -310,6 +317,8 @@ describe('MainLayout window keyboard shortcuts', () => {
     })
     executeMock.mockClear()
     executeMock.mockResolvedValue(undefined)
+    executeActionMock.mockClear()
+    executeActionMock.mockResolvedValue(undefined)
     focusSearchMock.mockClear()
     scrollTaskIntoViewMock.mockClear()
     messageApi.success.mockClear()
@@ -400,6 +409,26 @@ describe('MainLayout window keyboard shortcuts', () => {
 
     await pressKey('r', { altKey: true })
     expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-1' }))
+  })
+
+  it('wires execution result retry to the current action and opens its exact editor', async () => {
+    const mounted = await mountLayout()
+    wrapper = mounted.wrapper
+
+    await pressKey('`', { ctrlKey: true, code: 'Backquote' })
+    await wrapper.get('.retry-result-stub').trigger('click')
+    await flushPromises()
+
+    expect(executeActionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'task-1' }),
+      expect.objectContaining({ id: 'action-task-1' })
+    )
+
+    await wrapper.get('.edit-result-stub').trigger('click')
+    await nextTick()
+
+    expect(mounted.taskStore.selectedTaskId).toBe('task-1')
+    expect(wrapper.get('.task-wizard-stub').text()).toContain('edit:2:action-task-1')
   })
 
   it('does not trigger disabled main window keybindings', async () => {

@@ -18,33 +18,33 @@ export function useTaskWizardDraft(options: {
   const draft = ref<TaskItem | null>(null)
   const activeKey = shallowRef(CREATE_DRAFT_KEY)
 
-  watch(
-    [options.mode, options.sourceTask],
-    ([mode, task]) => {
-      const key = task?.id || (mode === 'create' ? CREATE_DRAFT_KEY : null)
-      activeKey.value = key || CREATE_DRAFT_KEY
+  function resetDraft() {
+    const task = options.sourceTask.value
+    const mode = options.mode.value
+    const key = task?.id || (mode === 'create' ? CREATE_DRAFT_KEY : null)
+    activeKey.value = key || CREATE_DRAFT_KEY
 
-      if (!key) {
-        draft.value = null
-        return
-      }
+    if (!key) {
+      draft.value = null
+      return
+    }
 
-      const cachedDraft = draftCache.get(key)
-      if (cachedDraft) {
-        draft.value = cachedDraft
-        normalizeRisks()
-        return
-      }
+    const cachedDraft = draftCache.get(key)
+    if (cachedDraft) {
+      draft.value = cachedDraft
+      normalizeRisks()
+      return
+    }
 
-      const nextDraft = task ? clonePlainDto(task) : mode === 'create' ? createTaskDraft() : null
-      draft.value = nextDraft
-      if (nextDraft) {
-        draftCache.set(key, nextDraft)
-        normalizeRisks()
-      }
-    },
-    { immediate: true }
-  )
+    const nextDraft = task ? clonePlainDto(task) : mode === 'create' ? createTaskDraft() : null
+    draft.value = nextDraft
+    if (nextDraft) {
+      draftCache.set(key, nextDraft)
+      normalizeRisks()
+    }
+  }
+
+  watch([options.mode, options.sourceTask], resetDraft, { immediate: true })
 
   watch(
     draft,
@@ -128,6 +128,7 @@ export function useTaskWizardDraft(options: {
     removeAction,
     moveAction,
     normalizeRisks,
+    resetDraft,
     clearDraft
   }
 }

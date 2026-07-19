@@ -20,6 +20,7 @@ const props = defineProps<{
   tags?: TaskTag[]
   saving: boolean
   initialStep?: number
+  initialActionId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -35,12 +36,13 @@ const currentStep = shallowRef(1)
 const actionWizardVisible = shallowRef(false)
 const actionWizardMode = shallowRef<ActionWizardMode>('create')
 const editingAction = shallowRef<TaskAction | null>(null)
+const openedInitialActionId = shallowRef<string | null>(null)
 const message = useMessage()
 const keybindings = useKeybindings()
 const modeRef = toRef(props, 'mode')
 const taskRef = toRef(props, 'task')
 const allTasksRef = toRef(props, 'allTasks')
-const { draft, validation, actionCount, containsCommand, addAction, replaceAction, removeAction, moveAction, normalizeRisks, clearDraft } = useTaskWizardDraft({
+const { draft, validation, actionCount, containsCommand, addAction, replaceAction, removeAction, moveAction, normalizeRisks, resetDraft, clearDraft } = useTaskWizardDraft({
   mode: modeRef,
   sourceTask: taskRef,
   allTasks: allTasksRef
@@ -59,13 +61,35 @@ onUnmounted(() => window.removeEventListener('keydown', onEditorKeydown))
 
 watch(
   () => props.show,
-  (show) => {
+  (show, previousShow) => {
     if (show) {
       currentStep.value = props.initialStep ?? 1
+      if (!draft.value) resetDraft()
       return
     }
+    if (previousShow === undefined) return
+    openedInitialActionId.value = null
+    actionWizardVisible.value = false
+    editingAction.value = null
     clearDraft()
-  }
+  },
+  { immediate: true }
+)
+
+watch(
+  [() => props.show, () => props.initialActionId, draft],
+  ([show, actionId, currentDraft]) => {
+    if (!show || !actionId || !currentDraft || openedInitialActionId.value === actionId) return
+    openedInitialActionId.value = actionId
+    currentStep.value = 2
+    const action = currentDraft.actions.find((item) => item.id === actionId)
+    if (!action) {
+      message.warning('动作已不存在，无法打开编辑器')
+      return
+    }
+    editAction(action)
+  },
+  { immediate: true }
 )
 
 watch(

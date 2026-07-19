@@ -69,6 +69,7 @@ export interface UseSelectedTaskDetailPanelOptions {
   selectedTaskStatusRun: Ref<ExecutionRunSnapshot | null>
   selectedTaskActiveRuns: Ref<ExecutionRunSnapshot[]>
   selectedTaskTimeline: Ref<ExecutionTimelineEntry[]>
+  selectedTaskLogs: Ref<ExecutionLogSummary[]>
   actionExecutionStates: Ref<Record<string, ActionExecutionDisplay>>
   flowExecutionStates: Ref<Record<string, ActionExecutionDisplay>>
   executionStore: ExecutionStore
@@ -101,7 +102,7 @@ export function useSelectedTaskDetailPanel(options: UseSelectedTaskDetailPanelOp
       actionExecutionStates: options.actionExecutionStates.value,
       taskStatusRun: options.selectedTaskStatusRun.value,
       activeRuns: options.selectedTaskActiveRuns.value,
-      logs: options.executionStore.logs,
+      logs: options.selectedTaskLogs.value,
       timeline: options.selectedTaskTimeline.value,
       logLoadError: options.executionStore.logLoadError,
       runningTask: Boolean(run),

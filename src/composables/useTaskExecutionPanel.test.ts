@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { defineComponent, nextTick, shallowRef } from 'vue'
 import type { ExecutionEventPayload } from '@/api/events'
 import { useExecutionStore } from '@/stores/executionStore'
-import type { TaskExecutionSummary, TaskItem } from '@/types/domain'
+import type { ExecutionLogSummary, TaskExecutionSummary, TaskItem } from '@/types/domain'
 import { useTaskExecutionPanel } from './useTaskExecutionPanel'
 
 type ExecutionPanelController = ReturnType<typeof useTaskExecutionPanel>
@@ -110,7 +110,18 @@ describe('useTaskExecutionPanel', () => {
     expect(controller.selectedTaskActiveRun.value).toBeNull()
     expect(controller.selectedTaskEvents.value).toEqual([])
     expect(controller.selectedTaskTimeline.value).toEqual([])
+    expect(controller.selectedTaskLogs.value).toEqual([])
     expect(controller.flowExecutionStates.value).toEqual({})
+
+    wrapper.unmount()
+  })
+
+  it('projects only logs for the selected task', () => {
+    const store = useExecutionStore()
+    store.logs = [makeLog('task-2', 'log-2'), makeLog('task-1', 'log-1')]
+    const { controller, wrapper } = mountHarness(store)
+
+    expect(controller.selectedTaskLogs.value.map((log) => log.id)).toEqual(['log-1'])
 
     wrapper.unmount()
   })
@@ -142,6 +153,13 @@ function makeTask(id: string): TaskItem {
     triggers: [{ type: 'manual', enabled: true }],
     createdAt: '2026-07-01T00:00:00.000Z',
     updatedAt: '2026-07-01T00:00:00.000Z'
+  }
+}
+
+function makeLog(taskId: string, id: string): ExecutionLogSummary {
+  return {
+    id,
+    ...makeSummary(taskId, [{ actionId: `action-${taskId}`, status: 'success' }])
   }
 }
 

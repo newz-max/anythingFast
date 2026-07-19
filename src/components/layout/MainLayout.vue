@@ -22,6 +22,7 @@ import { useTaskStore } from '@/stores/taskStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useUpdateStore } from '@/stores/updateStore'
 import { useTaskExecution } from '@/composables/useTaskExecution'
+import { useActionableExecutionResults } from '@/composables/useActionableExecutionResults'
 import { useKeybindings } from '@/composables/useKeybindings'
 import { useTaskImportExport } from '@/composables/useTaskImportExport'
 import { useResponsiveMainLayout } from '@/composables/useResponsiveMainLayout'
@@ -88,6 +89,7 @@ const wizardVisible = shallowRef(false)
 const wizardMode = shallowRef<TaskWizardMode>('create')
 const wizardTask = shallowRef<TaskItem | null>(null)
 const wizardInitialStep = shallowRef(1)
+const wizardInitialActionId = shallowRef<string | null>(null)
 const templatePreviewVisible = shallowRef(false)
 const previewTemplate = shallowRef<TaskTemplate | null>(null)
 const activeTaskView = shallowRef<TaskView>('all')
@@ -102,6 +104,18 @@ const taskListPanelRef = useTemplateRef<{
   visibleTaskIds: () => string[]
   scrollTaskIntoView: (taskId: string) => Promise<void>
 }>('taskListPanel')
+
+const {
+  copyExecutionError,
+  retryExecutionAction,
+  editExecutionAction
+} = useActionableExecutionResults({
+  getTasks: () => taskStore.tasks,
+  executeAction,
+  isActionActive: (taskId, actionId) => executionStore.isTargetActive(executionStore.actionRunTargetKey(taskId, actionId)),
+  openActionEditor,
+  message
+})
 
 const selectedTask = computed(() => taskStore.selectedTask)
 const visibleTasks = computed(() => getTasksForView(taskStore.tasks, activeTaskView.value, selectedTagId.value))
@@ -178,6 +192,7 @@ const {
   selectedTaskStatusRun,
   selectedTaskActiveRuns,
   selectedTaskTimeline,
+  selectedTaskLogs,
   actionExecutionStates,
   flowExecutionStates,
   toggleExecutionPanel
@@ -248,6 +263,7 @@ const {
   selectedTaskStatusRun,
   selectedTaskActiveRuns,
   selectedTaskTimeline,
+  selectedTaskLogs,
   actionExecutionStates,
   flowExecutionStates,
   executionStore,
@@ -318,6 +334,7 @@ function createTask() {
   wizardMode.value = 'create'
   wizardTask.value = createTaskDraft()
   wizardInitialStep.value = 1
+  wizardInitialActionId.value = null
   wizardVisible.value = true
 }
 
@@ -382,7 +399,20 @@ function editSelectedTask(initialStep = 1) {
   wizardMode.value = 'edit'
   wizardTask.value = selectedTask.value
   wizardInitialStep.value = initialStep
+  wizardInitialActionId.value = null
   wizardVisible.value = true
+}
+
+function openActionEditor(task: TaskItem, actionId: string) {
+  taskStore.selectTask(task.id)
+  wizardMode.value = 'edit'
+  wizardTask.value = task
+  wizardInitialStep.value = 2
+  wizardInitialActionId.value = actionId
+  wizardVisible.value = true
+  if (isStackedLayout.value) {
+    taskListExpanded.value = false
+  }
 }
 
 function isMainShortcutSuspended() {
@@ -548,6 +578,7 @@ function createFromTemplate(initialValues: Record<string, string>) {
   wizardMode.value = 'create'
   wizardTask.value = task
   wizardInitialStep.value = 1
+  wizardInitialActionId.value = null
   templatePreviewVisible.value = false
   wizardVisible.value = true
 }
@@ -678,6 +709,9 @@ function reportUiError(context: string, err: unknown, extra?: Record<string, unk
           @clear-schedule="clearTaskScheduleTrigger"
           @save-global-shortcut="saveShortcut"
           @toggle-execution-panel="toggleExecutionPanel"
+          @copy-execution-error="copyExecutionError"
+          @retry-execution-action="retryExecutionAction"
+          @edit-execution-action="editExecutionAction"
         />
 
         <NEmpty v-else class="empty-state" description="还没有事项">
@@ -697,6 +731,7 @@ function reportUiError(context: string, err: unknown, extra?: Record<string, unk
       :tags="taskStore.tags"
       :saving="taskStore.saving"
       :initial-step="wizardInitialStep"
+      :initial-action-id="wizardInitialActionId"
       @save="saveTask"
       @save-and-run="saveTaskAndRun"
       @duplicate="duplicateTask"

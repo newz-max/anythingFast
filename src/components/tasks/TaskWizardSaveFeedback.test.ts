@@ -140,6 +140,15 @@ const taskWizardWithRealActionStubs = {
   })
 }
 
+const initialActionStubs = {
+  ...taskWizardStubs,
+  ActionWizardPanel: defineComponent({
+    name: 'ActionWizardPanel',
+    props: ['show', 'mode', 'action'],
+    template: '<section v-if="show" class="initial-action-editor">{{ mode }}:{{ action?.id }}</section>'
+  })
+}
+
 const mountedWrappers: VueWrapper[] = []
 
 function trackWrapper<T extends VueWrapper>(wrapper: T) {
@@ -474,6 +483,59 @@ describe('wizard save feedback', () => {
 
     expect(messageApi.error).toHaveBeenCalledWith('动作保存失败：事项草稿不存在或动作已被移除')
     expect(wrapper.find('.action-wizard-stub').exists()).toBe(true)
+  })
+
+  it('opens the exact requested action when initialized from an execution result', async () => {
+    const actions: TaskAction[] = [
+      { id: 'action-first', type: 'delay', name: '第一个', params: { durationMs: 1 }, enabled: true, riskLevel: 'low' },
+      { id: 'action-target', type: 'delay', name: '目标动作', params: { durationMs: 2 }, enabled: true, riskLevel: 'low' }
+    ]
+    const wrapper = trackWrapper(mount(TaskWizardDrawer, {
+      props: {
+        show: true,
+        mode: 'edit',
+        task: makeTask(actions, 'task-initial-action'),
+        allTasks: [],
+        saving: false,
+        initialStep: 2,
+        initialActionId: 'action-target'
+      },
+      global: { stubs: initialActionStubs }
+    }))
+
+    await nextTick()
+
+    expect(wrapper.get('.initial-action-editor').text()).toBe('edit:action-target')
+    expect(messageApi.warning).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ show: false })
+    await nextTick()
+    await wrapper.setProps({ show: true })
+    await nextTick()
+
+    expect(wrapper.get('.initial-action-editor').text()).toBe('edit:action-target')
+  })
+
+  it('does not open an unrelated action when the requested draft action is stale', async () => {
+    const wrapper = trackWrapper(mount(TaskWizardDrawer, {
+      props: {
+        show: true,
+        mode: 'edit',
+        task: makeTask([
+          { id: 'action-existing', type: 'delay', name: '现有动作', params: { durationMs: 1 }, enabled: true, riskLevel: 'low' }
+        ], 'task-stale-initial-action'),
+        allTasks: [],
+        saving: false,
+        initialStep: 2,
+        initialActionId: 'action-missing'
+      },
+      global: { stubs: initialActionStubs }
+    }))
+
+    await nextTick()
+
+    expect(wrapper.find('.initial-action-editor').exists()).toBe(false)
+    expect(messageApi.warning).toHaveBeenCalledWith('动作已不存在，无法打开编辑器')
   })
 
   it('supports task editor keyboard save, close, and step navigation', async () => {

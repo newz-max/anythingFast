@@ -1,6 +1,6 @@
 import type { ExecutionEventPayload } from '@/api/events'
 import type { ExecutionRunSnapshot } from '@/stores/executionStore'
-import type { ExecutionStatus } from '@/types/domain'
+import type { ActionExecutionResult, ExecutionStatus, TaskExecutionSummary } from '@/types/domain'
 
 export type NaiveStatusType = 'default' | 'info' | 'success' | 'warning' | 'error'
 export type ExecutionRunStatus = ExecutionStatus | 'started'
@@ -10,6 +10,40 @@ export interface ActionExecutionDisplay {
   status: ActionRunDisplayStatus
   label: string
   type: NaiveStatusType
+}
+
+export interface ExecutionResultActionTarget {
+  logId: string
+  taskId: string
+  actionId: string
+}
+
+export interface CopyExecutionErrorPayload extends ExecutionResultActionTarget {
+  diagnostic: string
+}
+
+export function primaryFailureDiagnostic(action: ActionExecutionResult): string | null {
+  if (action.status !== 'failed') return null
+  return nonEmptyText(action.message) ?? nonEmptyText(action.stderr)
+}
+
+export function formatActionDuration(durationMs?: number): string | null {
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) return null
+  if (durationMs < 1000) return `${durationMs} ms`
+  return `${(durationMs / 1000).toFixed(1)} s`
+}
+
+export function deriveSlowestActionIds(summary: TaskExecutionSummary): string[] {
+  if (summary.scope !== 'task') return []
+  const timedActions = summary.actions.filter(
+    (action) => action.status !== 'skipped' && formatActionDuration(action.durationMs) !== null
+  )
+  if (timedActions.length < 2) return []
+
+  const maximumDuration = Math.max(...timedActions.map((action) => action.durationMs!))
+  return timedActions
+    .filter((action) => action.durationMs === maximumDuration)
+    .map((action) => action.actionId)
 }
 
 export function statusLabel(status: ExecutionRunStatus) {
@@ -130,4 +164,9 @@ function actionRunStatusFromEvent(event: ExecutionEventPayload): ActionRunDispla
   if (event.status === 'action-skipped') return 'skipped'
   if (event.status === 'action-cancelled') return 'cancelled'
   return null
+}
+
+function nonEmptyText(value?: string): string | null {
+  const text = value?.trim()
+  return text ? text : null
 }

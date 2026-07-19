@@ -16,6 +16,11 @@ const stubs = {
   NList: { template: '<div><slot /></div>' },
   NListItem: { template: '<div><slot name="prefix" /><slot /></div>' },
   NTag: { template: '<span><slot /></span>' },
+  NButton: {
+    props: ['disabled'],
+    emits: ['click'],
+    template: '<button type="button" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>'
+  },
   NThing: { props: ['title', 'description'], template: '<div><strong>{{ title }}</strong><span>{{ description }}</span></div>' },
   NAlert: { props: ['title'], template: '<div>{{ title }} <slot /></div>' }
 }
@@ -197,6 +202,96 @@ describe('ExecutionProgress', () => {
     expect(wrapper.text()).toContain('事项 B · 单动作')
     expect(wrapper.text()).toContain('进度 50%')
     expect(wrapper.text()).toContain('进度 0%')
+  })
+
+  it('renders actionable failed results, durations, and tied slowest markers', async () => {
+    const logs: ExecutionLogSummary[] = [
+      {
+        id: 'log-1',
+        taskId: 'task-1',
+        taskName: '构建事项',
+        scope: 'task',
+        startedAt: '2026-07-03T00:00:00Z',
+        finishedAt: '2026-07-03T00:00:08Z',
+        status: 'failed',
+        actions: [
+          {
+            actionId: 'failed-action',
+            actionName: '失败动作',
+            actionType: 'runCommand',
+            status: 'failed',
+            message: '密钥 *** 无效',
+            durationMs: 2000
+          },
+          {
+            actionId: 'success-action',
+            actionName: '成功动作',
+            actionType: 'delay',
+            status: 'success',
+            durationMs: 2000
+          },
+          {
+            actionId: 'skipped-action',
+            actionName: '跳过动作',
+            actionType: 'delay',
+            status: 'skipped',
+            durationMs: 8000
+          },
+          {
+            actionId: 'untimed-action',
+            actionName: '无耗时动作',
+            actionType: 'delay',
+            status: 'success'
+          }
+        ]
+      }
+    ]
+    const wrapper = mount(ExecutionProgress, {
+      props: { runs: [], timeline: [], logs },
+      global: { stubs }
+    })
+
+    expect(wrapper.text()).toContain('密钥 *** 无效')
+    expect(wrapper.text()).toContain('8.0 s')
+    expect(wrapper.findAll('span').filter((item) => item.text() === '最慢')).toHaveLength(2)
+    expect(wrapper.findAll('button').map((button) => button.text())).toEqual(['复制错误', '重试动作', '编辑动作'])
+
+    await wrapper.findAll('button')[0].trigger('click')
+    await wrapper.findAll('button')[1].trigger('click')
+    await wrapper.findAll('button')[2].trigger('click')
+
+    const target = { logId: 'log-1', taskId: 'task-1', actionId: 'failed-action' }
+    expect(wrapper.emitted('copy-error')).toEqual([[{ ...target, diagnostic: '密钥 *** 无效' }]])
+    expect(wrapper.emitted('retry-action')).toEqual([[target]])
+    expect(wrapper.emitted('edit-action')).toEqual([[target]])
+  })
+
+  it('does not expose failed-action controls for non-failed results', () => {
+    const wrapper = mount(ExecutionProgress, {
+      props: {
+        runs: [],
+        timeline: [],
+        logs: [
+          {
+            id: 'log-1',
+            taskId: 'task-1',
+            taskName: '完成事项',
+            scope: 'task',
+            startedAt: '2026-07-03T00:00:00Z',
+            finishedAt: '2026-07-03T00:00:01Z',
+            status: 'success',
+            actions: [
+              { actionId: 'success', actionName: '成功', actionType: 'delay', status: 'success', durationMs: 1 },
+              { actionId: 'skipped', actionName: '跳过', actionType: 'delay', status: 'skipped', durationMs: 0 },
+              { actionId: 'cancelled', actionName: '取消', actionType: 'delay', status: 'cancelled', durationMs: 1 }
+            ]
+          }
+        ]
+      },
+      global: { stubs }
+    })
+
+    expect(wrapper.findAll('button')).toHaveLength(0)
   })
 
   it('renders only the latest 20 timeline entries in observed order', () => {

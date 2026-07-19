@@ -6,6 +6,7 @@ import FlowPreviewGraph from '@/components/tasks/FlowPreviewGraph.vue'
 import TaskActionList from '@/components/tasks/TaskActionList.vue'
 import TaskTriggerSettings from '@/components/tasks/TaskTriggerSettings.vue'
 import type { ActionView } from '@/domain/actionView'
+import type { CopyExecutionErrorPayload, ExecutionResultActionTarget } from '@/domain/executionPresentation'
 import type { FlowPreviewModel } from '@/domain/flowPreview'
 import type { TaskDetailExecutionView, TaskDetailMetaView, TaskDetailTriggerView } from '@/composables/useSelectedTaskDetailPanel'
 import type {
@@ -46,6 +47,9 @@ const emit = defineEmits<{
   'clear-schedule': []
   'save-global-shortcut': []
   'toggle-execution-panel': []
+  'copy-execution-error': [payload: CopyExecutionErrorPayload]
+  'retry-execution-action': [payload: ExecutionResultActionTarget]
+  'edit-execution-action': [payload: ExecutionResultActionTarget]
 }>()
 
 function handleTaskMenuSelect(key: string | number) {
@@ -194,6 +198,9 @@ function handleShareSelect(key: string | number) {
       :logs="props.execution.logs"
       :timeline="props.execution.timeline"
       :log-load-error="props.execution.logLoadError"
+      @copy-error="emit('copy-execution-error', $event)"
+      @retry-action="emit('retry-execution-action', $event)"
+      @edit-action="emit('edit-execution-action', $event)"
     />
   </section>
 </template>

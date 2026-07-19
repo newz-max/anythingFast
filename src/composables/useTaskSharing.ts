@@ -3,6 +3,7 @@ import type { Ref } from 'vue'
 import { tauriApi } from '@/api/tauri'
 import { createTaskBundleFallback } from '@/domain/taskBundle'
 import { isTauriRuntime as defaultIsTauriRuntime } from '@/utils/tauriRuntime'
+import { writeClipboardText } from '@/utils/clipboard'
 import type { TaskItem } from '@/types/domain'
 
 export const taskShareActionKeys = {
@@ -41,7 +42,7 @@ export interface UseTaskSharingDeps {
 export function useTaskSharing(options: UseTaskSharingOptions, deps: UseTaskSharingDeps = {}) {
   const api = deps.tauriApi ?? tauriApi
   const isTauriRuntime = deps.isTauriRuntime ?? defaultIsTauriRuntime
-  const copyText = deps.copyText ?? copyTextToClipboard
+  const copyText = deps.copyText ?? writeClipboardText
   const now = deps.now ?? (() => new Date())
 
   async function handleShareSelect(key: string | number) {
@@ -92,8 +93,4 @@ export function createTaskSummary(task: TaskItem) {
     `动作数：${task.actions.length}`,
     `风险等级：${task.riskLevel}`
   ].join('\n')
-}
-
-async function copyTextToClipboard(text: string) {
-  await navigator.clipboard.writeText(text)
 }

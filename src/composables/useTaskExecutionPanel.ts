@@ -4,7 +4,7 @@ import type { ExecutionEventPayload } from '@/api/events'
 import { deriveActionExecutionStates, type ActionExecutionDisplay } from '@/domain/executionPresentation'
 import { deriveFlowExecutionStates, type FlowPreviewStatus } from '@/domain/flowPreview'
 import type { ExecutionRunSnapshot, ExecutionTimelineEntry, useExecutionStore } from '@/stores/executionStore'
-import type { TaskExecutionSummary, TaskItem } from '@/types/domain'
+import type { ExecutionLogSummary, TaskExecutionSummary, TaskItem } from '@/types/domain'
 
 type ActionExecutionStates = Record<string, ActionExecutionDisplay>
 type FlowExecutionStates = Record<string, FlowPreviewStatus>
@@ -24,6 +24,7 @@ interface TaskExecutionPanelController {
   selectedTaskStatusRun: ComputedRef<ExecutionRunSnapshot | null>
   selectedTaskEvents: ComputedRef<ExecutionEventPayload[]>
   selectedTaskTimeline: ComputedRef<ExecutionTimelineEntry[]>
+  selectedTaskLogs: ComputedRef<ExecutionLogSummary[]>
   selectedTaskLatestSummary: ComputedRef<TaskExecutionSummary | null>
   actionExecutionStates: ComputedRef<ActionExecutionStates>
   flowExecutionStates: ComputedRef<FlowExecutionStates>
@@ -51,6 +52,11 @@ export function useTaskExecutionPanel(options: UseTaskExecutionPanelOptions): Ta
   )
   const selectedTaskTimeline = computed(() =>
     options.selectedTask.value ? options.executionStore.timelineForTask(options.selectedTask.value.id) : []
+  )
+  const selectedTaskLogs = computed(() =>
+    options.selectedTask.value
+      ? options.executionStore.logs.filter((log) => log.taskId === options.selectedTask.value?.id)
+      : []
   )
   const selectedTaskLatestSummary = computed(() =>
     options.selectedTask.value ? options.executionStore.latestSummaryForTask(options.selectedTask.value.id) : null
@@ -95,6 +101,7 @@ export function useTaskExecutionPanel(options: UseTaskExecutionPanelOptions): Ta
     selectedTaskStatusRun,
     selectedTaskEvents,
     selectedTaskTimeline,
+    selectedTaskLogs,
     selectedTaskLatestSummary,
     actionExecutionStates,
     flowExecutionStates,

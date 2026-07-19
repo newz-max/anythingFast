@@ -2,14 +2,18 @@
 import { computed } from 'vue'
 import type { ExecutionEventPayload } from '@/api/events'
 import {
+  deriveSlowestActionIds,
   eventStatusLabel,
   eventStatusType,
+  formatActionDuration,
+  primaryFailureDiagnostic,
   runStatusType as getRunStatusType,
   runTitle as getRunTitle,
   statusLabel
 } from '@/domain/executionPresentation'
+import type { CopyExecutionErrorPayload, ExecutionResultActionTarget } from '@/domain/executionPresentation'
 import type { ExecutionRunSnapshot, ExecutionTimelineEntry } from '@/stores/executionStore'
-import type { ActionExecutionResult, ExecutionLogSummary } from '@/types/domain'
+import type { ExecutionLogSummary, ExecutionStatus } from '@/types/domain'
 
 const props = defineProps<{
   runs: ExecutionRunSnapshot[]
@@ -18,20 +22,27 @@ const props = defineProps<{
   logLoadError?: string | null
 }>()
 
+const emit = defineEmits<{
+  'copy-error': [payload: CopyExecutionErrorPayload]
+  'retry-action': [payload: ExecutionResultActionTarget]
+  'edit-action': [payload: ExecutionResultActionTarget]
+}>()
+
 const visibleTimeline = computed(() => props.timeline.slice(-20))
 const latestSummary = computed(() => props.logs[0] ?? null)
-
-function attentionActionMessages(log: ExecutionLogSummary): ActionExecutionResult[] {
-  return log.actions.filter((action) => (action.status === 'failed' || action.status === 'cancelled' || action.status === 'skipped') && Boolean(action.message || action.skipReason))
-}
-
-function actionsWithCommandOutput(log: ExecutionLogSummary): ActionExecutionResult[] {
-  return log.actions.filter(hasCommandOutput)
-}
-
-function hasCommandOutput(action: ActionExecutionResult) {
-  return Boolean(action.stdout || action.stderr || typeof action.exitCode === 'number')
-}
+const logViews = computed(() => props.logs.map((log) => {
+  const slowestActionIds = new Set(deriveSlowestActionIds(log))
+  return {
+    log,
+    actions: log.actions.map((action) => ({
+      action,
+      diagnostic: primaryFailureDiagnostic(action),
+      durationLabel: formatActionDuration(action.durationMs),
+      isSlowest: slowestActionIds.has(action.actionId),
+      hasCommandOutput: Boolean(action.stdout || action.stderr || typeof action.exitCode === 'number')
+    }))
+  }
+}))
 
 function eventType(event: ExecutionEventPayload) {
   return eventStatusType(event)
@@ -51,14 +62,21 @@ function runStatusType(run: ExecutionRunSnapshot) {
   return getRunStatusType(run.status)
 }
 
+function resultStatusType(status: ExecutionStatus) {
+  return getRunStatusType(status)
+}
+
 function runTitle(run: ExecutionRunSnapshot) {
   return getRunTitle(run)
 }
 
-function formatDuration(durationMs?: number) {
-  if (typeof durationMs !== 'number') return ''
-  if (durationMs < 1000) return `${durationMs} ms`
-  return `${(durationMs / 1000).toFixed(1)} s`
+function resultTarget(log: ExecutionLogSummary, actionId: string): ExecutionResultActionTarget {
+  return { logId: log.id, taskId: log.taskId, actionId }
+}
+
+function copyError(log: ExecutionLogSummary, actionId: string, diagnostic: string | null) {
+  if (!diagnostic) return
+  emit('copy-error', { ...resultTarget(log, actionId), diagnostic })
 }
 </script>
 
@@ -99,38 +117,55 @@ function formatDuration(durationMs?: number) {
         <h3 class="subhead">最近摘要</h3>
         <NEmpty v-if="logs.length === 0" description="暂无日志" />
         <NList v-else>
-          <NListItem v-for="log in logs" :key="log.id">
+          <NListItem v-for="view in logViews" :key="view.log.id">
             <template #prefix>
-              <NTag size="small" :type="log.status === 'success' ? 'success' : log.status === 'failed' ? 'error' : 'warning'">
-                {{ statusLabel(log.status) }}
+              <NTag size="small" :type="resultStatusType(view.log.status)">
+                {{ statusLabel(view.log.status) }}
               </NTag>
             </template>
             <NThing
-              :title="log.scope === 'action' ? `${log.taskName} · 单动作` : log.taskName"
-              :description="`${log.startedAt} · ${log.actions.length} 个动作`"
+              :title="view.log.scope === 'action' ? `${view.log.taskName} · 单动作` : view.log.taskName"
+              :description="`${view.log.startedAt} · ${view.log.actions.length} 个动作`"
             />
-            <ul v-if="attentionActionMessages(log).length > 0" class="error-list">
-              <li
-                v-for="action in attentionActionMessages(log)"
-                :key="action.actionId"
-                class="error-item"
-                :class="{ 'warning-item': action.status === 'cancelled' }"
-              >
-                <span class="error-action">{{ action.actionName }}</span>
-                <span class="error-message">{{ action.skipReason || action.message }}</span>
+            <ul v-if="view.actions.length > 0" class="result-list">
+              <li v-for="actionView in view.actions" :key="`${view.log.id}-${actionView.action.actionId}`" class="result-item">
+                <div class="result-heading">
+                  <span class="result-action">{{ actionView.action.actionName }}</span>
+                  <NTag size="small" :type="resultStatusType(actionView.action.status)">
+                    {{ statusLabel(actionView.action.status) }}
+                  </NTag>
+                  <span v-if="actionView.durationLabel" class="duration-label">{{ actionView.durationLabel }}</span>
+                  <NTag v-if="actionView.isSlowest" size="small" type="warning">最慢</NTag>
+                </div>
+                <span v-if="actionView.action.skipReason || actionView.action.message" class="result-message">
+                  {{ actionView.action.skipReason || actionView.action.message }}
+                </span>
+                <div v-if="actionView.action.status === 'failed'" class="result-actions">
+                  <NButton
+                    size="tiny"
+                    secondary
+                    :disabled="!actionView.diagnostic"
+                    @click="copyError(view.log, actionView.action.actionId, actionView.diagnostic)"
+                  >
+                    复制错误
+                  </NButton>
+                  <NButton size="tiny" secondary @click="emit('retry-action', resultTarget(view.log, actionView.action.actionId))">
+                    重试动作
+                  </NButton>
+                  <NButton size="tiny" secondary @click="emit('edit-action', resultTarget(view.log, actionView.action.actionId))">
+                    编辑动作
+                  </NButton>
+                </div>
+                <details v-if="actionView.hasCommandOutput" class="output-block">
+                  <summary>
+                    命令输出
+                    <span v-if="typeof actionView.action.exitCode === 'number'">退出码 {{ actionView.action.exitCode }}</span>
+                  </summary>
+                  <pre v-if="actionView.action.stdout" class="command-output stdout">{{ actionView.action.stdout }}</pre>
+                  <pre v-if="actionView.action.stderr" class="command-output stderr">{{ actionView.action.stderr }}</pre>
+                </details>
               </li>
             </ul>
-            <div v-if="actionsWithCommandOutput(log).length > 0" class="output-list">
-              <details v-for="action in actionsWithCommandOutput(log)" :key="`${log.id}-${action.actionId}`" class="output-block">
-                <summary>
-                  {{ action.actionName }}
-                  <span v-if="typeof action.exitCode === 'number'">退出码 {{ action.exitCode }}</span>
-                  <span v-if="formatDuration(action.durationMs)">{{ formatDuration(action.durationMs) }}</span>
-                </summary>
-                <pre v-if="action.stdout" class="command-output stdout">{{ action.stdout }}</pre>
-                <pre v-if="action.stderr" class="command-output stderr">{{ action.stderr }}</pre>
-              </details>
-            </div>
           </NListItem>
         </NList>
       </NGi>
@@ -206,8 +241,7 @@ function formatDuration(durationMs?: number) {
   scrollbar-gutter: stable;
 }
 
-.error-list,
-.output-list {
+.result-list {
   display: grid;
   gap: 6px;
   margin: 8px 0 0;
@@ -215,35 +249,41 @@ function formatDuration(durationMs?: number) {
   list-style: none;
 }
 
-.error-item {
+.result-item {
   display: grid;
-  gap: 4px;
+  gap: 7px;
   padding: 8px 10px;
-  border: 1px solid rgba(239, 68, 68, 0.28);
+  border: 1px solid rgba(82, 106, 171, 0.18);
   border-radius: 8px;
-  background: rgba(239, 68, 68, 0.08);
+  background: rgba(13, 18, 35, 0.36);
 }
 
-.error-action {
+.result-heading,
+.result-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.result-action {
+  min-width: 0;
   font-size: 12px;
   font-weight: 700;
-  color: #ff8a8a;
+  color: #dce4fb;
 }
 
-.warning-item {
-  border-color: rgba(245, 158, 11, 0.3);
-  background: rgba(245, 158, 11, 0.08);
-}
-
-.warning-item .error-action {
-  color: #fbbf24;
-}
-
-.error-message {
+.result-message {
   font-size: 12px;
   line-height: 1.5;
   word-break: break-word;
   color: inherit;
+}
+
+.duration-label {
+  color: #8b96b8;
+  font-size: 12px;
 }
 
 .output-block {

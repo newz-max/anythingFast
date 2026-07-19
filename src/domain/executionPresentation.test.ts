@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import type { ExecutionEventPayload } from '@/api/events'
 import type { ExecutionRunSnapshot } from '@/stores/executionStore'
-import { deriveActionExecutionStates, eventStatusLabel, eventStatusType, normalizedProgressPercent, runProgressLabel } from './executionPresentation'
+import {
+  deriveActionExecutionStates,
+  deriveSlowestActionIds,
+  eventStatusLabel,
+  eventStatusType,
+  formatActionDuration,
+  normalizedProgressPercent,
+  primaryFailureDiagnostic,
+  runProgressLabel
+} from './executionPresentation'
+import type { ActionExecutionResult, TaskExecutionSummary } from '@/types/domain'
 
 function event(patch: Partial<ExecutionEventPayload>): ExecutionEventPayload {
   return {
@@ -125,4 +135,54 @@ describe('executionPresentation', () => {
     expect(runProgressLabel(pendingRun)).toBe('等待动作事件')
     expect(normalizedProgressPercent({ ...pendingRun, totalActions: 2, progressPercent: 180 })).toBe(100)
   })
+
+  it('derives the sanitized primary failure diagnostic without using non-failed output', () => {
+    expect(primaryFailureDiagnostic(actionResult({ message: '  已遮罩：***  ', stderr: 'fallback' }))).toBe('已遮罩：***')
+    expect(primaryFailureDiagnostic(actionResult({ message: ' ', stderr: '  stderr fallback  ' }))).toBe('stderr fallback')
+    expect(primaryFailureDiagnostic(actionResult({ status: 'success', message: '完成' }))).toBeNull()
+  })
+
+  it('formats valid durations and rejects unavailable values', () => {
+    expect(formatActionDuration(999)).toBe('999 ms')
+    expect(formatActionDuration(1250)).toBe('1.3 s')
+    expect(formatActionDuration(undefined)).toBeNull()
+    expect(formatActionDuration(Number.NaN)).toBeNull()
+    expect(formatActionDuration(-1)).toBeNull()
+  })
+
+  it('derives all tied slowest non-skipped actions for task-scoped results', () => {
+    const summary = executionSummary([
+      actionResult({ actionId: 'fast', durationMs: 10 }),
+      actionResult({ actionId: 'slow-a', durationMs: 40 }),
+      actionResult({ actionId: 'slow-b', durationMs: 40 }),
+      actionResult({ actionId: 'skipped', status: 'skipped', durationMs: 100 }),
+      actionResult({ actionId: 'missing' })
+    ])
+
+    expect(deriveSlowestActionIds(summary)).toEqual(['slow-a', 'slow-b'])
+    expect(deriveSlowestActionIds({ ...summary, scope: 'action' })).toEqual([])
+    expect(deriveSlowestActionIds(executionSummary([actionResult({ durationMs: 10 })]))).toEqual([])
+  })
 })
+
+function actionResult(patch: Partial<ActionExecutionResult> = {}): ActionExecutionResult {
+  return {
+    actionId: 'action-1',
+    actionName: '测试动作',
+    actionType: 'runCommand',
+    status: 'failed',
+    ...patch
+  }
+}
+
+function executionSummary(actions: ActionExecutionResult[]): TaskExecutionSummary {
+  return {
+    taskId: 'task-1',
+    taskName: '测试事项',
+    scope: 'task',
+    startedAt: '2026-07-01T00:00:00.000Z',
+    finishedAt: '2026-07-01T00:00:01.000Z',
+    status: 'failed',
+    actions
+  }
+}
