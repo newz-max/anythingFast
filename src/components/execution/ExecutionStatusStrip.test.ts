@@ -77,12 +77,22 @@ describe('ExecutionStatusStrip', () => {
     expect(pending.text()).toContain('等待动作事件')
   })
 
-  it('summarizes multiple active runs and uses the latest run details', () => {
+  it('renders independent progress for every active run', () => {
     const wrapper = mount(ExecutionStatusStrip, {
       props: {
         runs: [
-          run({ runId: 'run-1', taskName: '事项 A' }),
-          run({ runId: 'run-2', taskId: 'task-2', targetKey: 'action:task-2:action-2', taskName: '事项 B', scope: 'action' })
+          run({ runId: 'run-1', taskName: '事项 A', progressPercent: 50 }),
+          run({
+            runId: 'run-2',
+            taskId: 'task-2',
+            targetKey: 'action:task-2:action-2',
+            taskName: '事项 B',
+            scope: 'action',
+            completedActions: 0,
+            totalActions: 1,
+            progressPercent: 25,
+            currentActionName: '动作 B'
+          })
         ],
         compact: true
       },
@@ -91,7 +101,60 @@ describe('ExecutionStatusStrip', () => {
 
     expect(wrapper.text()).toContain('2 个运行正在执行')
     expect(wrapper.text()).toContain('2 项运行中')
-    expect(wrapper.text()).toContain('最新：事项 B · 单动作')
+    expect(wrapper.findAll('.run-status-row')).toHaveLength(2)
+    expect(wrapper.findAll('.run-status-row')[0].text()).toContain('事项 A')
+    expect(wrapper.findAll('.run-status-row')[0].text()).toContain('进度 50%')
+    expect(wrapper.findAll('.run-status-row')[1].text()).toContain('事项 B · 单动作')
+    expect(wrapper.findAll('.run-status-row')[1].text()).toContain('进度 25%')
+    expect(wrapper.findAll('.run-status-row')[1].text()).toContain('当前：动作 B')
+  })
+
+  it('removes only the completed run and preserves remaining order and progress', async () => {
+    const runs = [
+      run({ runId: 'run-a', taskName: '事项 A', progressPercent: 25 }),
+      run({ runId: 'run-b', taskId: 'task-b', targetKey: 'task:task-b', taskName: '事项 B', progressPercent: 50 }),
+      run({ runId: 'run-c', taskId: 'task-c', targetKey: 'task:task-c', taskName: '事项 C', progressPercent: 75 })
+    ]
+    const wrapper = mount(ExecutionStatusStrip, {
+      props: { runs, compact: true },
+      global: { stubs }
+    })
+
+    await wrapper.setProps({ runs: [runs[0], runs[2]] })
+
+    const rows = wrapper.findAll('.run-status-row')
+    expect(rows).toHaveLength(2)
+    expect(rows.map((row) => row.text())).toEqual([
+      expect.stringContaining('事项 A'),
+      expect.stringContaining('事项 C')
+    ])
+    expect(rows[0].text()).toContain('进度 25%')
+    expect(rows[1].text()).toContain('进度 75%')
+    expect(wrapper.text()).not.toContain('事项 B')
+  })
+
+  it('keeps every run accessible when the compact list exceeds three rows', () => {
+    const wrapper = mount(ExecutionStatusStrip, {
+      props: {
+        runs: Array.from({ length: 4 }, (_, index) => run({
+          runId: `run-${index + 1}`,
+          taskId: `task-${index + 1}`,
+          targetKey: `task:task-${index + 1}`,
+          taskName: `事项 ${index + 1}`
+        })),
+        compact: true
+      },
+      global: { stubs }
+    })
+
+    expect(wrapper.find('.run-status-list').attributes('role')).toBe('list')
+    expect(wrapper.findAll('[role="listitem"]')).toHaveLength(4)
+    expect(wrapper.findAll('[role="listitem"]').map((row) => row.text())).toEqual([
+      expect.stringContaining('事项 1'),
+      expect.stringContaining('事项 2'),
+      expect.stringContaining('事项 3'),
+      expect.stringContaining('事项 4')
+    ])
   })
 
   it('renders nothing without active or scoped runs', () => {

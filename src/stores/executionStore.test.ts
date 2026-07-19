@@ -123,12 +123,16 @@ describe('executionStore', () => {
     expect(store.eventsByRunId['run-2']).toHaveLength(2)
     expect(store.eventTimeline.map((entry) => entry.payload.taskName)).toEqual(['事项 A', '事项 B', '事项 A', '事项 B'])
     expect(store.eventTimeline.map((entry) => entry.sequence)).toEqual([1, 2, 3, 4])
+    expect(store.eventsForRun('run-1').map((item) => item.actionName || item.status)).toEqual(['started', '动作 A'])
+    expect(store.eventsForRun('run-2').map((item) => item.actionName || item.status)).toEqual(['started', '动作 B'])
+    const runTwoBeforeFinish = { ...store.runsById['run-2'] }
 
     store.applyExecutionEvent(event({ runId: 'run-1', taskId: 'task-1', taskName: '事项 A', status: 'finished', currentIndex: 2 }))
 
     expect(store.activeRunIds).toEqual(['run-2'])
+    expect(store.activeRuns.map((run) => run.runId)).toEqual(['run-2'])
     expect(store.runsById['run-1'].status).toBe('success')
-    expect(store.runsById['run-2'].status).toBe('running')
+    expect(store.runsById['run-2']).toEqual(runTwoBeforeFinish)
     expect(store.running).toBe(true)
   })
 
@@ -146,6 +150,8 @@ describe('executionStore', () => {
 
     expect(store.eventTimeline).toHaveLength(200)
     expect(store.eventsByRunId['run-1']).toHaveLength(200)
+    expect(store.eventsForRun('run-1')).toHaveLength(200)
+    expect(store.events).toHaveLength(200)
     expect(store.eventTimeline[0]).toMatchObject({ sequence: 6 })
     expect(store.eventTimeline[0].payload.actionName).toBe('动作 5')
     expect(store.eventTimeline.at(-1)?.sequence).toBe(205)

@@ -25,18 +25,14 @@ const props = withDefaults(
 const displayRun = computed(() => props.runs.at(-1) || null)
 const multiple = computed(() => props.runs.length > 1)
 const active = computed(() => props.runs.some(isRunActive))
-const statusType = computed(() => runStatusType(displayRun.value?.status))
 const title = computed(() => {
   if (multiple.value) return `${props.runs.length} 个运行正在执行`
   return displayRun.value ? runTitle(displayRun.value) : '暂无执行'
 })
-const progressLabel = computed(() => (displayRun.value ? runProgressLabel(displayRun.value) : ''))
-const progressPercent = computed(() => (displayRun.value ? normalizedProgressPercent(displayRun.value) : 0))
-const message = computed(() => (displayRun.value ? runMessage(displayRun.value) : ''))
-const currentActionLabel = computed(() => {
-  if (!displayRun.value) return ''
-  return displayRun.value.currentActionName || (active.value ? '等待动作事件' : '')
-})
+
+function currentActionLabel(run: ExecutionRunSnapshot) {
+  return run.currentActionName || (isRunActive(run) ? '等待动作事件' : '')
+}
 </script>
 
 <template>
@@ -57,26 +53,56 @@ const currentActionLabel = computed(() => {
         <NSpin v-if="active" size="small" />
         <strong>{{ title }}</strong>
       </span>
-      <NTag size="small" :type="statusType">
+      <NTag size="small" :type="runStatusType(displayRun.status)">
         {{ multiple ? `${runs.length} 项运行中` : statusLabel(displayRun.status) }}
       </NTag>
     </div>
 
-    <NProgress
-      type="line"
-      :percentage="progressPercent"
-      :status="statusType"
-      :processing="active"
-      :height="compact ? 6 : 8"
-      :show-indicator="!compact"
-    />
-
-    <div class="status-meta">
-      <span>{{ progressLabel }}</span>
-      <span v-if="multiple">最新：{{ runTitle(displayRun) }}</span>
-      <span v-if="currentActionLabel">当前：{{ currentActionLabel }}</span>
-      <span>{{ message }}</span>
+    <div v-if="multiple" class="run-status-list" role="list" aria-label="当前活跃运行">
+      <article
+        v-for="run in runs"
+        :key="run.runId || run.targetKey"
+        class="run-status-row"
+        role="listitem"
+      >
+        <div class="run-row-head">
+          <strong class="run-row-title" :title="runTitle(run)">{{ runTitle(run) }}</strong>
+          <NTag size="small" :type="runStatusType(run.status)">{{ statusLabel(run.status) }}</NTag>
+        </div>
+        <NProgress
+          type="line"
+          :percentage="normalizedProgressPercent(run)"
+          :status="runStatusType(run.status)"
+          :processing="isRunActive(run)"
+          :height="compact ? 6 : 8"
+          :show-indicator="false"
+        />
+        <div class="run-row-meta">
+          <span>{{ runProgressLabel(run) }}</span>
+          <span v-if="currentActionLabel(run)" class="run-row-current" :title="currentActionLabel(run)">
+            当前：{{ currentActionLabel(run) }}
+          </span>
+          <span class="run-row-message" :title="runMessage(run)">{{ runMessage(run) }}</span>
+        </div>
+      </article>
     </div>
+
+    <template v-else>
+      <NProgress
+        type="line"
+        :percentage="normalizedProgressPercent(displayRun)"
+        :status="runStatusType(displayRun.status)"
+        :processing="active"
+        :height="compact ? 6 : 8"
+        :show-indicator="!compact"
+      />
+
+      <div class="status-meta">
+        <span>{{ runProgressLabel(displayRun) }}</span>
+        <span v-if="currentActionLabel(displayRun)">当前：{{ currentActionLabel(displayRun) }}</span>
+        <span>{{ runMessage(displayRun) }}</span>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -86,17 +112,15 @@ const currentActionLabel = computed(() => {
   gap: 9px;
   min-width: 0;
   border: 1px solid rgba(82, 106, 171, 0.22);
-  border-radius: 10px;
-  background:
-    linear-gradient(135deg, rgba(31, 42, 72, 0.82), rgba(20, 28, 50, 0.72)),
-    rgba(17, 24, 43, 0.86);
+  border-radius: 8px;
+  background: rgba(20, 28, 50, 0.92);
   padding: 12px 14px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .execution-status-strip.compact {
   gap: 7px;
-  border-radius: 9px;
+  border-radius: 8px;
   padding: 9px 10px;
 }
 
@@ -114,7 +138,9 @@ const currentActionLabel = computed(() => {
 
 .status-head,
 .status-main,
-.status-meta {
+.status-meta,
+.run-row-head,
+.run-row-meta {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -150,6 +176,60 @@ const currentActionLabel = computed(() => {
 .status-meta span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.run-status-list {
+  --run-status-row-height: 76px;
+  display: grid;
+  max-height: calc(var(--run-status-row-height) * 3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.run-status-row {
+  display: grid;
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--run-status-row-height);
+  gap: 7px;
+  padding: 9px 2px;
+}
+
+.run-status-row + .run-status-row {
+  border-top: 1px solid rgba(82, 106, 171, 0.2);
+}
+
+.run-row-head {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.run-row-title,
+.run-row-current,
+.run-row-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-row-title {
+  color: #f4f7ff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.run-row-meta {
+  gap: 8px;
+  color: #9faad0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.run-row-current,
+.run-row-message {
+  flex: 1 1 0;
 }
 
 .compact .status-main strong {

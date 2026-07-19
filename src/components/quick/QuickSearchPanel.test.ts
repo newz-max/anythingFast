@@ -6,6 +6,7 @@ import { defineComponent, nextTick, ref } from 'vue'
 import QuickSearchPanel from './QuickSearchPanel.vue'
 import QuickCreateConfirm from './QuickCreateConfirm.vue'
 import { useKeybindings } from '@/composables/useKeybindings'
+import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
 import type { AppConfig, TaskItem } from '@/types/domain'
 
@@ -65,6 +66,15 @@ const NInputStub = defineComponent({
   template: '<input ref="inputRef" :value="value" @input="$emit(\'update:value\', $event.target.value)" />'
 })
 
+const ExecutionStatusStripStub = defineComponent({
+  name: 'ExecutionStatusStrip',
+  props: {
+    runs: { type: Array, default: () => [] },
+    compact: Boolean
+  },
+  template: '<div class="execution-status-stub" :data-compact="String(compact)"><span v-for="run in runs" :key="run.runId">{{ run.taskName }}</span></div>'
+})
+
 const stubs = {
   NInput: NInputStub,
   NSelect: {
@@ -84,7 +94,7 @@ const stubs = {
   },
   NSpin: { template: '<span>loading</span>' },
   NTag: { props: ['type'], template: '<span><slot /></span>' },
-  ExecutionStatusStrip: { template: '<div />' }
+  ExecutionStatusStrip: ExecutionStatusStripStub
 }
 
 const scrollIntoViewMock = vi.fn()
@@ -617,6 +627,39 @@ describe('QuickSearchPanel keyboard navigation', () => {
 
     expect(resultItems(wrapper)[0].text()).toContain('事项 1')
     expect(resultItems(wrapper)[0].text()).toContain('上次')
+  })
+
+  it('passes every active run to the compact status without hiding results or hints', async () => {
+    const wrapper = await mountPanel()
+    const executionStore = useExecutionStore()
+
+    executionStore.applyExecutionEvent({
+      runId: 'run-a',
+      taskId: 'task-1',
+      taskName: '并发事项 A',
+      scope: 'task',
+      status: 'started',
+      totalActions: 2
+    })
+    executionStore.applyExecutionEvent({
+      runId: 'run-b',
+      taskId: 'task-2',
+      taskName: '并发事项 B',
+      scope: 'task',
+      status: 'started',
+      totalActions: 3
+    })
+    await nextTick()
+
+    const status = wrapper.findComponent(ExecutionStatusStripStub)
+    const statusRuns = status.props('runs') as Array<{ taskName: string }>
+    expect(status.exists()).toBe(true)
+    expect(status.props('compact')).toBe(true)
+    expect(statusRuns.map((run) => run.taskName)).toEqual(['并发事项 A', '并发事项 B'])
+    expect(status.text()).toContain('并发事项 A')
+    expect(status.text()).toContain('并发事项 B')
+    expect(resultItems(wrapper)).toHaveLength(3)
+    expect(wrapper.find('.status').text()).toContain('新增事项')
   })
 
   it('orders time-matched, recent, and ordinary tasks as one navigable recommendation list', async () => {

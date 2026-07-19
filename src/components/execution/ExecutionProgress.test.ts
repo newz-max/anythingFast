@@ -199,8 +199,8 @@ describe('ExecutionProgress', () => {
     expect(wrapper.text()).toContain('进度 0%')
   })
 
-  it('renders only the latest 12 timeline entries in observed order', () => {
-    const entries = Array.from({ length: 13 }, (_, index) => event({
+  it('renders only the latest 20 timeline entries in observed order', () => {
+    const entries = Array.from({ length: 21 }, (_, index) => event({
       actionId: `action-${index + 1}`,
       actionName: `事件 ${index + 1}`,
       currentIndex: index + 1
@@ -214,9 +214,37 @@ describe('ExecutionProgress', () => {
       global: { stubs }
     })
 
-    expect(wrapper.findAll('.timeline-item').map((item) => item.text().split(' ')[0] + ' ' + item.text().split(' ')[1])).toEqual(
-      Array.from({ length: 12 }, (_, index) => `事件 ${index + 2}`)
+    const timelineItems = wrapper.findAll('.timeline-item')
+    expect(timelineItems).toHaveLength(20)
+    expect(timelineItems.map((item) => item.text().match(/事件 \d+/)?.[0])).toEqual(
+      Array.from({ length: 20 }, (_, index) => `事件 ${index + 2}`)
     )
+    expect(timelineItems[0].text()).toContain('测试事项 · 事件 2')
+    expect(timelineItems.at(-1)?.text()).toContain('测试事项 · 事件 21')
+  })
+
+  it('keeps interleaved same-name events distinct and identifies their tasks', () => {
+    const entries = [
+      event({ runId: 'run-a', taskId: 'task-a', taskName: '事项 A', actionName: '等待', message: 'A1' }),
+      event({ runId: 'run-b', taskId: 'task-b', taskName: '事项 B', actionName: '等待', message: 'B1' }),
+      event({ runId: 'run-a', taskId: 'task-a', taskName: '事项 A', actionName: '等待', message: 'A2' }),
+      event({ runId: 'run-b', taskId: 'task-b', taskName: '事项 B', status: 'started', actionName: undefined, message: 'B2' })
+    ]
+    const wrapper = mount(ExecutionProgress, {
+      props: {
+        runs: [],
+        timeline: toTimeline(entries),
+        logs: []
+      },
+      global: { stubs }
+    })
+
+    expect(wrapper.findAll('.timeline-item').map((item) => item.text())).toEqual([
+      expect.stringContaining('事项 A · 等待 A1'),
+      expect.stringContaining('事项 B · 等待 B1'),
+      expect.stringContaining('事项 A · 等待 A2'),
+      expect.stringContaining('事项 B B2')
+    ])
   })
 
   it('shows a separate log loading error', () => {

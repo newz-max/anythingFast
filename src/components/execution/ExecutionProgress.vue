@@ -18,7 +18,7 @@ const props = defineProps<{
   logLoadError?: string | null
 }>()
 
-const visibleTimeline = computed(() => props.timeline.slice(-12))
+const visibleTimeline = computed(() => props.timeline.slice(-20))
 const latestSummary = computed(() => props.logs[0] ?? null)
 
 function attentionActionMessages(log: ExecutionLogSummary): ActionExecutionResult[] {
@@ -38,7 +38,8 @@ function eventType(event: ExecutionEventPayload) {
 }
 
 function eventTitle(event: ExecutionEventPayload) {
-  return event.actionName || event.result?.actionName || event.taskName
+  const actionName = event.actionName || event.result?.actionName
+  return actionName ? `${event.taskName} · ${actionName}` : event.taskName
 }
 
 function eventContent(event: ExecutionEventPayload) {
@@ -82,15 +83,17 @@ function formatDuration(durationMs?: number) {
       <NGi>
         <h3 class="subhead">当前事件</h3>
         <NEmpty v-if="visibleTimeline.length === 0" description="暂无执行事件" />
-        <NTimeline v-else>
-          <NTimelineItem
-            v-for="entry in visibleTimeline"
-            :key="entry.sequence"
-            :type="eventType(entry.payload)"
-            :title="eventTitle(entry.payload)"
-            :content="eventContent(entry.payload)"
-          />
-        </NTimeline>
+        <div v-else class="event-timeline-scroll">
+          <NTimeline>
+            <NTimelineItem
+              v-for="entry in visibleTimeline"
+              :key="entry.sequence"
+              :type="eventType(entry.payload)"
+              :title="eventTitle(entry.payload)"
+              :content="eventContent(entry.payload)"
+            />
+          </NTimeline>
+        </div>
       </NGi>
       <NGi>
         <h3 class="subhead">最近摘要</h3>
@@ -192,6 +195,15 @@ function formatDuration(durationMs?: number) {
 .subhead {
   margin: 0 0 8px;
   font-size: 15px;
+}
+
+.event-timeline-scroll {
+  box-sizing: border-box;
+  height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 8px;
+  scrollbar-gutter: stable;
 }
 
 .error-list,
