@@ -4,9 +4,11 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import QuickContextSuggestions from '@/components/quick/QuickContextSuggestions.vue'
 import QuickCreateConfirm from '@/components/quick/QuickCreateConfirm.vue'
 import QuickExecutionDock from '@/components/quick/QuickExecutionDock.vue'
+import QuickTaskCategorySection from '@/components/quick/QuickTaskCategorySection.vue'
 import QuickTaskSection from '@/components/quick/QuickTaskSection.vue'
 import type { QuickTaskRiskTagType, QuickTaskRow } from '@/components/quick/quickTaskRows'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
+import { categoryTone } from '@/domain/categoryPresentation'
 import { createQuickTaskFromIntent, type QuickCreateSuggestion } from '@/domain/quickInput'
 import {
   QUICK_RECOMMENDATION_SOURCE_LABEL,
@@ -14,6 +16,7 @@ import {
   getQuickLaunchGroups,
   getTimeContextLabel
 } from '@/domain/quickRecommendations'
+import { groupTasksByCategory } from '@/domain/taskCategories'
 import { useTaskSearch } from '@/composables/useTaskSearch'
 import { useTaskExecution } from '@/composables/useTaskExecution'
 import { useQuickInputIntent } from '@/composables/useQuickInputIntent'
@@ -42,6 +45,12 @@ type QuickSelectableOption =
   | { kind: 'context'; key: `context:${string}`; suggestion: QuickContextSuggestion }
   | { kind: 'task'; key: `task:${string}`; task: TaskItem }
 
+interface RemainingCategoryRowGroup {
+  key: string
+  label: string
+  rows: QuickTaskRow[]
+}
+
 const taskStore = useTaskStore()
 const executionStore = useExecutionStore()
 const enabledTasks = computed(() => taskStore.tasks.filter((task) => task.enabled))
@@ -51,6 +60,7 @@ const quickContext = useQuickContext()
 const { execute } = useTaskExecution()
 const keybindings = useKeybindings()
 const selectedOptionKey = shallowRef<QuickOptionKey | null>(null)
+const collapsedCategoryKeys = shallowRef<ReadonlySet<string>>(new Set())
 const dockExpanded = shallowRef(false)
 const confirmingSuggestion = shallowRef<QuickCreateSuggestion | null>(null)
 const quickCreateSaving = shallowRef(false)
@@ -78,7 +88,23 @@ const timeMatchedRows = computed(() =>
 const recentRows = computed(() =>
   launchpad.value?.groups.recent.map((task) => toTaskRow(task, QUICK_RECOMMENDATION_SOURCE_LABEL)) || []
 )
-const remainingRows = computed(() => launchpad.value?.groups.remaining.map((task) => toTaskRow(task)) || [])
+const remainingCategoryGroups = computed<RemainingCategoryRowGroup[]>(() =>
+  groupTasksByCategory(launchpad.value?.groups.remaining || []).map((group) => ({
+    key: group.key,
+    label: group.label,
+    rows: group.tasks.map((task) => toTaskRow(task))
+  }))
+)
+const remainingCategoryKeys = computed(() => remainingCategoryGroups.value.map((group) => group.key))
+const visibleRemainingCategoryGroups = computed(() =>
+  remainingCategoryGroups.value.map((group) => ({
+    ...group,
+    expanded: !collapsedCategoryKeys.value.has(group.key)
+  }))
+)
+const visibleRemainingRows = computed(() =>
+  visibleRemainingCategoryGroups.value.flatMap((group) => group.expanded ? group.rows : [])
+)
 const searchRows = computed(() => query.value.trim() ? results.value.slice(0, 8).map((task) => toTaskRow(task)) : [])
 const timeMatchedTitle = computed(() => {
   const context = launchpad.value?.context
@@ -90,18 +116,19 @@ const contextSuggestions = computed(() =>
 const manualSuggestions = computed(() =>
   !taskStore.loading && Boolean(query.value.trim()) && searchRows.value.length === 0 ? quickInput.suggestions.value : []
 )
+const hasPriorityTaskRows = computed(() =>
+  favoriteRows.value.length > 0 || timeMatchedRows.value.length > 0 || recentRows.value.length > 0
+)
 const hasVisibleTaskResults = computed(() =>
-  favoriteRows.value.length > 0 ||
-  timeMatchedRows.value.length > 0 ||
-  recentRows.value.length > 0 ||
-  remainingRows.value.length > 0 ||
+  hasPriorityTaskRows.value ||
+  visibleRemainingRows.value.length > 0 ||
   searchRows.value.length > 0
 )
 const selectableOptions = computed<QuickSelectableOption[]>(() => [
   ...favoriteRows.value.map(toTaskOption),
   ...timeMatchedRows.value.map(toTaskOption),
   ...recentRows.value.map(toTaskOption),
-  ...remainingRows.value.map(toTaskOption),
+  ...visibleRemainingRows.value.map(toTaskOption),
   ...searchRows.value.map(toTaskOption),
   ...contextSuggestions.value
     .filter((suggestion) => suggestion.canSaveDirectly)
@@ -121,6 +148,22 @@ const quickShortcutHint = computed(() => {
   }
   return `${taskStore.settings.globalShortcut} 唤起 · ${key('quick.focusSearch')} 搜索 · ${key('quick.selectPreviousResult')}/${key('quick.selectNextResult')} 选择 · ${key('quick.executeSelected')} 执行 · ${key('quick.createTask')} 新增事项 · ${key('quick.closePanel')} 关闭`
 })
+
+watch(
+  [remainingCategoryKeys, hasPriorityTaskRows, () => query.value.trim()],
+  ([categoryKeys, hasPriorityRows, searchQuery]) => {
+    if (searchQuery) return
+
+    const nextKeys = new Set(categoryKeys.filter((key) => collapsedCategoryKeys.value.has(key)))
+    if (!hasPriorityRows && categoryKeys.length > 0 && categoryKeys.every((key) => nextKeys.has(key))) {
+      nextKeys.delete(categoryKeys[0])
+    }
+    if (!setsEqual(nextKeys, collapsedCategoryKeys.value)) {
+      collapsedCategoryKeys.value = nextKeys
+    }
+  },
+  { immediate: true }
+)
 
 watch(
   selectableOptions,
@@ -251,6 +294,20 @@ function selectOption(key: QuickOptionKey) {
   if (selectableOptions.value.some((option) => option.key === key)) {
     selectedOptionKey.value = key
   }
+}
+
+function toggleRemainingCategory(categoryKey: string) {
+  if (!remainingCategoryKeys.value.includes(categoryKey)) return
+
+  const nextKeys = new Set(collapsedCategoryKeys.value)
+  if (nextKeys.has(categoryKey)) {
+    nextKeys.delete(categoryKey)
+  } else {
+    const expandedCategoryCount = remainingCategoryKeys.value.filter((key) => !nextKeys.has(key)).length
+    if (!hasPriorityTaskRows.value && expandedCategoryCount <= 1) return
+    nextKeys.add(categoryKey)
+  }
+  collapsedCategoryKeys.value = nextKeys
 }
 
 function openQuickCreate(suggestion: QuickCreateSuggestion) {
@@ -396,15 +453,6 @@ function riskLabel(riskLevel: RiskLevel) {
   return '低风险'
 }
 
-function categoryTone(categoryName?: string) {
-  const normalized = categoryName?.trim() || '未分类'
-  if (normalized === '工作') return 'blue'
-  if (normalized === '学习') return 'green'
-  if (normalized === '生活') return 'amber'
-  if (normalized === '其他') return 'purple'
-  return 'slate'
-}
-
 function formatTaskMeta(task: TaskItem) {
   if (task.lastRunAt) return `上次 ${formatTaskTime(task.lastRunAt)}`
   const enabledActionCount = task.actions.filter((action) => action.enabled).length
@@ -439,6 +487,10 @@ function contextOptionKey(suggestion: QuickContextSuggestion): `context:${string
 function optionId(key: string) {
   if (key.startsWith('task:')) return `quick-result-${key.slice('task:'.length)}`
   return `quick-context-${key.slice('context:'.length)}`
+}
+
+function setsEqual(left: ReadonlySet<string>, right: ReadonlySet<string>) {
+  return left.size === right.size && [...left].every((key) => right.has(key))
 }
 </script>
 
@@ -524,15 +576,26 @@ function optionId(key: string) {
             @execute="runTask"
           />
 
-          <QuickTaskSection
-            v-if="remainingRows.length"
-            title="其他事项"
-            :rows="remainingRows"
-            :selected-key="selectedOptionKey"
-            :option-id="optionId"
-            @select="selectOption($event.key)"
-            @execute="runTask"
-          />
+          <section
+            v-if="remainingCategoryGroups.length"
+            class="remaining-task-section"
+            aria-label="其他事项"
+          >
+            <h2 class="remaining-heading">其他事项</h2>
+            <QuickTaskCategorySection
+              v-for="group in visibleRemainingCategoryGroups"
+              :key="group.key"
+              :category-key="group.key"
+              :label="group.label"
+              :rows="group.rows"
+              :expanded="group.expanded"
+              :selected-key="selectedOptionKey"
+              :option-id="optionId"
+              @toggle="toggleRemainingCategory"
+              @select="selectOption($event.key)"
+              @execute="runTask"
+            />
+          </section>
 
           <QuickTaskSection
             v-if="searchRows.length"
@@ -737,6 +800,20 @@ function optionId(key: string) {
   min-height: 0;
   overflow-y: auto;
   padding-right: 2px;
+}
+
+.remaining-task-section {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.remaining-heading {
+  margin: 2px 0 0;
+  color: #aab5d4;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 .state-panel {

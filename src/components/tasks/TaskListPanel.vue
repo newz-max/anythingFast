@@ -2,6 +2,7 @@
 import { computed, nextTick, toRef, useTemplateRef } from 'vue'
 import { NScrollbar } from 'naive-ui'
 import { useTaskSearch } from '@/composables/useTaskSearch'
+import { categoryTone } from '@/domain/categoryPresentation'
 import type { TaskItem } from '@/types/domain'
 
 const props = defineProps<{
@@ -49,15 +50,6 @@ defineExpose({
   visibleTaskIds,
   scrollTaskIntoView
 })
-
-function categoryTone(categoryName?: string) {
-  const normalized = categoryName?.trim() || '未分类'
-  if (normalized === '工作') return 'blue'
-  if (normalized === '学习') return 'green'
-  if (normalized === '生活') return 'amber'
-  if (normalized === '其他') return 'purple'
-  return 'slate'
-}
 
 function formatTaskTime(task: TaskItem) {
   const source = task.lastRunAt || task.updatedAt || task.createdAt

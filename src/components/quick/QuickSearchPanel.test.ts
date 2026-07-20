@@ -105,7 +105,7 @@ function makeTask(index: number, patch: Partial<TaskItem> = {}): TaskItem {
   return {
     id: `task-${index}`,
     name: `事项 ${index}`,
-    category: index % 2 === 0 ? '工作' : '学习',
+    category: '工作',
     keywords: [],
     description: '',
     actions: [
@@ -166,6 +166,16 @@ async function pressKey(key: string, target: Window | HTMLElement = window, opti
 
 function resultItems(wrapper: VueWrapper) {
   return wrapper.findAll('.task-row')
+}
+
+function categoryButtons(wrapper: VueWrapper) {
+  return wrapper.findAll('.category-toggle')
+}
+
+function categoryButton(wrapper: VueWrapper, label: string) {
+  const button = categoryButtons(wrapper).find((candidate) => candidate.find('.category-name').text() === label)
+  if (!button) throw new Error(`Category button not found: ${label}`)
+  return button
 }
 
 function lastScrollTarget() {
@@ -457,6 +467,231 @@ describe('QuickSearchPanel keyboard navigation', () => {
     expect(wrapper.text()).toContain('没有匹配的启用事项')
   })
 
+  it('groups only remaining tasks by normalized category in stable category and task order', async () => {
+    const wrapper = await mountPanel([
+      makeTask(1, { name: '工作事项一', category: ' 工作 ' }),
+      makeTask(2, { name: '学习事项', category: '学习' }),
+      makeTask(3, { name: '工作事项二', category: '工作' }),
+      makeTask(4, { name: '空白分类事项', category: '   ' })
+    ])
+
+    expect(wrapper.text()).toContain('其他事项')
+    expect(categoryButtons(wrapper).map((button) => button.find('.category-name').text())).toEqual([
+      '工作',
+      '学习',
+      '未分类'
+    ])
+    expect(categoryButtons(wrapper).map((button) => button.find('.category-count').text())).toEqual(['2', '1', '1'])
+    expect(categoryButtons(wrapper).every((button) => button.attributes('aria-expanded') === 'true')).toBe(true)
+    expect(resultItems(wrapper).map((row) => row.find('.task-name').text())).toEqual([
+      '工作事项一',
+      '工作事项二',
+      '学习事项',
+      '空白分类事项'
+    ])
+  })
+
+  it('keeps priority launchpad groups flat and categorizes only remaining tasks', async () => {
+    const wrapper = await mountPanel([
+      makeTask(1, { name: '固定学习事项', category: '学习', favorite: true }),
+      makeTask(2, { name: '固定工作事项', category: '工作', favorite: true }),
+      makeTask(3, { name: '其他工作事项', category: '工作' }),
+      makeTask(4, { name: '其他学习事项', category: '学习' })
+    ])
+    const fixedSection = wrapper.findAll('.quick-task-section').find((section) =>
+      section.find('.section-heading').text() === '固定入口'
+    )
+
+    expect(fixedSection?.findAll('.task-row').map((row) => row.find('.task-name').text())).toEqual([
+      '固定学习事项',
+      '固定工作事项'
+    ])
+    expect(fixedSection?.find('.category-toggle').exists()).toBe(false)
+    expect(categoryButtons(wrapper).map((button) => button.find('.category-name').text())).toEqual(['工作', '学习'])
+  })
+
+  it('removes collapsed rows from navigation and repairs a hidden selection', async () => {
+    const wrapper = await mountPanel([
+      makeTask(1, { name: '工作一', category: '工作' }),
+      makeTask(2, { name: '工作二', category: '工作' }),
+      makeTask(3, { name: '学习一', category: '学习' }),
+      makeTask(4, { name: '生活一', category: '生活' })
+    ])
+
+    await pressKey('ArrowDown')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-2')
+
+    await categoryButton(wrapper, '工作').trigger('click')
+
+    expect(categoryButton(wrapper, '工作').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('#quick-result-task-1').exists()).toBe(false)
+    expect(wrapper.find('#quick-result-task-2').exists()).toBe(false)
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-3')
+    expect(categoryButtons(wrapper).every((button) => button.attributes('role') !== 'option')).toBe(true)
+
+    await pressKey('ArrowDown')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-4')
+
+    await pressKey('Enter')
+    expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-4' }))
+  })
+
+  it('keeps the final remaining category expanded ahead of a clipboard suggestion', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', { transformCallback: () => 1, invoke: vi.fn() })
+    getClipboardContextMock.mockResolvedValueOnce({
+      source: 'clipboard',
+      capturedAt: '2026-07-11T00:00:00.000Z',
+      status: 'available',
+      text: 'https://context.example',
+      truncated: false
+    })
+    const wrapper = await mountPanel([
+      makeTask(1, { category: '工作' }),
+      makeTask(2, { category: '学习' })
+    ])
+    await Promise.resolve()
+    await nextTick()
+
+    await categoryButton(wrapper, '工作').trigger('click')
+    await categoryButton(wrapper, '学习').trigger('click')
+
+    expect(categoryButton(wrapper, '工作').attributes('aria-expanded')).toBe('false')
+    expect(categoryButton(wrapper, '学习').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('#quick-result-task-2').exists()).toBe(true)
+    expect(wrapper.find('.context-suggestion').attributes('aria-selected')).toBe('false')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-2')
+  })
+
+  it('allows all remaining categories to collapse with a priority task and repairs dynamic priority loss', async () => {
+    const favorite = makeTask(9, { name: '固定入口', favorite: true })
+    const work = makeTask(1, { category: '工作' })
+    const study = makeTask(2, { category: '学习' })
+    const wrapper = await mountPanel([favorite, work, study])
+
+    await categoryButton(wrapper, '工作').trigger('click')
+    await categoryButton(wrapper, '学习').trigger('click')
+
+    expect(categoryButtons(wrapper).every((button) => button.attributes('aria-expanded') === 'false')).toBe(true)
+    expect(resultItems(wrapper).map((row) => row.find('.task-name').text())).toEqual(['固定入口'])
+
+    useTaskStore().replaceConfig(makeConfig([
+      { ...favorite, enabled: false },
+      work,
+      study
+    ]))
+    await nextTick()
+    await nextTick()
+
+    expect(categoryButton(wrapper, '工作').attributes('aria-expanded')).toBe('true')
+    expect(categoryButton(wrapper, '学习').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-1')
+  })
+
+  it('cleans removed category state and expands renamed or newly enabled categories', async () => {
+    const favorite = makeTask(9, { favorite: true })
+    const task = makeTask(1, { category: '工作' })
+    const wrapper = await mountPanel([favorite, task])
+
+    await categoryButton(wrapper, '工作').trigger('click')
+    expect(categoryButton(wrapper, '工作').attributes('aria-expanded')).toBe('false')
+
+    useTaskStore().replaceConfig(makeConfig([favorite, { ...task, category: '学习' }]))
+    await nextTick()
+    await nextTick()
+    expect(categoryButtons(wrapper).map((button) => button.find('.category-name').text())).toEqual(['学习'])
+    expect(categoryButton(wrapper, '学习').attributes('aria-expanded')).toBe('true')
+
+    const disabledLifeTask = makeTask(2, { category: '生活', enabled: false })
+    useTaskStore().replaceConfig(makeConfig([favorite, task, disabledLifeTask]))
+    await nextTick()
+    await nextTick()
+
+    expect(categoryButton(wrapper, '工作').attributes('aria-expanded')).toBe('true')
+    expect(categoryButtons(wrapper).map((button) => button.find('.category-name').text())).toEqual(['工作'])
+
+    useTaskStore().replaceConfig(makeConfig([favorite, task, { ...disabledLifeTask, enabled: true }]))
+    await nextTick()
+    await nextTick()
+
+    expect(categoryButton(wrapper, '生活').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.findAll('#quick-result-task-1')).toHaveLength(1)
+    expect(wrapper.findAll('#quick-result-task-2')).toHaveLength(1)
+  })
+
+  it('searches collapsed categories flat and restores collapse state after clear and focus reopen', async () => {
+    const wrapper = await mountPanel([
+      makeTask(1, { name: '隐藏工作事项', category: '工作' }),
+      makeTask(2, { name: '可见学习事项', category: '学习' })
+    ])
+
+    await categoryButton(wrapper, '工作').trigger('click')
+    await wrapper.find('input').setValue('隐藏工作')
+    await nextTick()
+    await nextTick()
+
+    expect(categoryButtons(wrapper)).toHaveLength(0)
+    expect(resultItems(wrapper)).toHaveLength(1)
+    expect(resultItems(wrapper)[0].text()).toContain('隐藏工作事项')
+
+    await wrapper.find('input').setValue('')
+    await nextTick()
+    await nextTick()
+    expect(categoryButton(wrapper, '工作').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('#quick-result-task-1').exists()).toBe(false)
+
+    focusChangedHandlers[0]?.({ payload: false })
+    focusChangedHandlers[0]?.({ payload: true })
+    await Promise.resolve()
+    await nextTick()
+    await nextTick()
+
+    expect(categoryButton(wrapper, '工作').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('#quick-result-task-1').exists()).toBe(false)
+  })
+
+  it('routes high-risk categorized tasks with runtime variables through the existing execution entry', async () => {
+    const wrapper = await mountPanel([
+      makeTask(1, {
+        category: '运维',
+        riskLevel: 'high',
+        variables: [{ key: 'token', label: '令牌', defaultValue: '', required: true, secret: true }],
+        actions: [{
+          id: 'high-risk-action',
+          type: 'runCommand',
+          name: '清理临时文件',
+          params: {
+            source: 'inline',
+            command: 'Remove-Item C:\\Temp\\example',
+            workingDir: 'C:\\Temp',
+            env: {},
+            showTerminal: false,
+            closeTerminalOnFinish: true,
+            terminalHost: 'systemTerminal',
+            shell: 'powershell',
+            scriptPath: '',
+            scriptArgs: []
+          },
+          enabled: true,
+          continueOnError: false,
+          condition: { type: 'always' },
+          outputBinding: null,
+          riskLevel: 'high'
+        }]
+      })
+    ])
+
+    expect(categoryButton(wrapper, '运维').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('.task-row').text()).toContain('高风险')
+
+    await pressKey('Enter')
+
+    expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'task-1',
+      riskLevel: 'high',
+      variables: [expect.objectContaining({ key: 'token', required: true })]
+    }))
+  })
+
   it('shows URL create suggestion when there are no matching task results', async () => {
     const wrapper = await mountPanel([])
 
@@ -563,6 +798,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
     await pressKey('Enter')
 
     expect(wrapper.text()).toContain('确认事项信息')
+    expect(categoryButtons(wrapper)).toHaveLength(0)
     expect(executeMock).not.toHaveBeenCalled()
   })
 
