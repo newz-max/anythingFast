@@ -4,6 +4,7 @@ mod diagnostics;
 mod domain;
 mod executor;
 mod import_export;
+mod quick_panel_geometry;
 mod risk;
 pub(crate) mod scheduler;
 mod storage;
@@ -15,10 +16,15 @@ mod variables;
 use commands::*;
 use diagnostics::dev_log_error;
 use domain::{ShortcutStatus, TaskTrigger};
+use quick_panel_geometry::{
+    PhysicalWorkArea, QUICK_PANEL_BASE_HEIGHT, QUICK_PANEL_BASE_WIDTH,
+    calculate_quick_panel_geometry,
+};
 use serde::Serialize;
 use std::sync::Mutex;
 use tauri::{
-    Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, Position, Size, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder, WindowEvent,
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -195,12 +201,13 @@ fn ensure_quick_panel(app: &tauri::AppHandle) -> tauri::Result<()> {
     let window =
         WebviewWindowBuilder::new(app, "quick-panel", WebviewUrl::App("/?window=quick".into()))
             .title("快捷搜索")
-            .inner_size(720.0, 520.0)
+            .inner_size(QUICK_PANEL_BASE_WIDTH, QUICK_PANEL_BASE_HEIGHT)
             .resizable(false)
             .decorations(false)
             .always_on_top(true)
             .skip_taskbar(true)
             .visible(false)
+            .prevent_overflow()
             .build()?;
 
     let quick_panel = window.clone();
@@ -433,9 +440,87 @@ pub(crate) fn request_main_window_create_task(app: &tauri::AppHandle) -> Result<
 
 fn show_quick_panel(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("quick-panel") {
-        let _ = window.center();
-        let _ = window.show();
-        let _ = window.set_focus();
+        if !apply_quick_panel_geometry(app, &window) {
+            if let Err(err) = window.set_size(Size::Logical(LogicalSize::new(
+                QUICK_PANEL_BASE_WIDTH,
+                QUICK_PANEL_BASE_HEIGHT,
+            ))) {
+                dev_log_error("Set quick panel fallback size failed", &err);
+            }
+            if let Err(err) = window.center() {
+                dev_log_error("Center quick panel fallback failed", &err);
+            }
+        }
+        if let Err(err) = window.show() {
+            dev_log_error("Show quick panel failed", &err);
+        }
+        if let Err(err) = window.set_focus() {
+            dev_log_error("Focus quick panel failed", &err);
+        }
+    }
+}
+
+fn apply_quick_panel_geometry(app: &tauri::AppHandle, window: &WebviewWindow) -> bool {
+    let Some(monitor) = select_quick_panel_monitor(app, window) else {
+        dev_log_error("Resolve quick panel monitor failed", "no monitor available");
+        return false;
+    };
+    let work_area = monitor.work_area();
+    let geometry = match calculate_quick_panel_geometry(
+        PhysicalWorkArea {
+            x: work_area.position.x,
+            y: work_area.position.y,
+            width: work_area.size.width,
+            height: work_area.size.height,
+        },
+        monitor.scale_factor(),
+    ) {
+        Ok(geometry) => geometry,
+        Err(err) => {
+            dev_log_error("Calculate quick panel geometry failed", &err);
+            return false;
+        }
+    };
+
+    if let Err(err) = window.set_size(Size::Logical(LogicalSize::new(
+        geometry.logical_width,
+        geometry.logical_height,
+    ))) {
+        dev_log_error("Resize quick panel failed", &err);
+        return false;
+    }
+    if let Err(err) = window.set_position(Position::Physical(PhysicalPosition::new(
+        geometry.physical_x,
+        geometry.physical_y,
+    ))) {
+        dev_log_error("Position quick panel failed", &err);
+        return false;
+    }
+    true
+}
+
+fn select_quick_panel_monitor(app: &tauri::AppHandle, window: &WebviewWindow) -> Option<Monitor> {
+    match app.cursor_position() {
+        Ok(position) => match app.monitor_from_point(position.x, position.y) {
+            Ok(Some(monitor)) => return Some(monitor),
+            Ok(None) => {}
+            Err(err) => dev_log_error("Resolve cursor monitor failed", &err),
+        },
+        Err(err) => dev_log_error("Read cursor position failed", &err),
+    }
+
+    match window.current_monitor() {
+        Ok(Some(monitor)) => return Some(monitor),
+        Ok(None) => {}
+        Err(err) => dev_log_error("Resolve current quick panel monitor failed", &err),
+    }
+
+    match app.primary_monitor() {
+        Ok(monitor) => monitor,
+        Err(err) => {
+            dev_log_error("Resolve primary monitor failed", &err);
+            None
+        }
     }
 }
 

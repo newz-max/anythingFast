@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import ExecutionStatusStrip from '@/components/execution/ExecutionStatusStrip.vue'
 import QuickContextSuggestions from '@/components/quick/QuickContextSuggestions.vue'
 import QuickCreateConfirm from '@/components/quick/QuickCreateConfirm.vue'
-import QuickRecommendationSection from '@/components/quick/QuickRecommendationSection.vue'
+import QuickExecutionDock from '@/components/quick/QuickExecutionDock.vue'
+import QuickTaskSection from '@/components/quick/QuickTaskSection.vue'
+import type { QuickTaskRiskTagType, QuickTaskRow } from '@/components/quick/quickTaskRows'
 import { describeAction, getActionTypeLabel } from '@/domain/actionPresentation'
 import { createQuickTaskFromIntent, type QuickCreateSuggestion } from '@/domain/quickInput'
-import { deriveTimeContext, getQuickRecommendations, getTimeContextLabel } from '@/domain/quickRecommendations'
+import {
+  QUICK_RECOMMENDATION_SOURCE_LABEL,
+  deriveTimeContext,
+  getQuickLaunchGroups,
+  getTimeContextLabel
+} from '@/domain/quickRecommendations'
 import { useTaskSearch } from '@/composables/useTaskSearch'
 import { useTaskExecution } from '@/composables/useTaskExecution'
 import { useQuickInputIntent } from '@/composables/useQuickInputIntent'
@@ -23,7 +29,6 @@ import { tauriApi } from '@/api/tauri'
 import logoUrl from '@/assets/logo.png'
 import type { RiskLevel, TaskAction, TaskItem } from '@/types/domain'
 
-type RiskTagType = 'success' | 'warning' | 'error'
 interface QuickCreateSubmitPayload {
   name: string
   category: string
@@ -32,19 +37,10 @@ interface QuickCreateSubmitPayload {
   runImmediately: boolean
 }
 
-interface QuickRecommendationRow {
-  task: TaskItem
-  actionDetail: string
-  categoryTone: string
-  lastRunLabel: string
-  running: boolean
-  riskLabel: string
-  riskTagType: RiskTagType
-}
-
+type QuickOptionKey = `task:${string}` | `context:${string}`
 type QuickSelectableOption =
-  | { kind: 'context'; id: string; suggestion: QuickContextSuggestion }
-  | { kind: 'task'; id: string; task: TaskItem }
+  | { kind: 'context'; key: `context:${string}`; suggestion: QuickContextSuggestion }
+  | { kind: 'task'; key: `task:${string}`; task: TaskItem }
 
 const taskStore = useTaskStore()
 const executionStore = useExecutionStore()
@@ -54,7 +50,8 @@ const quickInput = useQuickInputIntent(query)
 const quickContext = useQuickContext()
 const { execute } = useTaskExecution()
 const keybindings = useKeybindings()
-const selectedIndex = shallowRef(0)
+const selectedOptionKey = shallowRef<QuickOptionKey | null>(null)
+const dockExpanded = shallowRef(false)
 const confirmingSuggestion = shallowRef<QuickCreateSuggestion | null>(null)
 const quickCreateSaving = shallowRef(false)
 const quickCreateError = shallowRef<string | null>(null)
@@ -65,46 +62,54 @@ const resultsRef = useTemplateRef<HTMLElement>('results')
 let unlistenFocusChanged: (() => void) | null = null
 let panelWasFocused = true
 
-const recommendationGroups = computed(() => {
+const launchpad = computed(() => {
   if (query.value.trim()) return null
 
   const now = new Date()
   return {
     context: deriveTimeContext(now),
-    groups: getQuickRecommendations(results.value, now)
+    groups: getQuickLaunchGroups(enabledTasks.value, now)
   }
 })
-const timeMatchedRows = computed(() => recommendationGroups.value?.groups.timeMatched.map(toRecommendationRow) || [])
-const recentRows = computed(() => recommendationGroups.value?.groups.recent.map(toRecommendationRow) || [])
-const normalResultRows = computed(() => {
-  const tasks = recommendationGroups.value
-    ? recommendationGroups.value.groups.remaining.slice(0, 8)
-    : results.value.slice(0, 8)
-
-  return tasks.map(toNormalResultRow)
-})
+const favoriteRows = computed(() => launchpad.value?.groups.favorites.map((task) => toTaskRow(task)) || [])
+const timeMatchedRows = computed(() =>
+  launchpad.value?.groups.timeMatched.map((task) => toTaskRow(task, QUICK_RECOMMENDATION_SOURCE_LABEL)) || []
+)
+const recentRows = computed(() =>
+  launchpad.value?.groups.recent.map((task) => toTaskRow(task, QUICK_RECOMMENDATION_SOURCE_LABEL)) || []
+)
+const remainingRows = computed(() => launchpad.value?.groups.remaining.map((task) => toTaskRow(task)) || [])
+const searchRows = computed(() => query.value.trim() ? results.value.slice(0, 8).map((task) => toTaskRow(task)) : [])
 const timeMatchedTitle = computed(() => {
-  const context = recommendationGroups.value?.context
+  const context = launchpad.value?.context
   return context ? `本时段推荐 · ${getTimeContextLabel(context)}` : '本时段推荐'
 })
 const contextSuggestions = computed(() =>
   !taskStore.loading && !query.value.trim() ? quickContext.suggestions.value : []
 )
 const manualSuggestions = computed(() =>
-  !taskStore.loading && Boolean(query.value.trim()) && normalResultRows.value.length === 0 ? quickInput.suggestions.value : []
+  !taskStore.loading && Boolean(query.value.trim()) && searchRows.value.length === 0 ? quickInput.suggestions.value : []
 )
 const hasVisibleTaskResults = computed(() =>
-  timeMatchedRows.value.length > 0 || recentRows.value.length > 0 || normalResultRows.value.length > 0
+  favoriteRows.value.length > 0 ||
+  timeMatchedRows.value.length > 0 ||
+  recentRows.value.length > 0 ||
+  remainingRows.value.length > 0 ||
+  searchRows.value.length > 0
 )
 const selectableOptions = computed<QuickSelectableOption[]>(() => [
+  ...favoriteRows.value.map(toTaskOption),
+  ...timeMatchedRows.value.map(toTaskOption),
+  ...recentRows.value.map(toTaskOption),
+  ...remainingRows.value.map(toTaskOption),
+  ...searchRows.value.map(toTaskOption),
   ...contextSuggestions.value
     .filter((suggestion) => suggestion.canSaveDirectly)
-    .map((suggestion) => ({ kind: 'context' as const, id: suggestion.id, suggestion })),
-  ...timeMatchedRows.value.map((row) => ({ kind: 'task' as const, id: row.task.id, task: row.task })),
-  ...recentRows.value.map((row) => ({ kind: 'task' as const, id: row.task.id, task: row.task })),
-  ...normalResultRows.value.map((row) => ({ kind: 'task' as const, id: row.task.id, task: row.task }))
+    .map((suggestion) => ({ kind: 'context' as const, key: contextOptionKey(suggestion), suggestion }))
 ])
-const selectedOption = computed(() => selectableOptions.value[selectedIndex.value] || null)
+const selectedOption = computed(() =>
+  selectableOptions.value.find((option) => option.key === selectedOptionKey.value) || null
+)
 const selectedTask = computed(() => selectedOption.value?.kind === 'task' ? selectedOption.value.task : null)
 const selectedContextSuggestion = computed(() => selectedOption.value?.kind === 'context' ? selectedOption.value.suggestion : null)
 const selectedManualSuggestion = computed(() => manualSuggestions.value[0] || null)
@@ -118,9 +123,10 @@ const quickShortcutHint = computed(() => {
 })
 
 watch(
-  () => selectableOptions.value.length,
-  (length) => {
-    selectedIndex.value = Math.min(selectedIndex.value, Math.max(length - 1, 0))
+  selectableOptions,
+  (options) => {
+    if (options.some((option) => option.key === selectedOptionKey.value)) return
+    selectedOptionKey.value = defaultOptionKey(options)
   },
   { immediate: true }
 )
@@ -153,6 +159,10 @@ function onKeydown(event: KeyboardEvent) {
   }
   if (keybindingMatchesCommand(event, 'quick.closePanel', keybindings.effective.value)) {
     event.preventDefault()
+    if (dockExpanded.value) {
+      dockExpanded.value = false
+      return
+    }
     if (confirmingSuggestion.value) {
       cancelQuickCreate()
       return
@@ -198,7 +208,7 @@ function focusSearchInput() {
 }
 
 function resetSelection() {
-  selectedIndex.value = 0
+  selectedOptionKey.value = defaultOptionKey(selectableOptions.value)
   confirmingSuggestion.value = null
   quickCreateError.value = null
   quickCreateStatus.value = null
@@ -207,7 +217,9 @@ function resetSelection() {
 
 function moveSelection(delta: number) {
   const lastIndex = Math.max(selectableOptions.value.length - 1, 0)
-  selectedIndex.value = Math.min(Math.max(selectedIndex.value + delta, 0), lastIndex)
+  const currentIndex = selectableOptions.value.findIndex((option) => option.key === selectedOptionKey.value)
+  const nextIndex = Math.min(Math.max((currentIndex < 0 ? 0 : currentIndex) + delta, 0), lastIndex)
+  selectedOptionKey.value = selectableOptions.value[nextIndex]?.key || null
   void scrollSelectedIntoView()
 }
 
@@ -223,7 +235,7 @@ async function scrollSelectedIntoView() {
   await nextTick()
   const option = selectedOption.value
   if (!option || !resultsRef.value) return
-  const selectedElement = document.getElementById(optionId(option))
+  const selectedElement = document.getElementById(optionId(option.key))
   if (!(selectedElement instanceof HTMLElement) || !resultsRef.value.contains(selectedElement)) return
 
   selectedElement.scrollIntoView({
@@ -231,13 +243,14 @@ async function scrollSelectedIntoView() {
   })
 }
 
-function runTask(task: TaskItem) {
-  void execute(task)
+function runTask(row: QuickTaskRow) {
+  void execute(row.task)
 }
 
-function selectOption(kind: QuickSelectableOption['kind'], id: string) {
-  const index = selectableOptions.value.findIndex((option) => option.kind === kind && option.id === id)
-  if (index >= 0) selectedIndex.value = index
+function selectOption(key: QuickOptionKey) {
+  if (selectableOptions.value.some((option) => option.key === key)) {
+    selectedOptionKey.value = key
+  }
 }
 
 function openQuickCreate(suggestion: QuickCreateSuggestion) {
@@ -300,6 +313,7 @@ async function setupFocusLossHiding() {
     unlistenFocusChanged = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
       if (!focused) {
         panelWasFocused = false
+        dockExpanded.value = false
         void hideWindow()
       } else if (!panelWasFocused) {
         panelWasFocused = true
@@ -315,26 +329,29 @@ async function setupFocusLossHiding() {
 
 function startQuickPanelSession() {
   query.value = ''
+  dockExpanded.value = false
   resetSelection()
   void quickContext.refresh()
 }
 
-function toRecommendationRow(task: TaskItem): QuickRecommendationRow {
+function toTaskRow(task: TaskItem, sourceLabel?: string): QuickTaskRow {
   return {
+    key: taskOptionKey(task),
     task,
     ...taskRowDetails(task),
-    lastRunLabel: formatTaskTime(task.lastRunAt || ''),
+    meta: formatTaskMeta(task),
+    sourceLabel,
     riskLabel: riskLabel(task.riskLevel),
     riskTagType: riskTagType(task.riskLevel)
   }
 }
 
-function toNormalResultRow(task: TaskItem) {
-  return {
-    task,
-    ...taskRowDetails(task),
-    meta: formatTaskMeta(task)
-  }
+function toTaskOption(row: QuickTaskRow): QuickSelectableOption {
+  return { kind: 'task', key: row.key, task: row.task }
+}
+
+function defaultOptionKey(options: QuickSelectableOption[]): QuickOptionKey | null {
+  return options.find((option) => option.kind === 'task')?.key || options[0]?.key || null
 }
 
 function taskRowDetails(task: TaskItem) {
@@ -367,7 +384,7 @@ function normalize(value: string) {
   return value.trim().toLowerCase()
 }
 
-function riskTagType(riskLevel: RiskLevel): RiskTagType {
+function riskTagType(riskLevel: RiskLevel): QuickTaskRiskTagType {
   if (riskLevel === 'high') return 'error'
   if (riskLevel === 'medium') return 'warning'
   return 'success'
@@ -411,16 +428,17 @@ function formatTaskTime(value: string) {
   return `${prefix} ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}`
 }
 
-function resultOptionId(taskId: string) {
-  return `quick-result-${taskId}`
+function taskOptionKey(task: TaskItem): `task:${string}` {
+  return `task:${task.id}`
 }
 
-function contextOptionId(suggestion: QuickContextSuggestion) {
-  return `quick-context-${suggestion.id}`
+function contextOptionKey(suggestion: QuickContextSuggestion): `context:${string}` {
+  return `context:${suggestion.id}`
 }
 
-function optionId(option: QuickSelectableOption) {
-  return option.kind === 'task' ? resultOptionId(option.task.id) : contextOptionId(option.suggestion)
+function optionId(key: string) {
+  if (key.startsWith('task:')) return `quick-result-${key.slice('task:'.length)}`
+  return `quick-context-${key.slice('context:'.length)}`
 }
 </script>
 
@@ -457,7 +475,7 @@ function optionId(option: QuickSelectableOption) {
         class="results"
         role="listbox"
         aria-label="快捷搜索结果"
-        :aria-activedescendant="selectedOption ? optionId(selectedOption) : undefined"
+        :aria-activedescendant="selectedOption ? optionId(selectedOption.key) : undefined"
         aria-live="polite"
       >
         <div v-if="taskStore.loading" class="state-panel">
@@ -476,70 +494,63 @@ function optionId(option: QuickSelectableOption) {
         />
 
         <template v-else>
+          <QuickTaskSection
+            v-if="favoriteRows.length"
+            title="固定入口"
+            :rows="favoriteRows"
+            :selected-key="selectedOptionKey"
+            :option-id="optionId"
+            @select="selectOption($event.key)"
+            @execute="runTask"
+          />
+
+          <QuickTaskSection
+            v-if="timeMatchedRows.length"
+            :title="timeMatchedTitle"
+            :rows="timeMatchedRows"
+            :selected-key="selectedOptionKey"
+            :option-id="optionId"
+            @select="selectOption($event.key)"
+            @execute="runTask"
+          />
+
+          <QuickTaskSection
+            v-if="recentRows.length"
+            title="最近运行"
+            :rows="recentRows"
+            :selected-key="selectedOptionKey"
+            :option-id="optionId"
+            @select="selectOption($event.key)"
+            @execute="runTask"
+          />
+
+          <QuickTaskSection
+            v-if="remainingRows.length"
+            title="其他事项"
+            :rows="remainingRows"
+            :selected-key="selectedOptionKey"
+            :option-id="optionId"
+            @select="selectOption($event.key)"
+            @execute="runTask"
+          />
+
+          <QuickTaskSection
+            v-if="searchRows.length"
+            :rows="searchRows"
+            :selected-key="selectedOptionKey"
+            :option-id="optionId"
+            @select="selectOption($event.key)"
+            @execute="runTask"
+          />
+
           <QuickContextSuggestions
             v-if="contextSuggestions.length"
             :suggestions="contextSuggestions"
             :selected-id="selectedContextSuggestion?.id"
-            :option-id="contextOptionId"
-            @select="selectOption('context', $event.id)"
+            :option-id="(suggestion) => optionId(contextOptionKey(suggestion))"
+            @select="selectOption(contextOptionKey($event))"
             @create="openQuickCreate"
           />
-
-          <QuickRecommendationSection
-            v-if="timeMatchedRows.length"
-            :title="timeMatchedTitle"
-            :rows="timeMatchedRows"
-            :selected-id="selectedTask?.id"
-            :option-id="(task) => resultOptionId(task.id)"
-            @select="selectOption('task', $event.id)"
-            @execute="runTask"
-          />
-
-          <QuickRecommendationSection
-            v-if="recentRows.length"
-            title="最近运行"
-            :rows="recentRows"
-            :selected-id="selectedTask?.id"
-            :option-id="(task) => resultOptionId(task.id)"
-            @select="selectOption('task', $event.id)"
-            @execute="runTask"
-          />
-
-          <button
-            v-for="row in normalResultRows"
-            :key="row.task.id"
-            :id="resultOptionId(row.task.id)"
-            type="button"
-            role="option"
-            class="result-item"
-            :class="{ active: selectedTask?.id === row.task.id, running: row.running }"
-            :aria-selected="selectedTask?.id === row.task.id"
-            @mouseenter="selectOption('task', row.task.id)"
-            @click="runTask(row.task)"
-          >
-            <span class="task-icon" :class="row.categoryTone" aria-hidden="true">
-              {{ row.task.name.slice(0, 1) || '事' }}
-            </span>
-            <span class="result-main">
-              <span class="result-title-row">
-                <span class="result-name">{{ row.task.name || '未命名事项' }}</span>
-                <span class="task-meta">{{ row.meta }}</span>
-              </span>
-              <span class="result-detail">{{ row.actionDetail }}</span>
-              <span class="category-badge" :class="row.categoryTone">{{ row.task.category || '未分类' }}</span>
-            </span>
-            <span class="result-tags">
-              <NTag v-if="row.running" size="small" type="info">
-                <span class="running-tag">
-                  <NSpin size="small" />
-                  执行中
-                </span>
-              </NTag>
-              <NTag size="small" :type="riskTagType(row.task.riskLevel)">
-                {{ riskLabel(row.task.riskLevel) }}
-              </NTag>
-            </span>
-          </button>
 
           <div v-if="!hasVisibleTaskResults" class="empty-stack">
             <button
@@ -570,11 +581,16 @@ function optionId(option: QuickSelectableOption) {
       </section>
 
       <footer class="status">
-        <span>{{ quickShortcutHint }}</span>
-        <ExecutionStatusStrip
-          v-if="executionStore.activeRuns.length > 0"
-          class="quick-status-strip"
-          compact
+        <button
+          type="button"
+          class="shortcut-help"
+          aria-label="快捷键帮助"
+          :title="quickShortcutHint"
+        >
+          <span aria-hidden="true">?</span>
+        </button>
+        <QuickExecutionDock
+          v-model:expanded="dockExpanded"
           :runs="executionStore.activeRuns"
         />
       </footer>
@@ -621,8 +637,7 @@ function optionId(option: QuickSelectableOption) {
   cursor: default;
 }
 
-.brand-mark,
-.task-icon {
+.brand-mark {
   display: grid;
   place-items: center;
 }
@@ -657,8 +672,6 @@ function optionId(option: QuickSelectableOption) {
 
 .brand-copy small,
 .result-count,
-.task-meta,
-.result-detail,
 .status {
   color: #8b96b8;
 }
@@ -724,198 +737,6 @@ function optionId(option: QuickSelectableOption) {
   min-height: 0;
   overflow-y: auto;
   padding-right: 2px;
-}
-
-.result-item {
-  position: relative;
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 13px;
-  width: 100%;
-  min-height: 78px;
-  min-width: 0;
-  border: 1px solid rgba(82, 106, 171, 0.16);
-  border-radius: 12px;
-  background: rgba(27, 35, 55, 0.62);
-  color: inherit;
-  cursor: pointer;
-  overflow: hidden;
-  padding: 13px 13px 12px 15px;
-  text-align: left;
-  transition:
-    border-color 160ms ease,
-    background 160ms ease,
-    box-shadow 160ms ease;
-}
-
-.result-item::before {
-  position: absolute;
-  top: 12px;
-  bottom: 12px;
-  left: 0;
-  width: 3px;
-  border-radius: 0 999px 999px 0;
-  background: transparent;
-  content: "";
-  transition: background 160ms ease, box-shadow 160ms ease;
-}
-
-.result-item:hover {
-  border-color: rgba(67, 109, 255, 0.9);
-  background:
-    radial-gradient(circle at 100% 0%, rgba(82, 90, 255, 0.22), transparent 48%),
-    rgba(28, 38, 68, 0.8);
-  box-shadow: 0 0 0 1px rgba(60, 94, 161, 0.2), 0 12px 30px rgba(19, 42, 119, 0.22);
-}
-
-.result-item.active {
-  border-color: rgba(112, 154, 255, 0.98);
-  background:
-    linear-gradient(90deg, rgba(83, 132, 255, 0.18), transparent 42%),
-    radial-gradient(circle at 100% 0%, rgba(82, 90, 255, 0.28), transparent 50%),
-    rgba(31, 43, 78, 0.94);
-  box-shadow:
-    0 0 0 2px rgba(102, 146, 255, 0.42),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 15px 34px rgba(19, 42, 119, 0.3);
-}
-
-.result-item.active::before {
-  background: #8db4ff;
-  box-shadow: 0 0 18px rgba(141, 180, 255, 0.9);
-}
-
-.result-item:focus-visible {
-  outline: 2px solid rgba(168, 194, 255, 0.82);
-  outline-offset: 2px;
-}
-
-.result-item.running {
-  border-color: rgba(77, 135, 255, 0.66);
-  background:
-    radial-gradient(circle at 100% 0%, rgba(82, 90, 255, 0.22), transparent 48%),
-    rgba(28, 38, 68, 0.82);
-}
-
-.result-item.running.active {
-  border-color: rgba(112, 154, 255, 0.98);
-  background:
-    linear-gradient(90deg, rgba(83, 132, 255, 0.18), transparent 42%),
-    radial-gradient(circle at 100% 0%, rgba(82, 90, 255, 0.28), transparent 50%),
-    rgba(31, 43, 78, 0.94);
-}
-
-.task-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: linear-gradient(145deg, #2563eb, #6d5dff);
-  color: #dce9ff;
-  font-weight: 800;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 12px 24px rgba(31, 78, 199, 0.24);
-}
-
-.task-icon.green {
-  background: linear-gradient(145deg, #0e9f83, #163c6e);
-}
-
-.task-icon.amber {
-  background: linear-gradient(145deg, #dd9a20, #594018);
-}
-
-.task-icon.purple {
-  background: linear-gradient(145deg, #8a4cff, #41246c);
-}
-
-.task-icon.slate {
-  background: linear-gradient(145deg, #385072, #1b2740);
-}
-
-.result-main {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-}
-
-.result-title-row {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: 10px;
-}
-
-.result-name,
-.task-meta,
-.result-detail {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.result-name {
-  min-width: 0;
-  color: #f4f7ff;
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.task-meta {
-  flex: 0 0 auto;
-  font-size: 12px;
-}
-
-.result-detail {
-  color: #b3bddb;
-  font-size: 13px;
-}
-
-.category-badge {
-  position: relative;
-  display: inline-flex;
-  width: fit-content;
-  align-items: center;
-  gap: 5px;
-  color: #58a2ff;
-  font-size: 11px;
-  line-height: 1.2;
-}
-
-.category-badge::before {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-  content: "";
-}
-
-.category-badge.green {
-  color: #29d6ad;
-}
-
-.category-badge.amber {
-  color: #ffb83e;
-}
-
-.category-badge.purple {
-  color: #ad66ff;
-}
-
-.category-badge.slate {
-  color: #8b96b8;
-}
-
-.result-tags {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.running-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
 }
 
 .state-panel {
@@ -1040,20 +861,33 @@ function optionId(option: QuickSelectableOption) {
 }
 
 .status {
-  display: flex;
-  min-height: 24px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
+  min-width: 0;
+  height: 46px;
   gap: 8px;
-  border-top: 1px solid rgba(61, 76, 109, 0.66);
-  padding-top: 9px;
 }
 
-.quick-status-strip {
-  flex: 1 1 320px;
-  min-width: min(100%, 280px);
-  max-width: 520px;
+.shortcut-help {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid rgba(82, 106, 171, 0.32);
+  border-radius: 50%;
+  background: rgba(27, 35, 55, 0.68);
+  color: #b9c9ef;
+  cursor: help;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.shortcut-help:hover,
+.shortcut-help:focus-visible {
+  border-color: rgba(112, 154, 255, 0.92);
+  background: rgba(58, 79, 129, 0.7);
+  outline: none;
 }
 
 @media (max-width: 520px) {
@@ -1075,20 +909,30 @@ function optionId(option: QuickSelectableOption) {
     justify-self: start;
   }
 
-  .result-item {
-    grid-template-columns: 40px minmax(0, 1fr);
+}
+
+@media (max-height: 620px) {
+  .quick-panel {
+    padding: 8px;
   }
 
-  .result-tags {
-    grid-column: 2;
-    justify-self: start;
-    justify-content: flex-start;
+  .quick-shell {
+    height: calc(100vh - 16px);
+    gap: 8px;
+    padding: 10px;
   }
 
-  .result-title-row,
-  .status {
-    align-items: flex-start;
-    flex-direction: column;
+  .quick-header {
+    min-height: 34px;
+  }
+
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .search-box {
+    height: 42px;
   }
 }
 </style>

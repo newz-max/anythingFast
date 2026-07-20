@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, nextTick, ref } from 'vue'
 import QuickSearchPanel from './QuickSearchPanel.vue'
 import QuickCreateConfirm from './QuickCreateConfirm.vue'
+import QuickExecutionDock from './QuickExecutionDock.vue'
 import { useKeybindings } from '@/composables/useKeybindings'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useTaskStore } from '@/stores/taskStore'
@@ -164,7 +165,7 @@ async function pressKey(key: string, target: Window | HTMLElement = window, opti
 }
 
 function resultItems(wrapper: VueWrapper) {
-  return wrapper.findAll('.result-item, .recommendation-item')
+  return wrapper.findAll('.task-row')
 }
 
 function lastScrollTarget() {
@@ -289,7 +290,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
     await pressKey('n', window, { ctrlKey: true })
 
     expect(openMainWindowCreateTaskMock).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('.status').text()).toContain('Ctrl+N 新增事项')
+    expect(wrapper.find('.shortcut-help').attributes('title')).toContain('Ctrl+N 新增事项')
   })
 
   it('handles create task from the focused search input and prevents the default WebView behavior', async () => {
@@ -314,7 +315,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
 
     await pressKey('n', window, { altKey: true })
     expect(openMainWindowCreateTaskMock).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('.status').text()).toContain('Alt+N 新增事项')
+    expect(wrapper.find('.shortcut-help').attributes('title')).toContain('Alt+N 新增事项')
   })
 
   it('does not invoke a disabled create-task shortcut and represents it accurately', async () => {
@@ -324,7 +325,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
 
     await pressKey('n', window, { ctrlKey: true })
     expect(openMainWindowCreateTaskMock).not.toHaveBeenCalled()
-    expect(disabledWrapper.find('.status').text()).toContain('已禁用 新增事项')
+    expect(disabledWrapper.find('.shortcut-help').attributes('title')).toContain('已禁用 新增事项')
   })
 
   it('clamps selection to the visible result range', async () => {
@@ -367,10 +368,28 @@ describe('QuickSearchPanel keyboard navigation', () => {
     expect(resultItems(wrapper)[1].classes()).toContain('active')
   })
 
+  it('uses the first enabled favorite in configuration order as the stable default', async () => {
+    const wrapper = await mountPanel([
+      makeTask(1, { favorite: true, lastRunAt: '2026-07-01T08:00:00.000Z' }),
+      makeTask(2, { favorite: true, lastRunAt: '2026-07-20T08:00:00.000Z' }),
+      makeTask(3)
+    ])
+
+    expect(wrapper.text()).toContain('固定入口')
+    expect(resultItems(wrapper)[0].text()).toContain('事项 1')
+    expect(resultItems(wrapper)[0].text()).toContain('https://example.com/1')
+    expect(resultItems(wrapper)[0].attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-1')
+
+    await pressKey('Enter')
+
+    expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-1' }))
+  })
+
   it('focuses and selects the search input with slash from outside editable controls', async () => {
     const wrapper = await mountPanel()
     const input = wrapper.find('input').element as HTMLInputElement
-    await wrapper.find('.result-item').trigger('focus')
+    await wrapper.find('.task-row').trigger('focus')
     input.setSelectionRange(0, 0)
 
     await pressKey('/')
@@ -518,7 +537,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
     vi.useRealTimers()
   })
 
-  it('shows a clipboard suggestion before task results and opens confirmation with Enter', async () => {
+  it('shows a clipboard suggestion after tasks without stealing the Enter target', async () => {
     Reflect.set(window, '__TAURI_INTERNALS__', { transformCallback: () => 1, invoke: vi.fn() })
     getClipboardContextMock.mockResolvedValueOnce({
       source: 'clipboard',
@@ -536,9 +555,35 @@ describe('QuickSearchPanel keyboard navigation', () => {
     const contextSuggestion = wrapper.find('.context-suggestion')
     expect(contextSuggestion.exists()).toBe(true)
     expect(contextSuggestion.text()).toContain('来自剪贴板')
-    expect(contextSuggestion.attributes('aria-selected')).toBe('true')
-    expect(resultItems(wrapper)[0].attributes('aria-selected')).toBe('false')
-    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe(contextSuggestion.attributes('id'))
+    expect(contextSuggestion.attributes('aria-selected')).toBe('false')
+    expect(resultItems(wrapper)[0].attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-1')
+
+    await pressKey('ArrowDown')
+    await pressKey('Enter')
+
+    expect(wrapper.text()).toContain('确认事项信息')
+    expect(executeMock).not.toHaveBeenCalled()
+  })
+
+  it('uses a saveable clipboard suggestion as the default only when no task exists', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', { transformCallback: () => 1, invoke: vi.fn() })
+    getClipboardContextMock.mockResolvedValueOnce({
+      source: 'clipboard',
+      capturedAt: '2026-07-11T00:00:00.000Z',
+      status: 'available',
+      text: 'https://clipboard-only.example',
+      truncated: false
+    })
+
+    const wrapper = await mountPanel([])
+    await Promise.resolve()
+    await nextTick()
+    await nextTick()
+
+    const suggestion = wrapper.find('.context-suggestion')
+    expect(suggestion.attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe(suggestion.attributes('id'))
 
     await pressKey('Enter')
 
@@ -617,6 +662,8 @@ describe('QuickSearchPanel keyboard navigation', () => {
     const taskStore = useTaskStore()
 
     expect(resultItems(wrapper)[0].text()).toContain('事项 2')
+    await pressKey('ArrowDown')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-1')
 
     taskStore.replaceConfig(makeConfig([
       makeTask(1, { lastRunAt: '2026-07-03T08:00:00.000Z' }),
@@ -627,9 +674,11 @@ describe('QuickSearchPanel keyboard navigation', () => {
 
     expect(resultItems(wrapper)[0].text()).toContain('事项 1')
     expect(resultItems(wrapper)[0].text()).toContain('上次')
+    expect(resultItems(wrapper)[0].attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-1')
   })
 
-  it('passes every active run to the compact status without hiding results or hints', async () => {
+  it('passes every active run to the fixed Dock without rendering details while collapsed', async () => {
     const wrapper = await mountPanel()
     const executionStore = useExecutionStore()
 
@@ -651,15 +700,47 @@ describe('QuickSearchPanel keyboard navigation', () => {
     })
     await nextTick()
 
-    const status = wrapper.findComponent(ExecutionStatusStripStub)
-    const statusRuns = status.props('runs') as Array<{ taskName: string }>
-    expect(status.exists()).toBe(true)
-    expect(status.props('compact')).toBe(true)
-    expect(statusRuns.map((run) => run.taskName)).toEqual(['并发事项 A', '并发事项 B'])
-    expect(status.text()).toContain('并发事项 A')
-    expect(status.text()).toContain('并发事项 B')
+    const dock = wrapper.findComponent(QuickExecutionDock)
+    const dockRuns = dock.props('runs') as Array<{ taskName: string }>
+    expect(dock.exists()).toBe(true)
+    expect(dockRuns.map((run) => run.taskName)).toEqual(['并发事项 A', '并发事项 B'])
+    expect(dock.text()).toContain('正在执行 2 项')
+    expect(wrapper.findComponent(ExecutionStatusStripStub).exists()).toBe(false)
     expect(resultItems(wrapper)).toHaveLength(3)
-    expect(wrapper.find('.status').text()).toContain('新增事项')
+    expect(wrapper.find('.shortcut-help').attributes('title')).toContain('新增事项')
+
+    await wrapper.find('.expand-button').trigger('click')
+    await nextTick()
+
+    const status = wrapper.findComponent(ExecutionStatusStripStub)
+    expect((status.props('runs') as Array<{ taskName: string }>).map((run) => run.taskName)).toEqual([
+      '并发事项 A',
+      '并发事项 B'
+    ])
+  })
+
+  it('closes expanded execution details before hiding the quick window', async () => {
+    Reflect.set(window, '__TAURI_INTERNALS__', { transformCallback: () => 1, invoke: vi.fn() })
+    const wrapper = await mountPanel()
+    useExecutionStore().applyExecutionEvent({
+      runId: 'run-a',
+      taskId: 'task-1',
+      taskName: '并发事项 A',
+      scope: 'task',
+      status: 'started',
+      totalActions: 2
+    })
+    await nextTick()
+
+    await wrapper.find('.expand-button').trigger('click')
+    expect(wrapper.find('.execution-overlay').exists()).toBe(true)
+
+    await pressKey('Escape')
+    expect(wrapper.find('.execution-overlay').exists()).toBe(false)
+    expect(hideWindowMock).not.toHaveBeenCalled()
+
+    await pressKey('Escape')
+    expect(hideWindowMock).toHaveBeenCalledTimes(1)
   })
 
   it('orders time-matched, recent, and ordinary tasks as one navigable recommendation list', async () => {
@@ -694,7 +775,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
     expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-4' }))
   })
 
-  it('keeps a saveable clipboard suggestion ahead of recommendation groups', async () => {
+  it('keeps a saveable clipboard suggestion after task groups without stealing selection', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(localDate(6, 9, 0))
     Reflect.set(window, '__TAURI_INTERNALS__', { transformCallback: () => 1, invoke: vi.fn() })
@@ -713,11 +794,17 @@ describe('QuickSearchPanel keyboard navigation', () => {
     await nextTick()
     await nextTick()
 
-    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toMatch(/^quick-context-/)
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-1')
     expect(wrapper.find('.context-suggestion').text()).toContain('来自剪贴板')
 
     await pressKey('ArrowDown')
-    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-1')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-2')
+
+    await pressKey('ArrowDown')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toMatch(/^quick-context-/)
+
+    await pressKey('ArrowUp')
+    expect(wrapper.find('[role="listbox"]').attributes('aria-activedescendant')).toBe('quick-result-task-2')
   })
 
   it('hides both recommendation groups after a non-empty search query', async () => {
@@ -728,7 +815,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
       makeTask(2, { name: '匹配普通事项' })
     ])
 
-    expect(wrapper.findAll('.recommendation-item')).toHaveLength(1)
+    expect(wrapper.findAll('.task-row')).toHaveLength(2)
 
     await wrapper.find('input').setValue('匹配普通')
     await nextTick()
@@ -736,7 +823,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
 
     expect(wrapper.text()).not.toContain('本时段推荐')
     expect(wrapper.text()).not.toContain('最近运行')
-    expect(wrapper.findAll('.recommendation-item')).toHaveLength(0)
+    expect(wrapper.findAll('.task-row')).toHaveLength(1)
     expect(resultItems(wrapper)).toHaveLength(1)
     expect(resultItems(wrapper)[0].text()).toContain('匹配普通事项')
   })
@@ -774,7 +861,7 @@ describe('QuickSearchPanel keyboard navigation', () => {
       })
     ])
 
-    expect(wrapper.find('.recommendation-item').text()).toContain('高风险')
+    expect(wrapper.find('.task-row').text()).toContain('高风险')
     await pressKey('Enter')
 
     expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({

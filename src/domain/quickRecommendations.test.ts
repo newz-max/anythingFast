@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   QUICK_RECOMMENDATION_SOURCE_LABEL,
   deriveTimeContext,
-  getQuickRecommendations,
+  getQuickLaunchGroups,
   getTimeContextLabel
 } from '@/domain/quickRecommendations'
 import type { TaskItem } from '@/types/domain'
@@ -27,7 +27,7 @@ describe('quick recommendations', () => {
   })
 
   it('prioritizes Monday time-matched tasks before newer runs from other weekdays', () => {
-    const recommendations = getQuickRecommendations(
+    const recommendations = getQuickLaunchGroups(
       [
         makeTask('tuesday-newer', localDate(2026, 7, 7, 10, 30)),
         makeTask('monday-older', localDate(2026, 7, 6, 8, 10)),
@@ -43,7 +43,7 @@ describe('quick recommendations', () => {
   })
 
   it('prioritizes Friday time-matched tasks before newer runs from other weekdays', () => {
-    const recommendations = getQuickRecommendations(
+    const recommendations = getQuickLaunchGroups(
       [
         makeTask('thursday-newer', localDate(2026, 7, 9, 18, 30)),
         makeTask('friday-older', localDate(2026, 7, 10, 17, 10))
@@ -71,8 +71,9 @@ describe('quick recommendations', () => {
       makeTask('never-run')
     ]
 
-    const recommendations = getQuickRecommendations(tasks, localDate(2026, 7, 7, 9, 30))
+    const recommendations = getQuickLaunchGroups(tasks, localDate(2026, 7, 7, 9, 30))
     const groupedIds = [
+      ...recommendations.favorites.map((task) => task.id),
       ...recommendations.timeMatched.map((task) => task.id),
       ...recommendations.recent.map((task) => task.id),
       ...recommendations.remaining.map((task) => task.id)
@@ -80,18 +81,66 @@ describe('quick recommendations', () => {
 
     expect(recommendations.timeMatched.map((task) => task.id)).toEqual(['morning-4', 'morning-3', 'morning-2'])
     expect(recommendations.recent.map((task) => task.id)).toEqual(['morning-1', 'recent-1', 'recent-2', 'recent-3', 'recent-4'])
-    expect(recommendations.remaining.map((task) => task.id)).toEqual(['recent-5', 'recent-6', 'invalid', 'disabled', 'never-run'])
+    expect(recommendations.remaining.map((task) => task.id)).toEqual(['recent-5', 'recent-6', 'invalid', 'never-run'])
     expect(new Set(groupedIds).size).toBe(groupedIds.length)
   })
 
   it('shows no time-matched tasks during other time while retaining recent tasks', () => {
-    const recommendations = getQuickRecommendations(
+    const recommendations = getQuickLaunchGroups(
       [makeTask('morning', localDate(2026, 7, 7, 9, 0)), makeTask('recent', localDate(2026, 7, 6, 20, 0))],
       localDate(2026, 7, 11, 8, 0)
     )
 
     expect(recommendations.timeMatched).toEqual([])
     expect(recommendations.recent.map((task) => task.id)).toEqual(['morning', 'recent'])
+  })
+
+  it('keeps the first six enabled favorites in configuration order and puts overflow in remaining', () => {
+    const tasks = Array.from({ length: 8 }, (_, index) =>
+      makeTask(`favorite-${index + 1}`, localDate(2026, 7, 7, 8, index), { favorite: true })
+    )
+    tasks.splice(2, 0, makeTask('disabled-favorite', localDate(2026, 7, 7, 10, 0), {
+      enabled: false,
+      favorite: true
+    }))
+
+    const groups = getQuickLaunchGroups(tasks, localDate(2026, 7, 7, 9, 30))
+
+    expect(groups.favorites.map((task) => task.id)).toEqual([
+      'favorite-1',
+      'favorite-2',
+      'favorite-3',
+      'favorite-4',
+      'favorite-5',
+      'favorite-6'
+    ])
+    expect(groups.timeMatched).toEqual([])
+    expect(groups.recent).toEqual([])
+    expect(groups.remaining.map((task) => task.id)).toEqual(['favorite-7', 'favorite-8'])
+  })
+
+  it('excludes fixed favorites from recommendations and returns every enabled task at most once', () => {
+    const groups = getQuickLaunchGroups(
+      [
+        makeTask('favorite', localDate(2026, 7, 7, 9, 0), { favorite: true }),
+        makeTask('matched', localDate(2026, 7, 7, 8, 30)),
+        makeTask('recent', localDate(2026, 7, 6, 20, 0)),
+        makeTask('remaining')
+      ],
+      localDate(2026, 7, 7, 9, 30)
+    )
+    const ids = [
+      ...groups.favorites,
+      ...groups.timeMatched,
+      ...groups.recent,
+      ...groups.remaining
+    ].map((task) => task.id)
+
+    expect(groups.favorites.map((task) => task.id)).toEqual(['favorite'])
+    expect(groups.timeMatched.map((task) => task.id)).toEqual(['matched'])
+    expect(groups.recent.map((task) => task.id)).toEqual(['recent'])
+    expect(groups.remaining.map((task) => task.id)).toEqual(['remaining'])
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })
 

@@ -20,18 +20,6 @@
         "minHeight": 640,
         "decorations": false,
         "url": "/"
-      },
-      {
-        "label": "quick-panel",
-        "title": "快捷搜索",
-        "width": 720,
-        "height": 520,
-        "resizable": false,
-        "visible": false,
-        "decorations": false,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "url": "/?window=quick"
       }
     ],
     "security": {

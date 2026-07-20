@@ -8,7 +8,8 @@ export interface QuickTimeContext {
   weekdayMarker: QuickWeekdayMarker
 }
 
-export interface QuickRecommendations {
+export interface QuickLaunchGroups {
+  favorites: TaskItem[]
   timeMatched: TaskItem[]
   recent: TaskItem[]
   remaining: TaskItem[]
@@ -20,6 +21,7 @@ interface EligibleTask {
   timestamp: number
 }
 
+const MAX_FAVORITES = 6
 const MAX_TIME_MATCHED = 3
 const MAX_RECENT = 5
 
@@ -72,9 +74,14 @@ export function getTimeContextLabel(context: QuickTimeContext) {
   return label
 }
 
-export function getQuickRecommendations(tasks: TaskItem[], now: Date): QuickRecommendations {
+export function getQuickLaunchGroups(tasks: TaskItem[], now: Date): QuickLaunchGroups {
   const context = deriveTimeContext(now)
-  const eligible = tasks.flatMap((task) => {
+  const enabledTasks = tasks.filter((task) => task.enabled)
+  const favoriteTasks = enabledTasks.filter((task) => task.favorite)
+  const favorites = favoriteTasks.slice(0, MAX_FAVORITES)
+  const fixedFavoriteIds = new Set(favorites.map((task) => task.id))
+  const recommendationCandidates = enabledTasks.filter((task) => !task.favorite)
+  const eligible = recommendationCandidates.flatMap((task) => {
     const lastRunAt = parseEligibleLastRunAt(task)
     return lastRunAt ? [{ task, lastRunAt, timestamp: lastRunAt.getTime() }] : []
   })
@@ -98,11 +105,14 @@ export function getQuickRecommendations(tasks: TaskItem[], now: Date): QuickReco
   for (const task of recent) recommendedIds.add(task.id)
 
   return {
+    favorites,
     timeMatched,
     recent,
-    remaining: tasks.filter((task) => !recommendedIds.has(task.id))
+    remaining: enabledTasks.filter((task) => !fixedFavoriteIds.has(task.id) && !recommendedIds.has(task.id))
   }
 }
+
+export const getQuickRecommendations = getQuickLaunchGroups
 
 function isWithin(value: number, start: number, end: number) {
   return value >= start && value <= end
